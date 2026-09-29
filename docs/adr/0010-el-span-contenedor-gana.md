@@ -1,6 +1,6 @@
 # ADR-0010 · El span que contiene a otro gana
 
-- **Estado:** Propuesta (pendiente de aprobar por Miquel Moreno)
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-29)
 - **Fecha:** 2026-09-29
 - **Modifica:** la regla de solapamientos del ADR-0009
 
