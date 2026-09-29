@@ -20,6 +20,16 @@ class EntityType(StrEnum):
     IT_CODICE_FISCALE = "IT_CODICE_FISCALE"
     EU_VAT = "EU_VAT"
     CREDIT_CARD = "CREDIT_CARD"
+    EMAIL = "EMAIL"
+    IP = "IP"
+    PHONE = "PHONE"
+    ES_PASSPORT = "ES_PASSPORT"
+    ES_PLATE = "ES_PLATE"
+    ADDRESS = "ADDRESS"
+    DATE_OF_BIRTH = "DATE_OF_BIRTH"
+    PT_NIF = "PT_NIF"
+    FR_NIR = "FR_NIR"
+    DE_IDNR = "DE_IDNR"
 
 
 class Layer(StrEnum):

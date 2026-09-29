@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 ## [Unreleased]
 
 ### Added
+- Detector (issue 2, part 2): email (Unicode local part), IPv4, Spanish phone (business and premium-rate numbers excluded; found next to other numbers), payment card (Luhn + known prefix, 7 brands), Spanish, Catalan and Galician style addresses, and with a keyword before them passport, plate, date of birth and the digit-only Portuguese, French and German identifiers.
+- ADR-0010 (accepted): a span that contains another one wins, so an email with a DNI inside is masked whole.
 - Detector (issue 2, part 1): check-digit validators for DNI, NIE, NIF K/L/M, CIF, NSS, CCC and IBAN, plus Italian codice fiscale and EU VAT via python-stdnum; `scan(text)` returns non-overlapping spans without the value (ADR-0009). Invariant 10: the DNI, NIE, NIF K/L/M, CIF, CCC and Spanish IBAN validators agree with python-stdnum on 5,000 generated cases; the NSS, which stdnum lacks, is checked against documented vectors.
 - Project scaffold with one package per piece of the gateway (detect, policy, vault, mask, guard, providers, restore, audit, web, cli), `GET /healthz` and validation errors that never echo the request body.
 - Architecture decision records 0001-0008 (accepted), threat model, `SECURITY.md`, contributing guide and code of conduct.
