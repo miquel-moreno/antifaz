@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from scripts.check_coverage import check, main
-from scripts.check_licenses import Verdict, classify
+from scripts.check_licenses import Verdict, classify, documented_packages
 
 
 @pytest.mark.parametrize(
@@ -50,7 +50,7 @@ def coverage_report(files: dict[str, tuple[int, int]]) -> dict[str, object]:
 def test_privacy_pieces_need_ninety_percent() -> None:
     report = coverage_report(
         {
-            "src/antifaz/detect/validators/dni.py": (18, 20),  # 90 % -> ok
+            "src/antifaz/detect/validators/dni.py": (19, 20),  # 95 % -> ok
             "src\\antifaz\\mask\\core.py": (8, 10),  # 80 % -> too low (Windows path)
             "src/antifaz/api/app.py": (1, 10),  # not a privacy piece
         }
@@ -69,3 +69,18 @@ def test_a_missing_coverage_file_is_a_clear_failure(tmp_path: Path) -> None:
 
 def test_pieces_without_code_are_skipped() -> None:
     assert check(coverage_report({"src/antifaz/guard/__init__.py": (0, 0)})) == []
+
+
+def test_only_table_rows_count_as_documented() -> None:
+    doc = (
+        "certifi is mentioned here in passing.\n\n"
+        "| Paquete | Licencia |\n|---|---|\n| python-stdnum | LGPL |\n"
+    )
+
+    assert documented_packages(doc) == {"python-stdnum"}
+
+
+def test_validators_need_ninety_five_percent() -> None:
+    report = coverage_report({"src/antifaz/detect/validators/dni.py": (93, 100)})
+
+    assert check(report) == ["detect/validators: 93.0 % < 95 %"]
