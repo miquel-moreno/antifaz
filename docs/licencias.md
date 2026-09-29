@@ -1,0 +1,19 @@
+# Licencias
+
+Antifaz se distribuye con licencia **Apache-2.0** (`LICENSE` y `NOTICE`).
+
+## Regla
+
+En lo que se distribuye (la librería y la imagen) **no entra nada no comercial (NC) ni copyleft fuerte** (GPL, AGPL, SSPL…). Se permiten dependencias de **copyleft débil sin modificar** (LGPL, MPL, EPL), y cada una se anota aquí con su motivo.
+
+`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`: falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint) no se distribuyen y no cuentan.
+
+## Dependencias de copyleft débil
+
+| Paquete | Licencia | Por qué se acepta |
+|---|---|---|
+| certifi | MPL-2.0 | Certificados raíz que usa httpx para HTTPS. Se usa sin modificar; MPL solo obliga a publicar cambios en sus propios archivos. |
+
+## Modelos y datos
+
+Todavía ninguno. Cuando entre el NER (issue 6), se anotarán aquí el modelo, su licencia y la de sus datos de entrenamiento. En el benchmark: MEDDOCAN (CC-BY-4.0, citado) y, solo en el entorno del benchmark y nunca en lo que se distribuye, spaCy `es_core_news_*` (GPL-3.0).
