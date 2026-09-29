@@ -1,0 +1,8 @@
+# Always store and check out text files with LF, even on Windows,
+# so Docker and Linux CI see the same files as the local machine.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
