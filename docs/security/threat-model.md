@@ -35,7 +35,7 @@ externo. Si algo falla al revisar la petición, se bloquea.
 | Evidencias | Manipulación | Cadena de hashes, sin UPDATE/DELETE, puntos de control firmados. | Issue 9 |
 | Panel | Acceso indebido | Token de admin, cookies `HttpOnly` y `SameSite=Strict`, CSRF, CSP. | Issue 11 |
 | Cadena de suministro | Dependencia o acción de CI comprometida; licencia incompatible | Acciones fijadas por SHA con permisos mínimos, `uv audit`, CodeQL, gitleaks, comprobación de licencias, Dependabot. | **Hecho** (issue 1) |
-| Sesiones de desarrollo con IA | El asistente lee secretos o se salta controles | Hooks de `.claude/` que bloquean leer `.env`, imprimir variables secretas, `--no-verify` y force push, con tests. **Defensa en profundidad, no barrera:** quien puede ejecutar código arbitrario puede saltárselos (p. ej. `python -c`, `cp .env`, otra herramienta de shell). La barrera real son gitleaks en CI y que las claves no están en el repo. | Parcial (issue 1); endurecimiento pendiente de aprobar |
+| Sesiones de desarrollo con IA | El asistente lee secretos o se salta controles | Hooks de `.claude/` que bloquean leer `.env`, imprimir variables secretas, `--no-verify` y force push, con tests. **Defensa en profundidad, no barrera:** quien puede ejecutar código arbitrario puede saltárselos (una lista de patrones nunca es completa). La barrera real son gitleaks en CI y que las claves no están en el repo. | Hecho como defensa en profundidad (issue 1): los 7 caminos de la revisión de privacidad están bloqueados y probados, y el hook vigila también PowerShell |
 
 ## Fuera del modelo
 
