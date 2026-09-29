@@ -35,3 +35,6 @@ Thumbs.db
 
 # Hypothesis example database (synthetic identifiers, local only)
 .hypothesis/
+
+# MEDDOCAN is downloaded at bench time, never committed (third-party data)
+evals/datasets/.cache/
