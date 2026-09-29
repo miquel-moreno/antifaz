@@ -101,6 +101,40 @@ restore(respuesta_del_modelo, result.vault)
 - Cada respuesta se restaura solo con la tabla de **su** petición: todas numeran desde 1, así que con la tabla de otra petición `[[ES_DNI_1]]` daría el DNI de otra persona. La pasarela lo garantiza en el issue 5.
 - El restaurador solo reconoce marcadores en ASCII: parecidos como `[[ıp_1]]` se dejan tal cual.
 
+## Guardia de salida y CLI (issue 4, PR 4b)
+
+```python
+from antifaz.guard import check
+
+check(cuerpo_final_en_bytes, result.vault)  # lanza EgressBlocked si ve un valor oculto
+```
+
+- Si el cuerpo es JSON, revisa cada cadena, clave y número decodificados (así ve los escapes Unicode de JSON: una barra invertida seguida de `u0031` es el dígito 1); si no lo es, el texto crudo. Bytes que no son UTF-8 válido, o un JSON demasiado profundo para revisarlo: bloquea.
+- Normaliza igual el valor y el texto: NFKC (cifras de ancho completo), sin caracteres de formato Cf (espacio de ancho cero, guion blando), sin acentos (NFD sin marcas Mn, así `İbrahim` = `ibrahim`), `casefold()` y espacios seguidos reducidos a uno.
+- Valores con 6 o más letras y cifras: se comparan quitando **todo** lo que no es letra ni cifra y **sin límites de palabra**, así que `DNI12345678Z`, `X12345678ZY`, `12.345.678-Z` o `xana@example.com` bloquean.
+- Valores más cortos: con límites alfanuméricos (ni letra ni cifra justo antes o después), para que "Ana" no salte en "semana".
+- Se normaliza cada texto una sola vez: 1 MB de JSON con 200 valores ocultos se revisa en unos 0,04 s si es ASCII y unos 0,35 s con acentos (test con límite de 2 s).
+- **Un falso positivo bloquea**: la guardia falla cerrada a propósito. No tiene opción para desactivarla.
+- `EgressBlocked` lleva un mensaje fijo, sin valores y sin `__context__`.
+
+Limitaciones de la guardia (es una **segunda capa**, no un DLP completo):
+
+- No decodifica otras codificaciones: base64, URL (`%31`), entidades HTML, hexadecimal ni el valor escrito al revés.
+- No ve un valor partido entre dos cadenas JSON distintas.
+- Solo busca el valor tal como se detectó: un DNI copiado sin la letra, o un teléfono oculto con prefijo (`0034612345678`) que luego aparece sin él, pueden pasar. Al revés sí se detecta: el teléfono oculto sin prefijo bloquea aunque aparezca con `0034` pegado.
+- Los falsos positivos bloquean la petición, por diseño.
+- Invariante 2 (`tests/property/test_egress_invariant.py`): **sin llamar a la guardia**, un proveedor falso que guarda los bytes no recibe ningún valor oculto, ni tal cual, ni normalizado ni compactado, con `ensure_ascii` activado y desactivado.
+
+CLI (`uv run antifaz ...`):
+
+```bash
+antifaz scan fichero.txt   # una línea por detección: TIPO inicio fin (nunca el valor)
+antifaz mask fichero.txt   # el texto con marcadores (nunca la tabla)
+antifaz mask -             # lee de stdin
+```
+
+Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
