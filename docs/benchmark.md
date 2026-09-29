@@ -62,6 +62,18 @@ igual: sus fugas cuentan en la cifra global.
 | SEXO_SUJETO_ASISTENCIA | 461 | 100.0 |
 | TERRITORIO | 956 | 95.2 |
 
+Una detección de cualquier tipo tapa el dato: por eso algunos tipos no cubiertos no
+llegan a 100 fugas (por ejemplo, fechas tapadas por DATE_OF_BIRTH).
+
+## Detecciones de tipos sin equivalente en el dataset
+
+Tipos que Antifaz detecta pero que el dataset no anota con una etiqueta propia. Si no
+tocan ningún dato anotado, son falsos positivos.
+
+| Tipo Antifaz | Detecciones | Tocan un dato anotado |
+|---|---|---|
+| DATE_OF_BIRTH | 250 | 250 |
+
 ## Global
 
 | Medida | Valor |
@@ -70,5 +82,5 @@ igual: sus fugas cuentan en la cifra global.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 86.9 |
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
-| Latencia p50 / p95 por documento | 2.26 ms / 5.51 ms |
+| Latencia p50 / p95 por documento | 2.51 ms / 5.42 ms |
 <!-- bench:end -->
