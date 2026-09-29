@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MINIMUMS = {
     "detect": 90.0,
     "detect/validators": 95.0,
+    "policy": 90.0,
     "vault": 90.0,
     "mask": 90.0,
     "guard": 90.0,
