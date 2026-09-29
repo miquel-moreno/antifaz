@@ -87,7 +87,7 @@ tocan ningún dato anotado, son falsos positivos.
 
 ## Resultados en el conjunto sintético
 
-600 textos generados por `evals/generate.py` (semilla fija, en el repositorio): emails, tickets, nóminas, contratos, chats, CSV pegados, código, catalán y trampas. Cubre lo que MEDDOCAN no tiene (DNI, NIE, CIF, NSS con dígito válido, IBAN, tarjetas, pasaportes, matrículas…). **Sesgo declarado:** el mismo equipo escribió el generador y el detector, así que estas cifras son probablemente mejores que en texto real. Los nombres de persona no se anotan todavía (no hay tipo PERSON hasta el NER).
+600 textos generados por `evals/generate.py` (semilla fija, en el repositorio): emails, tickets, nóminas, contratos, chats, CSV pegados, código, catalán y trampas. Cubre lo que MEDDOCAN no tiene (DNI, NIE, CIF, NSS con dígito válido, IBAN, tarjetas, pasaportes, matrículas…). **Sesgo declarado:** el mismo equipo escribió el generador y el detector, así que estas cifras son probablemente mejores que en texto real. Los nombres de persona no se anotan todavía (no hay tipo PERSON hasta el NER). En los textos en catalán, el pasaporte y la matrícula llevan además la palabra clave en castellano, porque Antifaz solo reconoce palabras clave en castellano: su 100 % no mide el catalán. Un 100 % aquí **no** significa que Antifaz lo detecte todo.
 
 <!-- bench-synthetic:start -->
 ## Tipos cubiertos
