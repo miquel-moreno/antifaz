@@ -17,6 +17,8 @@ from evals.metrics import Annotation
 URL = "https://zenodo.org/records/4279323/files/meddocan.zip"
 MD5 = "6a09eb975580fdf56bc7041eadc9c921"
 SIZE = 11738792
+# Computed on the zip after its size and MD5 matched the Zenodo record (2026-09-29).
+SHA256 = "d0e4708b58689bc1440ede6f89e017e58d667827d927827622d73810cd68eac3"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "evals" / "datasets" / ".cache"
 TEST_PREFIX = "meddocan/test/brat/"
 
@@ -53,8 +55,8 @@ MEDDOCAN_TO_ANTIFAZ: dict[str, EntityType | None] = {
     "URL_WEB": None,
     "DIREC_PROT_INTERNET": None,
     "OTRO_NUMERO_IDENTIF": None,
-    # 29th type of the MEDDOCAN annotation guidelines (biometric identifiers). It was not in
-    # the plan's list of 28; to be confirmed against the guidelines when the data is read.
+    # 29th type of the MEDDOCAN guidelines (biometric identifiers); it does not occur in the
+    # test split (checked on 2026-09-29), but it is kept so every label of the corpus is mapped.
     "IDENTIF_BIOMETRICOS": None,
 }
 
@@ -78,12 +80,16 @@ def parse_brat(text: str, ann: str) -> tuple[Annotation, ...]:
     for number, line in enumerate(ann.splitlines(), start=1):
         if not line.startswith("T"):
             continue
-        _, spec, annotated = line.split("\t", 2)
-        label, _, ranges = spec.partition(" ")
-        fragments = []
-        for part in ranges.split(";"):
-            start, end = (int(offset) for offset in part.split())
-            fragments.append(Annotation(start, end, label))
+        try:
+            _, spec, annotated = line.split("\t", 2)
+            label, _, ranges = spec.partition(" ")
+            fragments = []
+            for part in ranges.split(";"):
+                start, end = (int(offset) for offset in part.split())
+                fragments.append(Annotation(start, end, label))
+        except ValueError:
+            # Python's own message could quote the line; ours only says where it is.
+            raise ValueError(f"malformed brat line {number}") from None
         if " ".join(text[f.start : f.end] for f in fragments) != annotated:
             # Never include the value: it may be personal data (synthetic here, but still).
             raise ValueError(f"brat offsets do not match the text (line {number}, {label})")
@@ -99,12 +105,14 @@ def _md5(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify(path: Path, md5: str = MD5, size: int = SIZE) -> None:
-    """Raise ValueError if the file size or MD5 differ from the expected ones."""
+def verify(path: Path, md5: str = MD5, size: int = SIZE, sha256: str | None = None) -> None:
+    """Raise ValueError if the file size, MD5 or (when given) SHA-256 differ."""
     if path.stat().st_size != size:
-        raise ValueError(f"{path.name}: unexpected size")
+        raise ValueError(f"{path.name}: unexpected size; delete it and run again")
     if _md5(path) != md5:
-        raise ValueError(f"{path.name}: unexpected MD5")
+        raise ValueError(f"{path.name}: unexpected MD5; delete it and run again")
+    if sha256 is not None and hashlib.sha256(path.read_bytes()).hexdigest() != sha256:
+        raise ValueError(f"{path.name}: unexpected SHA-256; delete it and run again")
 
 
 def load_test(zip_path: Path) -> list[Document]:
@@ -123,19 +131,25 @@ def load_test(zip_path: Path) -> list[Document]:
     return documents
 
 
-def download(dest_dir: Path = CACHE_DIR, *, md5: str = MD5, size: int = SIZE) -> Path:
+def download(
+    dest_dir: Path = CACHE_DIR, *, md5: str = MD5, size: int = SIZE, sha256: str | None = SHA256
+) -> Path:
     """Path to dest_dir / "meddocan.zip", downloading it (with urllib.request.urlopen)
     only when it is not there yet. An existing file is verified and reused without any
     network access; if it fails verification, ValueError is raised."""
     path = dest_dir / "meddocan.zip"
     if path.exists():
-        verify(path, md5, size)
+        verify(path, md5, size, sha256)
         return path
     dest_dir.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".part")
-    # URL is a fixed https address (a constant above), never user input.
-    with urllib.request.urlopen(URL, timeout=60) as response, partial.open("wb") as file:
-        shutil.copyfileobj(response, file)
-    verify(partial, md5, size)
+    try:
+        # URL is a fixed https address (a constant above), never user input.
+        with urllib.request.urlopen(URL, timeout=60) as response, partial.open("wb") as file:
+            shutil.copyfileobj(response, file)
+        verify(partial, md5, size, sha256)
+    except BaseException:
+        partial.unlink(missing_ok=True)  # never leave a half or bad download behind
+        raise
     partial.replace(path)
     return path

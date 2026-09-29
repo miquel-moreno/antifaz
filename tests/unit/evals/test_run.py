@@ -189,7 +189,8 @@ def test_evaluate_calls_detect_once_per_document() -> None:
         return fake_detect(text)
 
     evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ, detect=counting_detect)
-    assert sorted(seen) == sorted([TEXT_1, TEXT_2])
+    # One untimed warm-up call on the first document, then one call per document.
+    assert sorted(seen) == sorted([TEXT_1, TEXT_1, TEXT_2])
 
 
 def test_a_prediction_over_an_unmapped_value_protects_it_from_leaking() -> None:
@@ -285,3 +286,27 @@ def test_update_benchmark_doc_without_markers_raises_and_keeps_the_file(
     with pytest.raises(ValueError):
         update_benchmark_doc(doc, "| a |")
     assert doc.read_bytes().decode("utf-8") == content
+
+
+# Found by the code review of PR 3a: detections of types the dataset has no label for
+# must be visible, or false positives would be hidden from the report.
+def test_detections_of_types_without_a_dataset_label_are_reported() -> None:
+    def detect(text: str) -> list[Span]:
+        if text == TEXT_1:
+            return [_span(54, 66, T.DATE_OF_BIRTH), _span(0, 6, T.ES_DNI)]
+        return []
+
+    result = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ, detect=detect)
+    assert result.unmatched_types == {
+        "DATE_OF_BIRTH": {"detections": 1, "overlapping_gold": 1},
+        "ES_DNI": {"detections": 1, "overlapping_gold": 0},
+    }
+    markdown = render_markdown(result)
+    assert "## Detecciones de tipos sin equivalente en el dataset" in markdown
+    assert "| ES_DNI | 1 | 0 |" in markdown
+
+
+def test_an_unknown_dataset_label_is_an_error() -> None:
+    doc = Document("x", "abc", (Annotation(0, 3, "LABEL_NOT_IN_THE_MAPPING"),))
+    with pytest.raises(ValueError, match="LABEL_NOT_IN_THE_MAPPING"):
+        evaluate([doc], MEDDOCAN_TO_ANTIFAZ, detect=lambda _: [])

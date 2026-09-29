@@ -78,7 +78,9 @@ def overlap_counts(
     """Per label: a prediction is a TP if it overlaps >= 1 character of a gold annotation
     of the same label. One-to-one greedy matching in order of position (each gold is
     matched once; extra overlapping predictions are FP); unmatched gold are FN. Labels
-    seen only in gold or only in predictions are included. Independent of input order."""
+    seen only in gold or only in predictions are included. Independent of input order.
+    Greedy matching can only give fewer hits than the best possible one, never more: it
+    does not favour the detector."""
     return _count(gold, predicted, lambda g, p: g.start < p.end and p.start < g.end)
 
 

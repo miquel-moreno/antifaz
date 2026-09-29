@@ -5,13 +5,14 @@ Cuánto detecta Antifaz, y cuánto se le escapa, medido con datos que no hemos e
 ## Cómo leer las cifras
 
 - **Fugas por cada 100 datos:** de cada 100 datos personales anotados, cuántos saldrían con al menos una letra o cifra sin tapar. Es la cifra que importa para la privacidad. Si un dato se tapa con una etiqueta equivocada (una calle marcada como otra cosa), **no** cuenta como fuga: el dato no sale.
-- **Recall (por solapamiento):** de los datos de un tipo, cuántos toca alguna detección de ese mismo tipo.
+- **Recall (por solapamiento):** de los datos de un tipo, cuántos quedan emparejados con una detección de ese mismo tipo que los toca (cada detección se empareja con un solo dato).
 - **F1 estricto:** igual, pero exigiendo el mismo principio y fin exactos, como en la evaluación oficial de MEDDOCAN.
+- **Detecciones sin equivalente en el dataset:** tipos que Antifaz detecta y el dataset no anota con una etiqueta propia; se muestran para que sus falsos positivos no queden ocultos.
 - **Tipos aún no cubiertos:** datos que Antifaz todavía no busca (nombres, lugares, hospitales, fechas de consulta…). La mayoría llegan con el NER (issue 6). Se publican igual, y cuentan en la cifra global.
 
 ## Datos y entorno
 
-- **Datos:** partición de test de MEDDOCAN (250 casos clínicos **sintéticos** en español, escritos por terceros), descargada de Zenodo y comprobada por MD5. No se redistribuye ([licencias](licencias.md)).
+- **Datos:** partición de test de MEDDOCAN (250 casos clínicos **sintéticos** en español, escritos por terceros), descargada de Zenodo (DOI [10.5281/zenodo.4279323](https://doi.org/10.5281/zenodo.4279323), licencia CC-BY-4.0) y comprobada por tamaño, MD5 y SHA-256. No se redistribuye. Cita: Marimon et al., *Automatic De-identification of Medical Texts in Spanish: the MEDDOCAN Track*, IberLEF@SEPLN 2019 ([licencias](licencias.md)).
 - **Sesgos declarados:** MEDDOCAN es texto clínico: pocos emails, teléfonos o direcciones, y ningún DNI, IBAN o tarjeta. Por eso este benchmark mide sobre todo lo que **todavía falta**; el generador sintético (issue 3, segunda parte) medirá el resto, con su propio sesgo (lo escribe el mismo equipo que el detector).
 - **Qué se mide:** `antifaz.detect.scan()` en CPU, sin NER y sin llamadas a ningún proveedor.
 

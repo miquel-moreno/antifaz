@@ -7,7 +7,7 @@ import subprocess
 import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -53,6 +53,9 @@ class Report:
     overall: dict[str, float | int]
     latency_ms: dict[str, float]
     environment: dict[str, str]
+    # Antifaz types with no dataset label mapped to them -> {"detections",
+    # "overlapping_gold"}: shown so that false positives of those types are not hidden.
+    unmatched_types: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def _add(a: Counts, b: Counts) -> Counts:
@@ -72,13 +75,19 @@ def _mapped(
 
 
 def _environment() -> dict[str, str]:
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607 - git from PATH, fixed args
+    def git(*args: str) -> str:
+        return subprocess.run(  # noqa: S603 - fixed git subcommands, no user input
+            ["git", *args],  # noqa: S607 - git from PATH, fixed args
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
+
+    try:
+        commit = git("rev-parse", "--short", "HEAD")
+        # Results computed with uncommitted changes cannot be reproduced from the commit.
+        if git("status", "--porcelain", "--untracked-files=no"):
+            commit += "-dirty"
     except (OSError, subprocess.CalledProcessError):
         commit = "unknown"
     return {
@@ -104,6 +113,16 @@ def evaluate(
     source_recall: dict[str, Counts] = defaultdict(Counts)
     source_leaks: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     samples: list[int] = []
+    unmatched: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"detections": 0, "overlapping_gold": 0}
+    )
+    mapped_types = {t.value for t in mapping.values() if t is not None}
+
+    unknown = sorted({a.label for d in documents for a in d.annotations} - set(mapping))
+    if unknown:
+        raise ValueError(f"dataset labels missing from the mapping: {', '.join(unknown)}")
+    if documents:
+        detect(documents[0].text)  # warm-up: compiled patterns and caches, not timed
 
     for document in documents:
         started = time.perf_counter_ns()
@@ -111,6 +130,11 @@ def evaluate(
         samples.append(time.perf_counter_ns() - started)
         predicted = [Annotation(s.start, s.end, s.type.value) for s in spans]
         gold = _mapped(document.annotations, mapping)
+        for p in predicted:
+            if p.label not in mapped_types:
+                unmatched[p.label]["detections"] += 1
+                if any(a.start < p.end and p.start < a.end for a in document.annotations):
+                    unmatched[p.label]["overlapping_gold"] += 1
         for label, counts in overlap_counts(gold, predicted).items():
             overlap[label] = _add(overlap[label], counts)
         for label, counts in strict_counts(gold, predicted).items():
@@ -143,8 +167,7 @@ def evaluate(
         }
 
     by_type: dict[str, dict[str, float | int]] = {}
-    mapped_types = {t.value for t in mapping.values() if t is not None}
-    for label in sorted(set(overlap) & (mapped_types | {s for s in overlap if overlap[s].tp})):
+    for label in sorted(set(overlap) & mapped_types):
         o, s = overlap[label], strict[label]
         by_type[label] = {
             "tp": o.tp,
@@ -179,6 +202,7 @@ def evaluate(
         },
         latency_ms={"p50": p50, "p95": p95},
         environment=_environment(),
+        unmatched_types={k: dict(v) for k, v in sorted(unmatched.items())},
     )
 
 
@@ -229,6 +253,23 @@ def render_markdown(report: Report) -> str:
     ]
     for label, row in missing.items():
         lines.append(f"| {label} | {row['n']} | {float(row['leaks_per_100'] or 0):.1f} |")
+    lines += [
+        "",
+        "Una detección de cualquier tipo tapa el dato: por eso algunos tipos no cubiertos no",
+        "llegan a 100 fugas (por ejemplo, fechas tapadas por DATE_OF_BIRTH).",
+        "",
+        "## Detecciones de tipos sin equivalente en el dataset",
+        "",
+        "Tipos que Antifaz detecta pero que el dataset no anota con una etiqueta propia. Si no",
+        "tocan ningún dato anotado, son falsos positivos.",
+        "",
+        "| Tipo Antifaz | Detecciones | Tocan un dato anotado |",
+        "|---|---|---|",
+    ]
+    for label, counts in report.unmatched_types.items():
+        lines.append(f"| {label} | {counts['detections']} | {counts['overlapping_gold']} |")
+    if not report.unmatched_types:
+        lines.append("| — | 0 | 0 |")
     overall = report.overall
     lines += [
         "",

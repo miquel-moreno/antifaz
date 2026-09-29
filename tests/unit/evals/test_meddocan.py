@@ -253,7 +253,9 @@ def test_download_reuses_a_valid_cached_file_without_network(
     cached.write_bytes(data)
     md5 = hashlib.md5(data, usedforsecurity=False).hexdigest()
 
-    path = download(tmp_path, md5=md5, size=len(data))
+    sha256 = hashlib.sha256(data).hexdigest()
+
+    path = download(tmp_path, md5=md5, size=len(data), sha256=sha256)
 
     assert path == cached
     assert cached.read_bytes() == data
@@ -270,3 +272,51 @@ def test_download_raises_on_an_invalid_cached_file_without_network(
 
 def test_cache_dir_is_inside_evals_datasets() -> None:
     assert meddocan.CACHE_DIR.parts[-3:] == ("evals", "datasets", ".cache")
+
+
+# Added with the reviews of PR 3a.
+class _FakeResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+        self._done = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self._done:
+            return b""
+        self._done = True
+        return self._data
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+def test_download_keeps_a_verified_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = b"invented zip bytes"
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(data))
+    path = download(
+        tmp_path,
+        md5=hashlib.md5(data, usedforsecurity=False).hexdigest(),
+        size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+    assert path.read_bytes() == data
+    assert not (tmp_path / "meddocan.part").exists()
+
+
+def test_a_bad_download_leaves_nothing_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(b"wrong"))
+    with pytest.raises(ValueError):
+        download(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("line", ["T1\tCALLE 0\tabc", "T1\tCALLE x 3\tabc", "T1 CALLE 0 3 abc"])
+def test_a_malformed_ann_line_gives_its_number_without_the_value(line: str) -> None:
+    with pytest.raises(ValueError, match="line 2") as error:
+        parse_brat("abc def", "#1\tnote\n" + line)
+    assert "abc" not in str(error.value)
