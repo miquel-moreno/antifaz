@@ -75,3 +75,22 @@ def test_no_command_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as info:
         main([])
     assert info.value.code == 2
+
+
+def test_stray_arguments_are_not_echoed(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as info:
+        main(["scan", "a.txt", DNI])
+    assert info.value.code == 2
+    captured = capsys.readouterr()
+    assert DNI not in captured.out + captured.err
+    assert captured.err.strip()
+
+
+def test_output_is_utf8_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    buffer = io.BytesIO()
+    stdout = io.TextIOWrapper(buffer, encoding="cp1252")
+    monkeypatch.setattr("sys.stdout", stdout)
+    path = write(tmp_path, "¿Ñandú? 中 DNI 12345678Z\n".encode())
+    assert main(["mask", str(path)]) == 0
+    stdout.flush()
+    assert buffer.getvalue().decode("utf-8") == "¿Ñandú? 中 DNI [[ES_DNI_1]]\n"

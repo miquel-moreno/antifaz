@@ -1,10 +1,13 @@
 """Egress guard: a second check on the final bytes before they leave for a provider.
 
-Looks for any value the policy said to hide, in the raw bytes and in decoded JSON
-strings (values and keys, so `\\u` escapes are covered), with normalisation (NFC and
-casefold; identifiers and phones also without spaces, dots, hyphens and slashes) and
-alphanumeric boundaries, so "Ana" does not match inside "semana". If it finds one, the
-request is blocked. A false positive also blocks: the guard fails closed on purpose.
+Looks for any value the policy said to hide. If the payload is JSON, it checks every
+decoded string, key and number (so `\\u` escapes are covered); otherwise the raw text.
+Both the value and the text are normalised the same way: NFKC, format characters (Cf)
+removed, accents removed, casefold and whitespace runs collapsed. Values with 6 or more
+letters and digits are then compared with every other character removed and WITHOUT word
+boundaries, so a value glued to other letters is still caught. Shorter values need
+alphanumeric boundaries, so "Ana" does not match inside "semana". Any match blocks the
+request, false positives included: the guard fails closed on purpose.
 
 Plain `str.find` loops, no regular expressions (ADR-0008).
 
@@ -15,20 +18,34 @@ import json
 import unicodedata
 from collections.abc import Iterator
 
-from antifaz.detect.types import EntityType
-from antifaz.detect.validators._ascii import compact
 from antifaz.errors import EgressBlocked
 from antifaz.vault import Vault
 
-_SEPARATORS = frozenset(" .-/")
-# Types whose value keeps its meaning without separators. Emails, IPs and addresses do
-# not: their dots or spaces are part of the value, and dropping them would match noise.
-_NOT_COMPACTED = frozenset({EntityType.EMAIL, EntityType.IP, EntityType.ADDRESS})
-_MIN_COMPACT = 6  # a shorter compact form would match unrelated digits
+_MIN_COMPACT = 6  # from this length on, a value is searched without boundaries
 
 
-def _norm(text: str) -> str:
-    return unicodedata.normalize("NFC", text).casefold()
+_ASCII_NOT_ALNUM = str.maketrans(
+    "", "", "".join(chr(c) for c in range(128) if not chr(c).isalnum())
+)
+
+
+def _normal(text: str) -> str:
+    if text.isascii():  # fast path: NFKC, Cf and Mn change nothing in ASCII
+        return " ".join(text.lower().split())
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(
+        char
+        for char in unicodedata.normalize("NFD", text)
+        if unicodedata.category(char) not in ("Cf", "Mn")
+    )
+    text = unicodedata.normalize("NFC", text.casefold())
+    return " ".join(text.split())
+
+
+def _compact(normal: str) -> str:
+    if normal.isascii():
+        return normal.translate(_ASCII_NOT_ALNUM)
+    return "".join(char for char in normal if char.isalnum())
 
 
 def _boundary(text: str, index: int) -> bool:
@@ -36,25 +53,12 @@ def _boundary(text: str, index: int) -> bool:
     return not 0 <= index < len(text) or not text[index].isalnum()
 
 
-def _contains(text: str, needle: str) -> bool:
+def _contains_word(text: str, needle: str) -> bool:
     start = text.find(needle)
     while start != -1:
         if _boundary(text, start - 1) and _boundary(text, start + len(needle)):
             return True
         start = text.find(needle, start + 1)
-    return False
-
-
-def _contains_compact(text: str, needle: str) -> bool:
-    """Search without separators; boundaries are checked in the original text."""
-    kept = [i for i, char in enumerate(text) if char not in _SEPARATORS]
-    stripped = "".join(text[i] for i in kept)
-    start = stripped.find(needle)
-    while start != -1:
-        first, last = kept[start], kept[start + len(needle) - 1]
-        if _boundary(text, first - 1) and _boundary(text, last + 1):
-            return True
-        start = stripped.find(needle, start + 1)
     return False
 
 
@@ -71,32 +75,33 @@ def _strings(node: object) -> Iterator[str]:
 
 
 def _texts(payload: bytes | str) -> list[str] | None:
-    """Raw text plus every JSON string, normalised. None means: block."""
+    """Texts to inspect: the decoded JSON strings, or the raw text. None means: block."""
     if isinstance(payload, bytes):
         try:
             payload = payload.decode("utf-8")
         except UnicodeDecodeError:
             return None
-    texts = [payload]
     try:
-        texts.extend(_strings(json.loads(payload)))
+        # Numbers come back as their literal text, so a phone sent as a number is seen too.
+        return list(_strings(json.loads(payload, parse_int=str, parse_float=str)))
     except RecursionError:
         return None  # too deep to inspect: it could hide an escaped value
     except ValueError:
-        pass  # not JSON: the raw text is checked
-    return [_norm(text) for text in texts]
+        return [payload]  # not JSON: the raw text is checked
 
 
 def _found(texts: list[str], vault: Vault) -> bool:
+    normals = [_normal(text) for text in texts]
+    compacts = [_compact(text) for text in normals]
     # _hidden_values is package-internal API: only mask/, restore/ and guard/ may call it.
-    for entity, value in vault._hidden_values():
-        needle = _norm(value)
-        folded = _norm(compact(value)) if entity not in _NOT_COMPACTED else ""
-        for text in texts:
-            if needle and _contains(text, needle):
+    for _, value in vault._hidden_values():
+        needle = _normal(value)
+        folded = _compact(needle)
+        if len(folded) >= _MIN_COMPACT:
+            if any(folded in text for text in compacts):
                 return True
-            if len(folded) >= _MIN_COMPACT and _contains_compact(text, folded):
-                return True
+        elif needle and any(_contains_word(text, needle) for text in normals):
+            return True
     return False
 
 

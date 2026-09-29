@@ -11,13 +11,21 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn
 
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
 
+class _Parser(argparse.ArgumentParser):
+    """Usage errors never repeat the arguments: a stray one could be a value."""
+
+    def error(self, message: str) -> NoReturn:
+        self.exit(2, f"{self.prog}: invalid arguments; see {self.prog} --help\n")
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="antifaz", description="Find or mask personal data.")
+    parser = _Parser(prog="antifaz", description="Find or mask personal data.")
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("scan", "print TYPE start end for each detection (never the value)"),
@@ -54,7 +62,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if failed:
         print("antifaz: personal data detector failed", file=sys.stderr)
         return 2
-    sys.stdout.write(output)
+    # Bytes, so a console in another encoding (cp1252 on Windows) neither crashes nor mangles.
+    sys.stdout.flush()
+    sys.stdout.buffer.write(output.encode("utf-8"))
+    sys.stdout.buffer.flush()
     return 0
 
 

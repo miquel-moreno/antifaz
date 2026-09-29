@@ -60,14 +60,77 @@ def test_json_keys_are_checked() -> None:
 
 
 def test_email_nfc_and_case_are_normalised() -> None:
-    value = "josé@example.com"
+    value = "jos\u00e9@example.com"
     with pytest.raises(EgressBlocked):
-        check("escribe a JOSÉ@EXAMPLE.COM", vault_with((EntityType.EMAIL, value)))
+        check("escribe a JOSE\u0301@EXAMPLE.COM", vault_with((EntityType.EMAIL, value)))
 
 
-@pytest.mark.parametrize("payload", ["X12345678ZY", "112345678Z", "12345678ZZ", "a12.345.678-Z"])
-def test_value_inside_a_longer_alphanumeric_run_is_not_matched(payload: str) -> None:
-    check(payload, vault_with((EntityType.ES_DNI, DNI)))
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "DNI12345678Z",
+        "12345678Zabc",
+        "X12345678ZY",
+        "a12.345.678-Z",
+        "DNI\t12\u00a0345\u200b678_Z",
+        "\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff3a",  # fullwidth
+        "12\u00ad345678\u200dZ",  # soft hyphen, zero-width joiner
+        "12,345,678\nz",
+    ],
+)
+def test_long_values_are_found_glued_or_obfuscated(payload: str) -> None:
+    with pytest.raises(EgressBlocked):
+        check(payload, vault_with((EntityType.ES_DNI, DNI)))
+
+
+@pytest.mark.parametrize(
+    ("entity", "value", "payload"),
+    [
+        (EntityType.IBAN, "ES9121000418450200051332", "IBANES9121000418450200051332"),
+        (EntityType.EMAIL, EMAIL, "xana@example.com"),
+        (EntityType.EMAIL, EMAIL, "anaexamplecom"),
+    ],
+)
+def test_other_glued_values(entity: EntityType, value: str, payload: str) -> None:
+    with pytest.raises(EgressBlocked):
+        check(payload, vault_with((entity, value)))
+
+
+def test_mask_then_check_catches_a_glued_copy() -> None:
+    result = mask("Mi DNI es 12345678Z y DNI12345678Z")
+    with pytest.raises(EgressBlocked):
+        check(json.dumps({"content": result.text}), result.vault)
+
+
+def test_accents_and_dotted_i_are_removed() -> None:
+    vault = vault_with((EntityType.ADDRESS, "\u0130brahim"))
+    with pytest.raises(EgressBlocked):
+        check("hola ibrahim", vault)
+
+
+def test_short_values_collapse_whitespace() -> None:
+    vault = vault_with((EntityType.ADDRESS, "C/ Sol 3"))
+    with pytest.raises(EgressBlocked):
+        check("en c/\u00a0 sol\t3.", vault)
+
+
+def test_json_numbers_are_checked() -> None:
+    with pytest.raises(EgressBlocked):
+        check('{"tel": 612345678}', vault_with((EntityType.PHONE, "612 345 678")))
+
+
+def test_one_megabyte_with_200_values_is_fast() -> None:
+    # Generous bound (measured well under it) so a slow CI runner does not make it flaky.
+    import time
+
+    values = [f"{n:08d}" + "TRWAGMYFPDXBNJZSQVHLCKE"[n % 23] for n in range(10_000_000, 10_000_200)]
+    vault = vault_with(*((EntityType.ES_DNI, v) for v in values))
+    filler = "texto de relleno sin datos " * 190
+    payload = json.dumps({"messages": [{"content": filler} for _ in range(200)]})
+    assert len(payload) > 1_000_000
+    start = time.perf_counter()
+    check(payload, vault)
+    assert time.perf_counter() - start < 2.0
 
 
 def test_word_boundary_for_short_values() -> None:
@@ -75,11 +138,6 @@ def test_word_boundary_for_short_values() -> None:
     check("la semana que viene", vault)
     with pytest.raises(EgressBlocked):
         check("hola, Ana.", vault)
-
-
-def test_email_is_not_compacted() -> None:
-    # No compact form for emails: dots and hyphens are part of the value.
-    check("anaexamplecom", vault_with((EntityType.EMAIL, "ana@example.com")))
 
 
 def test_invalid_utf8_is_blocked() -> None:

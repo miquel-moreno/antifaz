@@ -11,7 +11,6 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from antifaz import EgressBlocked, mask
-from antifaz.detect.validators._ascii import compact
 from antifaz.guard import check
 
 # Synthetic values with valid check digits: never real data.
@@ -23,7 +22,22 @@ VALUES = [
     "ES9121000418450200051332",
     "612 345 678",
 ]
-FILLER = ["Hola", "mi dato es", "gracias", "y", "[[ES_DNI_1]]", "semana", ",", "\n", "ñandú"]
+FILLER = [
+    "Hola",
+    "mi dato es",
+    "gracias",
+    "y",
+    "[[ES_DNI_1]]",
+    "semana",
+    ",",
+    "\n",
+    "ñandú",
+    "\u00a0",  # no-break space
+    "\u200b",  # zero-width space
+    "\t_",
+    "\uff21\uff11",  # fullwidth A1
+    "\u0130stanbul",
+]
 
 turns = st.lists(
     st.lists(st.sampled_from(VALUES) | st.sampled_from(FILLER), min_size=1, max_size=8).map(
@@ -35,7 +49,14 @@ turns = st.lists(
 
 
 def _norm(text: str) -> str:
-    return unicodedata.normalize("NFC", text).casefold()
+    """Independent oracle: NFKC, no format characters or accents, casefold."""
+    decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", text))
+    kept = "".join(c for c in decomposed if unicodedata.category(c) not in ("Cf", "Mn"))
+    return unicodedata.normalize("NFC", kept.casefold())
+
+
+def _compact(text: str) -> str:
+    return "".join(c for c in _norm(text) if c.isalnum())
 
 
 class FakeProvider:
@@ -72,8 +93,8 @@ def test_provider_never_receives_a_hidden_value_without_the_guard(
         for text in haystacks:
             assert value not in text
             assert _norm(value) not in _norm(text)
-            if len(compact(value)) >= 6 and "@" not in value:
-                assert compact(value) not in compact(text)
+            if len(_compact(value)) >= 6:
+                assert _compact(value) not in _compact(text)
 
 
 @settings(max_examples=300, deadline=None)
