@@ -16,7 +16,7 @@ Cuánto detecta Antifaz, y cuánto se le escapa, medido con datos que no hemos e
 - **Sesgos declarados:** MEDDOCAN es texto clínico: pocos emails, teléfonos o direcciones, y ningún DNI, IBAN o tarjeta. Por eso este benchmark mide sobre todo lo que **todavía falta**; el generador sintético (issue 3, segunda parte) medirá el resto, con su propio sesgo (lo escribe el mismo equipo que el detector).
 - **Qué se mide:** `antifaz.detect.scan()` en CPU, sin NER y sin llamadas a ningún proveedor.
 
-## Resultados
+## Resultados en MEDDOCAN
 
 Generados por `make bench`; el detalle está en `evals/results/<fecha>-<versión>.json`.
 
@@ -82,5 +82,79 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 86.9 |
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
-| Latencia p50 / p95 por documento | 2.51 ms / 5.42 ms |
+| Latencia p50 / p95 por documento | 1.98 ms / 3.76 ms |
 <!-- bench:end -->
+
+## Resultados en el conjunto sintético
+
+600 textos generados por `evals/generate.py` (semilla fija, en el repositorio): emails, tickets, nóminas, contratos, chats, CSV pegados, código, catalán y trampas. Cubre lo que MEDDOCAN no tiene (DNI, NIE, CIF, NSS con dígito válido, IBAN, tarjetas, pasaportes, matrículas…). **Sesgo declarado:** el mismo equipo escribió el generador y el detector, así que estas cifras son probablemente mejores que en texto real. Los nombres de persona no se anotan todavía (no hay tipo PERSON hasta el NER). En los textos en catalán, el pasaporte y la matrícula llevan además la palabra clave en castellano, porque Antifaz solo reconoce palabras clave en castellano: su 100 % no mide el catalán. Un 100 % aquí **no** significa que Antifaz lo detecte todo.
+
+<!-- bench-synthetic:start -->
+## Tipos cubiertos
+
+| Tipo en el dataset | Tipo Antifaz | Datos | Recall (solape) | Fugas por cada 100 |
+|---|---|---|---|---|
+| ADDRESS | ADDRESS | 240 | 100.0 % | 0.0 |
+| CREDIT_CARD | CREDIT_CARD | 80 | 100.0 % | 0.0 |
+| DATE_OF_BIRTH | DATE_OF_BIRTH | 60 | 100.0 % | 0.0 |
+| EMAIL | EMAIL | 420 | 100.0 % | 0.0 |
+| ES_CCC | ES_CCC | 60 | 100.0 % | 0.0 |
+| ES_CIF | ES_CIF | 60 | 100.0 % | 0.0 |
+| ES_DNI | ES_DNI | 400 | 100.0 % | 0.0 |
+| ES_NIE | ES_NIE | 60 | 100.0 % | 0.0 |
+| ES_NIF | ES_NIF | 40 | 100.0 % | 0.0 |
+| ES_NSS | ES_NSS | 60 | 100.0 % | 0.0 |
+| ES_PASSPORT | ES_PASSPORT | 60 | 100.0 % | 0.0 |
+| ES_PLATE | ES_PLATE | 60 | 100.0 % | 0.0 |
+| IBAN | IBAN | 120 | 100.0 % | 0.0 |
+| IP | IP | 60 | 100.0 % | 0.0 |
+| PHONE | PHONE | 440 | 100.0 % | 0.0 |
+
+| Tipo Antifaz | Precisión | Recall | F1 | F1 estricto |
+|---|---|---|---|---|
+| ADDRESS | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| CREDIT_CARD | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| DATE_OF_BIRTH | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| EMAIL | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_CCC | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_CIF | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_DNI | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_NIE | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_NIF | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_NSS | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_PASSPORT | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| ES_PLATE | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| IBAN | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| IP | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+| PHONE | 100.0 % | 100.0 % | 100.0 % | 100.0 % |
+
+## Tipos aún no cubiertos
+
+Antifaz todavía no busca estos datos (la mayoría necesitan NER, issue 6). Se miden
+igual: sus fugas cuentan en la cifra global.
+
+| Tipo en el dataset | Datos | Fugas por cada 100 |
+|---|---|---|
+
+Una detección de cualquier tipo tapa el dato: por eso algunos tipos no cubiertos no
+llegan a 100 fugas (por ejemplo, fechas tapadas por DATE_OF_BIRTH).
+
+## Detecciones de tipos sin equivalente en el dataset
+
+Tipos que Antifaz detecta pero que el dataset no anota con una etiqueta propia. Si no
+tocan ningún dato anotado, son falsos positivos.
+
+| Tipo Antifaz | Detecciones | Tocan un dato anotado |
+|---|---|---|
+| — | 0 | 0 |
+
+## Global
+
+| Medida | Valor |
+|---|---|
+| Documentos | 600 |
+| Datos personales anotados | 2220 |
+| Fugas por cada 100 (todos los tipos) | 0.0 |
+| Fugas por cada 100 (tipos cubiertos) | 0.0 |
+| Latencia p50 / p95 por documento | 0.23 ms / 0.32 ms |
+<!-- bench-synthetic:end -->

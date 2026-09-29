@@ -20,8 +20,10 @@ from antifaz.detect.types import Confidence, EntityType, Layer, Span
 from antifaz.detect.validators import luhn
 
 _ASCII_CI = re.IGNORECASE | re.ASCII
-_START = r"(?<![0-9A-Za-z])"
-_END = r"(?![0-9A-Za-z])"
+# Letters with accents (Latin-1 and Latin Extended-A/B) are word characters too: in
+# "DNI és 16257107-V" the "s" of "és" must not start a value.
+_START = r"(?<![0-9A-Za-z\u00C0-\u024F])"
+_END = r"(?![0-9A-Za-z\u00C0-\u024F])"
 
 
 def _keywords(words: str) -> re.Pattern[str]:

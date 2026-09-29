@@ -15,8 +15,10 @@ from antifaz.detect.types import Confidence, EntityType, Layer, Span
 from antifaz.detect.validators import ccc, cif, dni, eu, iban, nie, nif_klm, nss
 
 _FLAGS = re.IGNORECASE | re.ASCII
-_START = r"(?<![0-9A-Za-z])"
-_END = r"(?![0-9A-Za-z])"
+# Letters with accents (Latin-1 and Latin Extended-A/B) are word characters too: in
+# "DNI és 16257107-V" the "s" of "és" must not start a value.
+_START = r"(?<![0-9A-Za-z\u00C0-\u024F])"
+_END = r"(?![0-9A-Za-z\u00C0-\u024F])"
 _SEP = r"[ .-]?"  # between the parts of a DNI, NIE, NIF or CIF
 _EU_VAT_PREFIXES = (
     "AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|XI"

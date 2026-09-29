@@ -16,6 +16,7 @@ from antifaz.detect.scan import scan
 from antifaz.detect.types import EntityType, Span
 from evals.datasets import meddocan
 from evals.datasets.meddocan import Document
+from evals.generate import from_jsonl
 from evals.metrics import (
     Annotation,
     Counts,
@@ -28,9 +29,12 @@ from evals.metrics import (
 
 START_MARKER = "<!-- bench:start -->"
 END_MARKER = "<!-- bench:end -->"
+SYNTHETIC_START = "<!-- bench-synthetic:start -->"
+SYNTHETIC_END = "<!-- bench-synthetic:end -->"
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "evals" / "results"
 BENCHMARK_DOC = ROOT / "docs" / "benchmark.md"
+SYNTHETIC = ROOT / "evals" / "datasets" / "synthetic-v1.jsonl"
 
 
 @dataclass
@@ -287,23 +291,41 @@ def render_markdown(report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
-def update_benchmark_doc(doc: Path, table: str) -> None:
-    """Replace what is between START_MARKER and END_MARKER with table.strip(), keeping
-    the markers on their own lines. Raises ValueError (file untouched) if a marker is
-    missing."""
+def update_benchmark_doc(
+    doc: Path, table: str, start_marker: str = START_MARKER, end_marker: str = END_MARKER
+) -> None:
+    """Replace what is between the markers with table.strip(), keeping the markers on
+    their own lines. Raises ValueError (file untouched) if a marker is missing."""
     text = doc.read_text(encoding="utf-8")
-    start, end = text.find(START_MARKER), text.find(END_MARKER)
+    start, end = text.find(start_marker), text.find(end_marker)
     if start == -1 or end == -1 or end < start:
         raise ValueError(f"{doc.name}: benchmark markers not found")
-    new = text[: start + len(START_MARKER)] + "\n" + table.strip() + "\n" + text[end:]
+    new = text[: start + len(start_marker)] + "\n" + table.strip() + "\n" + text[end:]
     doc.write_text(new, encoding="utf-8", newline="\n")
 
 
+def _save(report: Report, suffix: str) -> str:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{report.environment['date']}-{report.environment['antifaz']}{suffix}.json"
+    (RESULTS_DIR / name).write_text(to_json(report), encoding="utf-8", newline="\n")
+    return name
+
+
+def run_synthetic(documents: Sequence[Document]) -> Report:
+    """The synthetic set is labelled directly with Antifaz types."""
+    mapping = {entity_type.value: entity_type for entity_type in EntityType}
+    return evaluate(documents, mapping, dataset="synthetic-v1 (evals/datasets/synthetic-v1.jsonl)")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Command line entry point: download MEDDOCAN if needed, evaluate, write the results."""
-    parser = argparse.ArgumentParser(description="Run Antifaz-Bench on the MEDDOCAN test set.")
+    """Command line entry point: download MEDDOCAN if needed, evaluate both sets and write
+    the results."""
+    parser = argparse.ArgumentParser(description="Run Antifaz-Bench (MEDDOCAN + synthetic).")
     parser.add_argument("--no-doc", action="store_true", help="do not update docs/benchmark.md")
     args = parser.parse_args(argv)
+
+    synthetic = run_synthetic(from_jsonl(SYNTHETIC.read_text(encoding="utf-8")))
+    synthetic_name = _save(synthetic, "-synthetic")
 
     archive = meddocan.download()
     report = evaluate(
@@ -312,15 +334,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
     )
     report.environment["dataset_md5"] = meddocan.MD5
-
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{report.environment['date']}-{report.environment['antifaz']}.json"
-    (RESULTS_DIR / name).write_text(to_json(report), encoding="utf-8", newline="\n")
+    name = _save(report, "")
     table = render_markdown(report)
     if not args.no_doc:
         update_benchmark_doc(BENCHMARK_DOC, table)
+        update_benchmark_doc(
+            BENCHMARK_DOC, render_markdown(synthetic), SYNTHETIC_START, SYNTHETIC_END
+        )
     print(table)
-    print(f"Results: evals/results/{name}")
+    print(f"Results: evals/results/{name} and evals/results/{synthetic_name}")
     return 0
 
 
