@@ -82,6 +82,23 @@ Los identificadores de la UE que son solo cifras necesitan contexto porque, sin 
 - "CCC" aquí es la cuenta bancaria, no el código de cuenta de cotización de la Seguridad Social.
 - Faker genera NSS con otra fórmula cuando el número empieza por 0: no sirve de referencia (se tendrá en cuenta en el benchmark).
 
+## Librería: `mask()` y `restore()` (issue 4, PR 4a)
+
+```python
+from antifaz import mask, restore
+
+result = mask(["Mi DNI es 12345678Z", "¿y el 12345678Z?"])  # también acepta un solo str
+result.texts  # ("Mi DNI es [[ES_DNI_1]]", "¿y el [[ES_DNI_1]]?")
+result.hidden  # (EntityType.ES_DNI,)
+restore(respuesta_del_modelo, result.vault)
+```
+
+- Marcadores `[[TIPO_N]]`, numerados por tipo y por primera aparición en todos los textos; el mismo par (tipo, texto exacto) recibe siempre el mismo marcador ([ADR-0012](adr/0012-escape-and-same-value.md), propuesta).
+- Los `[[` que ya escribe el usuario se escapan con un `!` detrás; `restore()` lo quita en una sola pasada y solo restaura marcadores de **esta** petición. Hypothesis comprueba `restore(mask(x)) == x`.
+- Política por defecto (`DEFAULT_POLICY`, versión `builtin-1`): enmascara todos los tipos salvo el CIF de empresa.
+- Si el detector falla o devuelve spans mal formados: `DetectorFailed`, con un mensaje fijo sin el texto. Nunca sale texto en claro.
+- `Vault` no se puede imprimir (solo `Vault(entries=N)`), recorrer, serializar ni copiar.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
@@ -100,4 +117,5 @@ Los identificadores de la UE que son solo cifras necesitan contexto porque, sin 
 
 ## Limitaciones
 
-- Detecta identificadores con dígito de control, pero todavía no enmascara nada: eso llega en el issue 4.
+- `mask()` y `restore()` funcionan como librería; la pasarela HTTP, la guardia de salida y el streaming llegan después (issues 4b y 5).
+- Los nombres de persona no se detectan hasta el issue 6 (NER): hoy pasan en claro.
