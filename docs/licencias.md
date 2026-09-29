@@ -17,4 +17,14 @@ En lo que se distribuye (la librería y la imagen) **no entra nada no comercial 
 
 ## Modelos y datos
 
+### Datos del benchmark (no se distribuyen)
+
+| Datos | Licencia | Uso |
+|---|---|---|
+| MEDDOCAN, partición de test (Zenodo, DOI 10.5281/zenodo.4279323) | CC-BY-4.0 | Se descarga al ejecutar `make bench` a `evals/datasets/.cache/` (ignorado por git), se comprueba su MD5 y no se sube al repositorio. |
+
+Cita: Marimon, M., Gonzalez-Agirre, A., Intxaurrondo, A., Rodríguez, H., Lopez Martin, J. A., Villegas, M., Krallinger, M. (2019). *Automatic De-identification of Medical Texts in Spanish: the MEDDOCAN Track, Corpus, Guidelines, Methods and Evaluation of Results.* IberLEF@SEPLN 2019, pp. 618–638.
+
+### Modelos
+
 Todavía ninguno. Cuando entre el NER (issue 6), se anotarán aquí el modelo, su licencia y la de sus datos de entrenamiento. En el benchmark: MEDDOCAN (CC-BY-4.0, citado) y, solo en el entorno del benchmark y nunca en lo que se distribuye, spaCy `es_core_news_*` (GPL-3.0).

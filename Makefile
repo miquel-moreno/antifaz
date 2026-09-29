@@ -2,7 +2,7 @@
 PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 
-.PHONY: help install dev lint format typecheck test secrets check audit licenses
+.PHONY: help install dev lint format typecheck test secrets check audit licenses bench
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -15,6 +15,7 @@ help:
 	@echo "check      lint + typecheck + test + secrets (run before every commit)"
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
 	@echo "licenses   Licenses of the runtime dependencies"
+	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
 
 install:
 	uv sync
@@ -32,7 +33,7 @@ format:
 	uv run ruff check --fix .
 
 typecheck:
-	uv run mypy src
+	uv run mypy src evals
 
 test:
 	uv run pytest --cov --cov-report=term-missing --cov-report=json
@@ -48,3 +49,6 @@ audit:
 
 licenses:
 	uv run python -m scripts.check_licenses
+
+bench:
+	uv run python -m evals.run

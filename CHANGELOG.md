@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 ## [Unreleased]
 
 ### Added
+- Antifaz-Bench (issue 3, part 1): `make bench` measures the detector on the MEDDOCAN test set (downloaded and verified, never redistributed): per-type precision, recall, F1 (overlap and strict), leaks per 100 values including the types not covered yet, and latency. ADR-0011 (accepted) defines how hits and leaks are counted. First results in `docs/benchmark.md`.
 - Detector (issue 2, part 2): email (Unicode local part), IPv4, Spanish phone (business and premium-rate numbers excluded; found next to other numbers), payment card (Luhn + known prefix, 7 brands), Spanish, Catalan and Galician style addresses, and with a keyword before them passport, plate, date of birth and the digit-only Portuguese, French and German identifiers.
 - ADR-0010 (accepted): a span that contains another one wins, so an email with a DNI inside is masked whole.
 - Detector (issue 2, part 1): check-digit validators for DNI, NIE, NIF K/L/M, CIF, NSS, CCC and IBAN, plus Italian codice fiscale and EU VAT via python-stdnum; `scan(text)` returns non-overlapping spans without the value (ADR-0009). Invariant 10: the DNI, NIE, NIF K/L/M, CIF, CCC and Spanish IBAN validators agree with python-stdnum on 5,000 generated cases; the NSS, which stdnum lacks, is checked against documented vectors.

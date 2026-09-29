@@ -15,3 +15,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0008](0008-expresiones-regulares.md) | Expresiones regulares y diccionarios | Aceptada |
 | [0009](0009-spans-y-criterio-de-validadores.md) | Spans y criterio de los validadores | Aceptada |
 | [0010](0010-el-span-contenedor-gana.md) | El span que contiene a otro gana | Aceptada |
+| [0011](0011-antifaz-bench.md) | Antifaz-Bench: cómo se cuentan aciertos y fugas | Aceptada |
