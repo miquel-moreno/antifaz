@@ -1,0 +1,64 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Read(**/.env.production)",
+      "Read(**/.env.development)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.test)",
+      "Read(**/secrets/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "PowerShell(git push --force *)",
+      "PowerShell(git push -f *)",
+      "PowerShell(git push --force-with-lease *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git -C * push *)",
+      "Bash(gh repo create *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh release create *)",
+      "Bash(gh pr merge *)",
+      "Bash(docker push *)",
+      "Bash(uv publish *)",
+      "Bash(cosign *)",
+      "PowerShell(git push *)",
+      "PowerShell(git -C * push *)",
+      "PowerShell(gh repo create *)",
+      "PowerShell(gh repo edit *)",
+      "PowerShell(gh release create *)",
+      "PowerShell(gh pr merge *)",
+      "PowerShell(docker push *)",
+      "PowerShell(uv publish *)",
+      "PowerShell(cosign *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_bash.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

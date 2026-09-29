@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: every job only reads the code unless it says otherwise.
+permissions:
+  contents: read
+
+# Actions are pinned by full commit SHA (a tag can be moved; a SHA cannot).
+# Dependabot keeps them up to date.
+env:
+  UV_VERSION: "0.12.20"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  quality:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Types (mypy --strict)
+        run: uv run mypy src
+      - name: Tests
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=json
+      - name: Coverage >= 90 % in the privacy pieces
+        run: uv run python -m scripts.check_coverage
+
+  supply-chain:
+    name: Vulnerabilities and licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Known vulnerabilities (uv audit, OSV)
+        run: uv audit --frozen --preview-features audit-command
+      - name: Licenses of what ships
+        run: |
+          uv sync --frozen --no-dev
+          uv run --no-sync python -m scripts.check_licenses
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks-action lists the commits of the PR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

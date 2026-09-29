@@ -1,0 +1,26 @@
+name: Bug
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems (personal data reaching a provider, data restored for the wrong
+        user, a bypass of a check) go through SECURITY.md, not here.**
+        Use invented data only: never paste real names, IDs or messages.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce (with invented data)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Antifaz version or commit

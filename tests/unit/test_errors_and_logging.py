@@ -17,6 +17,8 @@ class TeapotError(AppError):
 
 class Body(BaseModel):
     count: int
+    scores: dict[str, int] = {}
+    tags: list[int] = []
 
 
 def app_with_routes() -> FastAPI:
@@ -49,8 +51,18 @@ def test_validation_errors_never_echo_the_received_body() -> None:
     assert response.status_code == 422
     assert SENTINEL_DNI not in response.text
     assert response.json() == {
-        "error": {"code": "invalid_request", "message": "invalid request: check body.count"}
+        "error": {"code": "invalid_request", "message": "invalid request: check body.*"}
     }
+
+
+def test_validation_errors_never_echo_keys_the_client_chose() -> None:
+    response = TestClient(app_with_routes()).post(
+        "/echo", json={"count": 1, "scores": {SENTINEL_DNI: "x"}, "tags": [1, "x"]}
+    )
+
+    assert response.status_code == 422
+    assert SENTINEL_DNI not in response.text
+    assert response.json()["error"]["message"] == "invalid request: check body.*.*, body.*.1"
 
 
 def test_json_formatter_includes_request_id() -> None:
@@ -64,3 +76,11 @@ def test_json_formatter_includes_request_id() -> None:
     assert line["msg"] == "hello world"
     assert line["request_id"] == "req-1"
     assert line["level"] == "INFO"
+
+
+def test_validation_error_message_has_a_maximum_size() -> None:
+    body = {"count": 1, "tags": ["x"] * 500}
+
+    message = TestClient(app_with_routes()).post("/echo", json=body).json()["error"]["message"]
+
+    assert message.count("body.") == 10 and message.endswith(", ...")
