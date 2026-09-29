@@ -16,7 +16,7 @@ Cuánto detecta Antifaz, y cuánto se le escapa, medido con datos que no hemos e
 - **Sesgos declarados:** MEDDOCAN es texto clínico: pocos emails, teléfonos o direcciones, y ningún DNI, IBAN o tarjeta. Por eso este benchmark mide sobre todo lo que **todavía falta**; el generador sintético (issue 3, segunda parte) medirá el resto, con su propio sesgo (lo escribe el mismo equipo que el detector).
 - **Qué se mide:** `antifaz.detect.scan()` en CPU, sin NER y sin llamadas a ningún proveedor.
 
-## Resultados
+## Resultados en MEDDOCAN
 
 Generados por `make bench`; el detalle está en `evals/results/<fecha>-<versión>.json`.
 
@@ -84,3 +84,11 @@ tocan ningún dato anotado, son falsos positivos.
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
 | Latencia p50 / p95 por documento | 2.51 ms / 5.42 ms |
 <!-- bench:end -->
+
+## Resultados en el conjunto sintético
+
+600 textos generados por `evals/generate.py` (semilla fija, en el repositorio): emails, tickets, nóminas, contratos, chats, CSV pegados, código, catalán y trampas. Cubre lo que MEDDOCAN no tiene (DNI, NIE, CIF, NSS con dígito válido, IBAN, tarjetas, pasaportes, matrículas…). **Sesgo declarado:** el mismo equipo escribió el generador y el detector, así que estas cifras son probablemente mejores que en texto real. Los nombres de persona no se anotan todavía (no hay tipo PERSON hasta el NER).
+
+<!-- bench-synthetic:start -->
+_Pendiente de la primera ejecución._
+<!-- bench-synthetic:end -->

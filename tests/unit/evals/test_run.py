@@ -310,3 +310,17 @@ def test_an_unknown_dataset_label_is_an_error() -> None:
     doc = Document("x", "abc", (Annotation(0, 3, "LABEL_NOT_IN_THE_MAPPING"),))
     with pytest.raises(ValueError, match="LABEL_NOT_IN_THE_MAPPING"):
         evaluate([doc], MEDDOCAN_TO_ANTIFAZ, detect=lambda _: [])
+
+
+def test_the_synthetic_set_runs_end_to_end_without_values_in_the_output() -> None:
+    from evals.generate import generate
+    from evals.run import run_synthetic
+
+    documents = generate(seed=3, counts={"email": 2, "payslip": 2, "trap": 2})
+    report = run_synthetic(documents)
+    assert report.documents == 6
+    assert report.by_type["ES_DNI"]["recall"] > 0
+    output = to_json(report) + render_markdown(report)
+    for document in documents:
+        for annotation in document.annotations:
+            assert document.text[annotation.start : annotation.end] not in output
