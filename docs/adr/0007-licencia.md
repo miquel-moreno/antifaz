@@ -1,6 +1,6 @@
 # ADR-0007 · Licencia Apache-2.0
 
-- **Estado:** Propuesta (pendiente de aprobar por Miquel Moreno)
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-29)
 - **Fecha:** 2026-09-29
 
 ## Contexto

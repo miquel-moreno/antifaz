@@ -1,6 +1,6 @@
 # ADR-0006 · Campos desconocidos y adjuntos
 
-- **Estado:** Propuesta (pendiente de aprobar por Miquel Moreno)
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-29)
 - **Fecha:** 2026-09-29
 
 ## Contexto

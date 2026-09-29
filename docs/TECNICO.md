@@ -30,7 +30,7 @@ Una pieza por responsabilidad, cada una en su paquete de `src/antifaz/`:
 | Restaurador | `restore/` | Vuelve a poner los valores, también en streaming |
 | Evidencias | `audit/` | Registro encadenado sin datos personales (v0.2) |
 
-El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decisiones están en [`docs/adr/`](adr/README.md) y las amenazas en [`docs/security/threat-model.md`](security/threat-model.md).
+El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decisiones (aceptadas) están en [`docs/adr/`](adr/README.md) y las amenazas en [`docs/security/threat-model.md`](security/threat-model.md).
 
 ## Decisiones técnicas del issue 1
 
