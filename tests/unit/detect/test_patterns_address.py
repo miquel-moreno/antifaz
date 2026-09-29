@@ -22,7 +22,7 @@ def _addresses(text: str) -> list[tuple[str, Confidence]]:
 ADDRESSES = [
     ("Vivo en C/ Mayor 3, 2º B, 08001 Barcelona", "C/ Mayor 3, 2º B, 08001", H),
     ("en la Calle de la Paz 12.", "Calle de la Paz 12", M),
-    ("Avda. Diagonal 640, 5º 2ª", "Avda. Diagonal 640, 5º 2ª", M),
+    ("Avda. Diagonal 9640, 5º 2ª", "Avda. Diagonal 9640, 5º 2ª", M),
     ("Plaza España nº 5", "Plaza España nº 5", M),
     ("Paseo de Gracia 21, 08007 Barcelona", "Paseo de Gracia 21, 08007", H),
     ("Calle Núñez de Balboa 3", "Calle Núñez de Balboa 3", M),
@@ -68,8 +68,8 @@ def test_a_postcode_outside_01000_52999_is_left_out_and_confidence_stays_medium(
 
 
 def test_two_addresses_are_both_found() -> None:
-    text = "De C/ Mayor 3 a Avda. Diagonal 640, 08019 Barcelona."
-    assert _addresses(text) == [("C/ Mayor 3", M), ("Avda. Diagonal 640, 08019", H)]
+    text = "De C/ Mayor 3 a Avda. Diagonal 9640, 08019 Barcelona."
+    assert _addresses(text) == [("C/ Mayor 3", M), ("Avda. Diagonal 9640, 08019", H)]
 
 
 @pytest.mark.parametrize(
@@ -88,3 +88,30 @@ def test_two_addresses_are_both_found() -> None:
 )
 def test_street_words_without_a_full_address_are_not_reported(text: str) -> None:
     assert _addresses(text) == []
+
+
+# Added with the privacy review of PR 2b: common forms that slipped through.
+MORE_ADDRESSES = [
+    ("envíalo a c/ mayor 3", "c/ mayor 3"),
+    ("calle mayor, 3, 2º 1ª", "calle mayor, 3, 2º 1ª"),
+    ("Avda Diagonal 3", "Avda Diagonal 3"),
+    ("Av Meridiana 350", "Av Meridiana 350"),
+    ("C. Mayor 3", "C. Mayor 3"),
+    ("Carrer de Balmes 12", "Carrer de Balmes 12"),
+    ("Avinguda de Roma 5", "Avinguda de Roma 5"),
+    ("Plaça de Catalunya 1", "Plaça de Catalunya 1"),
+    ("Passeig de Sant Joan 8", "Passeig de Sant Joan 8"),
+    ("Rambla Nova 4", "Rambla Nova 4"),
+    ("Pza. Mayor 2", "Pza. Mayor 2"),
+    ("Rúa do Franco 3", "Rúa do Franco 3"),
+    ("Avda. d'Aragó 5", "Avda. d'Aragó 5"),
+    ("Calle Mayor n.º 3", "Calle Mayor n.º 3"),
+    ("Calle Mayor s/n", "Calle Mayor s/n"),
+    ("C/ Mayor, 3 - 2º 1ª", "C/ Mayor, 3 - 2º 1ª"),
+    ("Calle Dr. Fleming 3", "Calle Dr. Fleming 3"),
+]
+
+
+@pytest.mark.parametrize(("text", "value"), MORE_ADDRESSES, ids=[a[1] for a in MORE_ADDRESSES])
+def test_more_address_forms_are_found(text: str, value: str) -> None:
+    assert [v for v, _ in _addresses(text)] == [value]

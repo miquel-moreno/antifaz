@@ -171,3 +171,22 @@ def test_many_real_values_in_one_text_are_all_found_quickly(
     spans = scan(text)
     assert time.perf_counter() - started < 3.0
     assert sum(1 for s in spans if s.type is entity_type) == count
+
+
+# ADR-0010 and the privacy review of PR 2b: no piece of an email is left in clear.
+@pytest.mark.parametrize(
+    "value",
+    [
+        "12345678Z@example.com",
+        "juan.garcia.12345678Z@example.com",
+        "4111111111111111@example.es",
+        "Juan.Pérez@example.es",
+        "o'brien@example.com",
+        "juan&co@example.com",
+        "josé@example.es",
+        "juan@münchen.example",
+    ],
+)
+def test_an_email_is_masked_whole(value: str) -> None:
+    text = f"Escribe a {value} hoy"
+    assert [(text[s.start : s.end], s.type) for s in scan(text)] == [(value, T.EMAIL)]

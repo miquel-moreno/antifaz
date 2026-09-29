@@ -33,7 +33,7 @@ EMAILS = [
     ("ana+facturas@correo.example.es", "ana+facturas@correo.example.es"),
     ("soporte: soporte@mail.eu.example.org, gracias", "soporte@mail.eu.example.org"),
     ("ANA_G-1@Example.COM", "ANA_G-1@Example.COM"),
-    ("Contacto <jordi.puig@example.cat>", "jordi.puig@example.cat"),
+    ("Contacto <jordi.puig@example.org>", "jordi.puig@example.org"),
     ("mailto:ana@example.com", "ana@example.com"),
     ("(ana.1985@example.net)", "ana.1985@example.net"),
 ]
@@ -71,7 +71,7 @@ def test_things_that_are_not_emails_are_not_reported(text: str) -> None:
 IPS = [
     ("El servidor 192.168.1.10 no responde", "192.168.1.10"),
     ("IP: 10.0.0.1, puerto 22", "10.0.0.1"),
-    ("desde 8.8.8.8.", "8.8.8.8"),  # the sentence period is not part of it
+    ("desde 203.0.113.8.", "203.0.113.8"),  # the sentence period is not part of it
     ("0.0.0.0", "0.0.0.0"),  # noqa: S104 (a string to scan, not a bind address)
     ("máscara 255.255.255.255", "255.255.255.255"),
     ("(172.16.254.1)", "172.16.254.1"),
@@ -223,3 +223,30 @@ def test_find_patterns_writes_nothing_to_the_logs(caplog: pytest.LogCaptureFixtu
         for record in caplog.records:
             assert value not in record.getMessage()
             assert value not in repr(record.args)
+
+
+# Found by the code review of PR 2b: phones next to other numbers.
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        ("Tel 612345678 698765432", ["612345678", "698765432"]),
+        ("Tel 612345678-698765432", ["612345678", "698765432"]),
+        ("Tel 612 345 678 698765432", ["612 345 678", "698765432"]),
+        ("Tel 612345678 2 veces", ["612345678"]),
+        ("cita 3 612345678", ["612345678"]),
+        ("móviles: 612 345 678, 698 765 432", ["612 345 678", "698 765 432"]),
+        ("wa.me/34612345678", ["34612345678"]),
+    ],
+)
+def test_phones_next_to_other_numbers_are_found(text: str, values: list[str]) -> None:
+    assert [v for v, _ in _found(text, T.PHONE)] == values
+
+
+def test_a_phone_group_is_not_read_as_part_of_a_card() -> None:
+    from antifaz.detect.scan import scan
+
+    text = "Tel 612 345 678 698765432"
+    assert [(text[s.start : s.end], s.type) for s in scan(text)] == [
+        ("612 345 678", T.PHONE),
+        ("698765432", T.PHONE),
+    ]

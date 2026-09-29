@@ -74,7 +74,7 @@ def test_two_grouped_cards_in_a_list_are_both_found() -> None:
         "4111111111111112",  # Luhn wrong
         "4111 1111 1111 1112",
         "1234567812345670",  # Luhn right, unknown prefix
-        "3530111333300000",  # Luhn right, JCB prefix: not in the accepted list
+        _card("3527", 16),  # just before JCB 3528-3589
         _card("9", 16),
         _card("56", 16),  # just after the Mastercard 51-55 range
         _card("2721", 16),  # just after the Mastercard 2221-2720 range
@@ -93,3 +93,17 @@ def test_two_grouped_cards_in_a_list_are_both_found() -> None:
 )
 def test_numbers_that_are_not_cards_are_not_reported(text: str) -> None:
     assert _cards(text) == []
+
+
+# Added with the privacy review of PR 2b: more brands and the dot separator.
+@pytest.mark.parametrize(
+    "value",
+    ["3530111333300000", "30569309025904", "6200000000000005", "4111.1111.1111.1111"],
+    ids=["JCB", "Diners", "UnionPay", "dots"],
+)
+def test_more_card_brands_and_dot_grouping_are_found(value: str) -> None:
+    assert _cards(f"tarjeta {value}") == [value]
+
+
+def test_a_lone_count_before_a_card_does_not_hide_it() -> None:
+    assert _cards("serie 2 4111 1111 1111 1111") == ["4111 1111 1111 1111"]

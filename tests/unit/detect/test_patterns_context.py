@@ -249,3 +249,20 @@ def test_a_failing_eu_validator_rejects_the_value_instead_of_raising() -> None:
     match = _re.search(r"[0-9]+", "501964843")
     assert match is not None
     assert _validated_by(broken)(match) is False
+
+
+# Added with the privacy review of PR 2b.
+MORE_BIRTH_DATES = [
+    ("fecha de nacimiento: 1985-03-12", "1985-03-12"),
+    ("nacido el 12/03/85", "12/03/85"),
+    ("nació el 12 marzo 1985", "12 marzo 1985"),
+    ("F. nac.: 1 de Marzo del 1985", "1 de Marzo del 1985"),
+    ("Fec. Nac. 12 de marzo, 1985", "12 de marzo, 1985"),
+    ("date of birth: 12/03/1985", "12/03/1985"),
+    ("FNAC 12/03/1985", "12/03/1985"),
+]
+
+
+@pytest.mark.parametrize(("text", "value"), MORE_BIRTH_DATES, ids=[d[0] for d in MORE_BIRTH_DATES])
+def test_more_birth_date_forms_are_found(text: str, value: str) -> None:
+    assert _found(text, T.DATE_OF_BIRTH) == [value]

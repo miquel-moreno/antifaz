@@ -22,8 +22,6 @@ from antifaz.detect.validators import luhn
 _ASCII_CI = re.IGNORECASE | re.ASCII
 _START = r"(?<![0-9A-Za-z])"
 _END = r"(?![0-9A-Za-z])"
-_DIGIT_START = r"(?<![0-9A-Za-z])(?<![0-9][ .-])"  # not glued to a longer number
-_DIGIT_END = r"(?![0-9A-Za-z])(?![ .-][0-9])"
 
 
 def _keywords(words: str) -> re.Pattern[str]:
@@ -37,12 +35,15 @@ def _span(match: re.Match[str], entity_type: EntityType, layer: Layer, conf: Con
 
 # --- Email ------------------------------------------------------------------------------
 
+# Local part: the RFC 5322 "atext" characters plus Unicode letters (RFC 6531), so that
+# "Juan.Pérez@..." or "o'brien@..." are masked whole, not left half in clear.
+_LOCAL_CHAR = r"[\w.!#$%&'*+/=?^`{|}~-]"
 _EMAIL = re.compile(
-    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}+@"
+    rf"(?<!{_LOCAL_CHAR}){_LOCAL_CHAR}{{1,64}}+@"
     # Not possessive: the last label must be able to give back a sentence-ending period.
-    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){1,8}[A-Za-z]{2,24}"
-    r"(?![A-Za-z0-9-])",
-    re.ASCII,
+    r"(?:[^\W_](?:[\w-]{0,61}[^\W_])?\.){1,8}(?:[^\W\d_]{2,24}|xn--[a-z0-9-]{1,59})"
+    r"(?![\w-])",
+    re.IGNORECASE,
 )
 
 
@@ -66,37 +67,106 @@ def _ips(text: str) -> Iterator[Span]:
 
 # Business numbers (800, 900, 901, 902, 905) and premium rate (803, 806, 807; CNMC).
 _BUSINESS_PREFIXES = frozenset({"800", "803", "806", "807", "900", "901", "902", "905"})
-_PHONE = re.compile(
-    rf"{_DIGIT_START}(?<!\+)(?:(?:\+34|0034|\(\+34\))[ .-]?)?[6789](?:[ .-]?[0-9]){{8}}{_DIGIT_END}"
+# A run of digit groups with single separators, optionally after an international prefix.
+# Phones are then assembled group by group (_phones_in_run), so a phone next to another
+# number ("612345678 698765432", "CP 08001 612345678") is still found.
+_PHONE_RUN = re.compile(
+    r"(?<![0-9A-Za-z+])(?P<prefix>(?:\+ ?34|0034|\(\+34\))[ .-]?)?[0-9](?:[ ./-]?[0-9])*+"
 )
+_DIGIT_GROUP = re.compile(r"[0-9]+")
 _PHONE_KEYWORDS = _keywords(r"tel|tel[eé]fono|m[oó]vil|llamar?|whatsapp")
 
 
-def _phones(text: str) -> Iterator[Span]:
-    for match in _PHONE.finditer(text):
-        national = re.sub(r"[^0-9]", "", match.group())[-9:]
-        if national[:3] in _BUSINESS_PREFIXES:
+def _phone_end(text: str, groups: list[tuple[int, int]], first: int) -> int | None:
+    """Index after the last group of a 9-digit phone starting at groups[first], if any.
+
+    The groups must be joined by the same separator ("600 123 456", "600.123.456").
+    """
+    total, separator = 0, None
+    for i in range(first, len(groups)):
+        if i > first:
+            gap = text[groups[i - 1][1] : groups[i][0]]
+            if separator is not None and gap != separator:
+                return None
+            separator = gap
+        total += groups[i][1] - groups[i][0]
+        if total == 9:
+            return i + 1
+        if total > 9:
+            return None
+    return None
+
+
+def _phones_in_run(text: str, run: re.Match[str]) -> Iterator[Span]:
+    body_start = run.start() + len(run["prefix"] or "")
+    groups = [m.span() for m in _DIGIT_GROUP.finditer(text, body_start, run.end())]
+    if run.end() < len(text) and text[run.end()].isascii() and text[run.end()].isalnum():
+        groups.pop()  # glued to a letter ("600123456B"): not a phone
+    i = 0
+    while i < len(groups):
+        start = groups[i][0]
+        glued = text[groups[i][0] : groups[i][1]]
+        if len(glued) == 11 and glued.startswith("34"):  # "34612345678" (e.g. wa.me links)
+            after: int | None = i + 1
+        else:
+            after = _phone_end(text, groups, i)
+        if after is None:
+            i += 1
             continue
-        context = has_context(text, match.start(), _PHONE_KEYWORDS)
-        confidence = Confidence.HIGH if context else Confidence.MEDIUM
-        yield _span(match, EntityType.PHONE, Layer.PATTERN, confidence)
+        end = groups[after - 1][1]
+        national = re.sub(r"[^0-9]", "", text[start:end])[-9:]
+        if national[0] in "6789" and national[:3] not in _BUSINESS_PREFIXES:
+            if i == 0 and run["prefix"]:
+                start = run.start()
+            context = has_context(text, start, _PHONE_KEYWORDS)
+            confidence = Confidence.HIGH if context else Confidence.MEDIUM
+            yield Span(start, end, EntityType.PHONE, Layer.PATTERN, confidence)
+            i = after
+        else:
+            i += 1
+
+
+def _phones(text: str) -> Iterator[Span]:
+    for run in _PHONE_RUN.finditer(text):
+        yield from _phones_in_run(text, run)
 
 
 # --- Payment card --------------------------------------------------------------------------
 
-_CARD_CANDIDATE = re.compile(rf"{_START}[0-9](?:[ -]?[0-9]){{12,18}}+")
+_CARD_CANDIDATE = re.compile(r"(?<![0-9A-Za-z])[0-9](?:[ .-]?[0-9]){12,18}+")
+_CARD_NEXT = re.compile(r"[0-9](?:[ .-]?[0-9]){12,18}+")
+
+
+def _inside_grouped_number(text: str, start: int) -> bool:
+    """True if a group of 3+ digits comes right before `start`, with one separator.
+
+    Then the candidate is probably the middle of a grouped number (e.g. the "345" of the
+    phone "612 345 678"), not the start of a card. A lone 1-2 digit number (a count, an
+    index: "serie 2 2223...") does not count.
+    """
+    if start < 2 or text[start - 1] not in " .-" or not text[start - 2].isdigit():
+        return False
+    digits = 0
+    i = start - 2
+    while i >= 0 and text[i].isdigit() and digits < 3:
+        digits += 1
+        i -= 1
+    return digits >= 3
 
 
 def is_card_prefix(digits: str) -> bool:
-    """Visa 4; Mastercard 51-55 and 2221-2720; Amex 34, 37; Discover 6011, 65, 644-649."""
-    first_two, first_four = int(digits[:2]), int(digits[:4])
+    """Visa 4; Mastercard 51-55, 2221-2720; Amex 34, 37; Discover 6011, 65, 644-649;
+    JCB 3528-3589; Diners 300-305, 36, 38; UnionPay 62."""
+    first_two, first_three, first_four = int(digits[:2]), int(digits[:3]), int(digits[:4])
     return (
         digits[0] == "4"
         or 51 <= first_two <= 55
         or 2221 <= first_four <= 2720
-        or first_two in (34, 37, 65)
+        or first_two in (34, 36, 37, 38, 62, 65)
         or first_four == 6011
-        or 644 <= int(digits[:3]) <= 649
+        or 644 <= first_three <= 649
+        or 3528 <= first_four <= 3589
+        or 300 <= first_three <= 305
     )
 
 
@@ -104,11 +174,13 @@ def _card_at(text: str, match: re.Match[str]) -> Span | None:
     """The longest valid card (13-19 digits) that starts where the candidate starts."""
     ends = [match.start() + i + 1 for i, char in enumerate(match.group()) if char.isdigit()]
     digits = "".join(char for char in match.group() if char.isdigit())
+    if not is_card_prefix(digits):
+        return None
     for length in range(min(19, len(ends)), 12, -1):
         end = ends[length - 1]
         if end < len(text) and text[end].isascii() and text[end].isalnum():
             continue
-        if is_card_prefix(digits) and luhn.is_valid(digits[:length]):
+        if luhn.is_valid(digits[:length]):
             return Span(
                 match.start(), end, EntityType.CREDIT_CARD, Layer.VALIDATOR, Confidence.HIGH
             )
@@ -119,10 +191,17 @@ def _cards(text: str) -> Iterator[Span]:
     # By hand, not with finditer: a candidate can run into the next card.
     position = 0
     while match := _CARD_CANDIDATE.search(text, position):
-        span = _card_at(text, match)
-        position = span.end if span else match.start() + 1
-        if span:
+        span = None if _inside_grouped_number(text, match.start()) else _card_at(text, match)
+        if span is None:
+            position = match.start() + 1
+            continue
+        while span is not None:  # cards one after the other, e.g. a list
             yield span
+            position = span.end
+            following = None
+            if span.end < len(text) and text[span.end] in " .-":
+                following = _CARD_NEXT.match(text, span.end + 1)
+            span = _card_at(text, following) if following else None
 
 
 # --- Values that need a keyword before them -----------------------------------------------
@@ -139,19 +218,32 @@ _MONTHS = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ]  # fmt: skip
-_NUMERIC_DATE = re.compile(r"(?<![0-9])([0-9]{1,2})([/.-])([0-9]{1,2})\2([0-9]{4})(?![0-9])")
-_WORD_DATE = re.compile(
-    rf"(?<![0-9])([0-9]{{1,2}}) de ({'|'.join(_MONTHS)}) de ([0-9]{{4}})(?![0-9])", re.IGNORECASE
+# 12/03/1985, 12-03-1985, 12.03.1985, 12/03/85 · 1985-03-12 · 12 de marzo de 1985, 12 marzo
+# 1985, 1 de marzo del 1985, 12 de marzo, 1985
+_NUMERIC_DATE = re.compile(
+    r"(?<![0-9])([0-9]{1,2})([/.-])([0-9]{1,2})\2([0-9]{4}|[0-9]{2})(?![0-9])"
 )
-_BIRTH_KEYWORDS = _keywords(r"nacid[oa]|nacimiento|f\. ?nac|fecha de nac|born|dob")
+_ISO_DATE = re.compile(r"(?<![0-9])([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?![0-9])")
+_WORD_DATE = re.compile(
+    rf"(?<![0-9])([0-9]{{1,2}}) (?:de )?({'|'.join(_MONTHS)})(?:,| de| del)? ([0-9]{{4}})(?![0-9])",
+    re.IGNORECASE,
+)
+_BIRTH_KEYWORDS = _keywords(
+    r"nacid[oa]|naci[oó]|nac[ií]|nacimiento|f\. ?nac|fecha de nac|fecha nac|fnac|fec\. ?nac"
+    r"|born|dob|d\.o\.b\.?|date of birth"
+)
 
 
 def _is_date(day: str, month: str, year: str) -> bool:
-    try:
-        date(int(year), int(month), int(day))
-    except ValueError:
-        return False
-    return True
+    """A real calendar date; a 2-digit year is valid if it is in the 1900s or the 2000s."""
+    years = [year] if len(year) == 4 else [f"19{year}", f"20{year}"]
+    for full_year in years:
+        try:
+            date(int(full_year), int(month), int(day))
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def _with_keyword(
@@ -175,6 +267,13 @@ def _birth_dates(text: str) -> Iterator[Span]:
         _BIRTH_KEYWORDS,
         EntityType.DATE_OF_BIRTH,
         lambda m: _is_date(m[1], m[3], m[4]),
+    )
+    yield from _with_keyword(
+        text,
+        _ISO_DATE,
+        _BIRTH_KEYWORDS,
+        EntityType.DATE_OF_BIRTH,
+        lambda m: _is_date(m[3], m[2], m[1]),
     )
     yield from _with_keyword(
         text,
@@ -236,18 +335,34 @@ def _validated_by(is_valid: Callable[[str], bool]) -> Callable[[re.Match[str]], 
 
 # --- Spanish-style address -------------------------------------------------------------------
 
-_STREET_TYPE = (
-    r"(?i:C/|Calle|Avda\.|Avenida|Av\.|Pl\.|Plaza|Paseo|Pº|Ctra\.|Carretera|Camino|Ronda"
-    r"|Traves[íi]a)"
+# Street types that cannot be anything else: the name may be written in lower case.
+_CLEAR_STREET_TYPE = (
+    r"(?i:C/|Calle|Carrer|Avda\.?|Avenida|Avinguda|Av\.?|Pl\.|Plaza|Pla[çc]a|Pza\.?|Plza\.?"
+    r"|Pg\.|Pº|Passeig|Rambla|Ctra\.?|R[úu]a|Glorieta|Traves[íi]a|Travessera|Urb\.|Urbanizaci[óo]n)"
 )
-_NAME_WORD = r"[A-ZÁÉÍÓÚÑÜÇÀÈÒÏ][^\W\d_]{0,30}"
-_CONNECTOR = r"(?:de|del|la|las|los|el|y|i|d')"
-_NAME = rf"(?:{_CONNECTOR} ){{0,3}}{_NAME_WORD}(?: (?:{_CONNECTOR} ){{0,3}}{_NAME_WORD}){{0,5}}"
+# Street types that are also ordinary words ("el camino es largo") or initials ("C."): the
+# name must start with a capital letter.
+_AMBIGUOUS_STREET_TYPE = (
+    r"(?:(?i:Paseo|Camino|Ronda|Carretera|V[íi]a|Callej[óo]n|Pol[íi]gono)"
+    r"|C\.)"
+)
+# \u2019 is the typographic apostrophe (as in d\u2019Aragó), written as an escape so it is visible.
+_ANY_WORD = r"(?:d['\u2019])?[^\W\d_][\w'\u2019.-]{0,30}"
+_CAPITAL_WORD = r"(?:d['\u2019])?[A-ZÁÉÍÓÚÑÜÇÀÈÒÏ][\w'\u2019.-]{0,30}"
+_CONNECTOR = r"(?:de|del|la|las|los|el|y|i|do|da|dos|das)"
+_ANY_NAME = rf"{_ANY_WORD}(?: {_ANY_WORD}){{0,5}}"
+_CAPITAL_NAME = (
+    rf"(?:{_CONNECTOR} ){{0,3}}{_CAPITAL_WORD}(?: (?:{_CONNECTOR} ){{0,3}}{_CAPITAL_WORD}){{0,5}}"
+)
+_NUMBER = r"(?:(?:n\.?[ºo°]\.?|n[úu]m\.?|n[úu]mero) ?)?[0-9]{1,4}[A-Za-z]?(?![^\W_])|s/n(?![^\W_])"
+_FLOOR = (
+    r"(?:,? ?-? ?[0-9]{1,2}\.?[ºª](?: ?(?:[A-Z]|[0-9]{1,2}\.?[ºª]?)(?![^\W_]))?)?"
+    r"(?:,? piso [0-9]{1,2}(?:,? puerta [0-9A-Za-z]{1,2}(?![^\W_]))?)?"
+)
 _POSTCODE = r"(?:0[1-9]|[1-4][0-9]|5[0-2])[0-9]{3}(?![0-9])"
 _ADDRESS = re.compile(
-    rf"(?<![^\W_]){_STREET_TYPE} ?{_NAME},? (?:nº\.? ?)?[0-9]{{1,4}}[A-Za-z]?(?![^\W_])"
-    rf"(?:,? [0-9]{{1,2}}[ºª](?: ?(?:[A-Z]|[0-9]{{1,2}}[ºª]?)(?![^\W_]))?)?"
-    rf"(?P<postcode>,? {_POSTCODE})?"
+    rf"(?<![^\W_])(?:{_CLEAR_STREET_TYPE} ?{_ANY_NAME}|{_AMBIGUOUS_STREET_TYPE} ?{_CAPITAL_NAME})"
+    rf",? (?:{_NUMBER}){_FLOOR}(?P<postcode>,? {_POSTCODE})?"
 )
 
 
