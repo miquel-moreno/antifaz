@@ -1,6 +1,6 @@
 # ADR-0012 · Escape de `[[` y qué es "el mismo valor"
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-30)
 - **Fecha:** 2026-09-30
 - **Concreta:** el escape del ADR-0002 y la numeración del ADR-0004
 
