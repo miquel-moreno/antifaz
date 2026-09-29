@@ -16,6 +16,9 @@ dependencies = [
     "python-stdnum>=2.2,<3",
 ]
 
+[project.scripts]
+antifaz = "antifaz.cli:main"
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.160",

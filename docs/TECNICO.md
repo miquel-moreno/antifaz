@@ -101,6 +101,31 @@ restore(respuesta_del_modelo, result.vault)
 - Cada respuesta se restaura solo con la tabla de **su** petición: todas numeran desde 1, así que con la tabla de otra petición `[[ES_DNI_1]]` daría el DNI de otra persona. La pasarela lo garantiza en el issue 5.
 - El restaurador solo reconoce marcadores en ASCII: parecidos como `[[ıp_1]]` se dejan tal cual.
 
+## Guardia de salida y CLI (issue 4, PR 4b)
+
+```python
+from antifaz.guard import check
+
+check(cuerpo_final_en_bytes, result.vault)  # lanza EgressBlocked si ve un valor oculto
+```
+
+- Revisa el texto crudo y, si es JSON, cada cadena y cada clave decodificadas (así ve los escapes `1...`). Bytes que no son UTF-8 válido, o un JSON demasiado profundo para revisarlo: bloquea.
+- Normaliza con NFC y `casefold()`. Para identificadores y teléfonos compara también sin espacios, puntos, guiones ni barras (`12.345.678-Z` = `12345678Z`), con un mínimo de 6 caracteres; email, IP y dirección no se compactan.
+- Límites alfanuméricos: no hay letra ni dígito justo antes ni después, así que `X12345678ZY` no cuenta y "Ana" no salta en "semana".
+- **Un falso positivo bloquea**: la guardia falla cerrada a propósito. No tiene opción para desactivarla.
+- `EgressBlocked` lleva un mensaje fijo, sin valores y sin `__context__`.
+- Invariante 2 (`tests/property/test_egress_invariant.py`): **sin llamar a la guardia**, un proveedor falso que guarda los bytes no recibe ningún valor oculto, ni tal cual, ni normalizado ni compactado, con `ensure_ascii` activado y desactivado.
+
+CLI (`uv run antifaz ...`):
+
+```bash
+antifaz scan fichero.txt   # una línea por detección: TIPO inicio fin (nunca el valor)
+antifaz mask fichero.txt   # el texto con marcadores (nunca la tabla)
+antifaz mask -             # lee de stdin
+```
+
+Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
