@@ -58,7 +58,13 @@ def _detect(text: str, detector: Detector) -> list[Span]:
 def _well_formed(spans: list[Span], length: int) -> bool:
     position = 0
     for span in spans:
-        if not isinstance(span, Span) or not position <= span.start < span.end <= length:
+        if (
+            not isinstance(span, Span)
+            # plain ints only: a float or bool would slice wrongly or fail later
+            or type(span.start) is not int
+            or type(span.end) is not int
+            or not position <= span.start < span.end <= length
+        ):
             return False
         position = span.end
     return True
@@ -82,6 +88,7 @@ def mask(
             if policy.action_for(span.type) is Action.ALLOW:
                 continue
             out.append(escape(text[clear_start : span.start]))
+            # _add is package-internal API: the Vault exposes no public way to read values.
             out.append(f"[[{vault._add(span.type, text[span.start : span.end])}]]")
             hidden.setdefault(span.type)
             clear_start = span.end

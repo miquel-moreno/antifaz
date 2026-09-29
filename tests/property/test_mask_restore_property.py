@@ -8,10 +8,11 @@
 import re
 from collections.abc import Sequence
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from antifaz import mask, restore
+from antifaz import DetectorFailed, mask, restore
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
 
 # Synthetic values with valid check digits: never real data.
@@ -24,7 +25,11 @@ texts = st.lists(pieces, max_size=12).map(" ".join) | st.lists(pieces, max_size=
 any_text = texts | st.text(max_size=80)
 
 PLACEHOLDER = re.compile(r"\[\[([A-Z]+(?:_[A-Z]+)*)_([0-9]+)\]\]")
-UNESCAPE = re.compile(r"(\[\[+)!")
+# Independent oracle of ADR-0012 (ASCII only): escape run, or a placeholder-shaped token.
+ANY_PLACEHOLDER = re.compile(
+    r"(?P<esc>\[\[+)!|\[\[[ \t]*(?P<token>[A-Za-z]+(?:_[A-Za-z]+)*_[0-9]+)[ \t]*\]\]",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 @settings(max_examples=500, deadline=None)
@@ -83,8 +88,52 @@ def test_same_value_same_placeholder_and_numbering_without_gaps(conversation: li
 @settings(max_examples=300, deadline=None)
 @given(text=texts, answer=texts)
 def test_placeholders_of_another_request_are_left_unchanged(text: str, answer: str) -> None:
-    other = mask(text)
-    empty = mask("no personal data here")
-    # With an empty table, restore only undoes escapes: every placeholder stays verbatim.
-    for candidate in (answer, other.text):
-        assert restore(candidate, empty.vault) == UNESCAPE.sub(r"\1", candidate)
+    # A non-empty table from another request: ES_DNI_1, ES_DNI_2 and EMAIL_1 only.
+    other = mask("12345678Z 87654321X ana@example.com")
+    assert other.text == "[[ES_DNI_1]] [[ES_DNI_2]] [[EMAIL_1]]"
+    known = {"ES_DNI_1", "ES_DNI_2", "EMAIL_1"}
+    mine = mask(text)
+    for candidate in (answer, mine.text):
+        # Remove the escapes and every placeholder the table knows: what is left is untouched.
+        restored = restore(candidate, other.vault)
+        expected = ANY_PLACEHOLDER.sub(
+            lambda m: (
+                {"ES_DNI_1": "12345678Z", "ES_DNI_2": "87654321X", "EMAIL_1": "ana@example.com"}[
+                    m.group("token").upper()
+                ]
+                if m.group("token") and m.group("token").upper() in known
+                else (m.group("esc") or m.group(0))
+            ),
+            candidate,
+        )
+        assert restored == expected
+
+
+malformed_spans = st.one_of(
+    # out of range
+    st.integers(0, 5).map(
+        lambda s: [Span(s, 50, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH)]
+    ),
+    # empty or reversed
+    st.integers(0, 6).flatmap(
+        lambda s: st.integers(0, s).map(
+            lambda e: [Span(s, e, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH)]
+        )
+    ),
+    # overlapping or unordered pair
+    st.tuples(st.integers(0, 3), st.integers(0, 3)).map(
+        lambda p: [
+            Span(max(p), max(p) + 2, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH),
+            Span(min(p), min(p) + 3, EntityType.EMAIL, Layer.PATTERN, Confidence.HIGH),
+        ]
+    ),
+    # negative start
+    st.just([Span(-1, 2, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH)]),
+)
+
+
+@settings(max_examples=300, deadline=None)
+@given(spans=malformed_spans)
+def test_malformed_spans_always_block(spans: list[Span]) -> None:
+    with pytest.raises(DetectorFailed):
+        mask("abcdef", detector=lambda _: spans)

@@ -86,17 +86,41 @@ def test_vault_of_another_request_restores_nothing() -> None:
     assert restore(other.text, mine.vault) == other.text == "[[EMAIL_1]]"
 
 
-def test_restored_values_are_not_rescanned() -> None:
-    result = mask(
-        "x", detector=lambda t: [Span(0, 1, EntityType.EMAIL, Layer.PATTERN, Confidence.HIGH)]
-    )
-    # The masked value itself looks like a placeholder: it comes back verbatim, once.
-    fake = mask(
-        "[[EMAIL_1]]",
-        detector=lambda t: [Span(0, len(t), EntityType.EMAIL, Layer.PATTERN, Confidence.HIGH)],
-    )
-    assert restore(fake.text, fake.vault) == "[[EMAIL_1]]"
-    assert restore("[[EMAIL_1]]", result.vault) == "x"
+def _email(start: int, end: int) -> Span:
+    return Span(start, end, EntityType.EMAIL, Layer.PATTERN, Confidence.HIGH)
+
+
+def test_a_restored_value_that_looks_like_a_placeholder_is_not_restored_again() -> None:
+    # EMAIL_1 holds the text "[[EMAIL_2]]" and EMAIL_2 holds "b".
+    result = mask("[[EMAIL_2]] b", detector=lambda _: [_email(0, 11), _email(12, 13)])
+    assert result.text == "[[EMAIL_1]] [[EMAIL_2]]"
+    assert restore("[[EMAIL_1]]", result.vault) == "[[EMAIL_2]]"
+
+
+def test_a_masked_value_containing_brackets_round_trips() -> None:
+    text = "[[EMAIL_1]]"
+    result = mask(text, detector=lambda t: [_email(0, len(t))])
+    assert restore(result.text, result.vault) == text
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["[[\u0131p_1]]", "[[es_dn\u0131_1]]", "[[e\u017f_dni_1]]", "[[\u212aey_1]]"],
+)
+def test_non_ascii_look_alikes_of_a_placeholder_stay_unchanged(answer: str) -> None:
+    result = mask(f"{SENTINEL_DNI} 192.168.1.10")
+    assert result.text == "[[ES_DNI_1]] [[IP_1]]"
+    assert restore(answer, result.vault) == answer
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(0.0, 3), (0, 3.0), (False, 3), (0, True)],
+)
+def test_span_positions_that_are_not_plain_ints_block(start: object, end: object) -> None:
+    span = Span(start, end, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH)  # type: ignore[arg-type]
+    with pytest.raises(DetectorFailed):
+        mask("abcdef", detector=lambda _: [span])
 
 
 def _failing_detector(text: str) -> Sequence[Span]:

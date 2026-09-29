@@ -97,7 +97,9 @@ restore(respuesta_del_modelo, result.vault)
 - Los `[[` que ya escribe el usuario se escapan con un `!` detrás; `restore()` lo quita en una sola pasada y solo restaura marcadores de **esta** petición. Hypothesis comprueba `restore(mask(x)) == x`.
 - Política por defecto (`DEFAULT_POLICY`, versión `builtin-1`): enmascara todos los tipos salvo el CIF de empresa.
 - Si el detector falla o devuelve spans mal formados: `DetectorFailed`, con un mensaje fijo sin el texto. Nunca sale texto en claro.
-- `Vault` no se puede imprimir (solo `Vault(entries=N)`), recorrer, serializar ni copiar.
+- `Vault` no se puede imprimir (solo `Vault(entries=N)`), recorrer, serializar ni copiar. Protege contra fugas **accidentales** (logs, `repr`, pickle), no contra código del mismo proceso que lea sus atributos privados.
+- Cada respuesta se restaura solo con la tabla de **su** petición: todas numeran desde 1, así que con la tabla de otra petición `[[ES_DNI_1]]` daría el DNI de otra persona. La pasarela lo garantiza en el issue 5.
+- El restaurador solo reconoce marcadores en ASCII: parecidos como `[[ıp_1]]` se dejan tal cual.
 
 ## Decisiones técnicas del issue 1
 

@@ -13,7 +13,9 @@ from antifaz.vault import Vault
 
 _ESCAPE_OR_PLACEHOLDER = re.compile(
     r"(?P<esc>\[\[+)!|\[\[[ \t]*(?P<token>[A-Za-z]+(?:_[A-Za-z]+)*_[0-9]+)[ \t]*\]\]",
-    re.IGNORECASE,
+    # ASCII: without it, IGNORECASE lets look-alikes such as dotless i, long s or the Kelvin sign
+    # match [A-Za-z], and .upper() would turn them into a real token.
+    re.IGNORECASE | re.ASCII,
 )
 
 
@@ -24,6 +26,7 @@ def restore(text: str, vault: Vault) -> str:
         brackets = match.group("esc")
         if brackets is not None:
             return brackets
+        # _lookup is package-internal API: only mask/, restore/ and guard/ may call it.
         value = vault._lookup(match.group("token").upper())
         return match.group(0) if value is None else value
 
