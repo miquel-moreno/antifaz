@@ -13,3 +13,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0006](0006-campos-desconocidos.md) | Campos desconocidos y adjuntos | Aceptada |
 | [0007](0007-licencia.md) | Licencia Apache-2.0 | Aceptada |
 | [0008](0008-expresiones-regulares.md) | Expresiones regulares y diccionarios | Aceptada |
+| [0009](0009-spans-y-criterio-de-validadores.md) | Spans y criterio de los validadores | Aceptada |

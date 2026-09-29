@@ -32,6 +32,31 @@ Una pieza por responsabilidad, cada una en su paquete de `src/antifaz/`:
 
 El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decisiones (aceptadas) están en [`docs/adr/`](adr/README.md) y las amenazas en [`docs/security/threat-model.md`](security/threat-model.md).
 
+## Detector: identificadores con dígito de control (issue 2, PR 2a)
+
+`antifaz.detect.scan(text)` devuelve la lista de spans `(start, end, type, layer, confidence)`: dónde hay un dato y de qué tipo, **nunca el valor** (ADR-0009).
+
+| Tipo | Validación | Fuente |
+|---|---|---|
+| `ES_DNI` | 8 cifras + letra `TRWAGMYFPDXBNJZSQVHLCKE[n mod 23]` | Ministerio del Interior |
+| `ES_NIE` | X/Y/Z → 0/1/2 + regla del DNI | Ministerio del Interior |
+| `ES_NIF` (K/L/M) | 7 cifras + letra del DNI | RD 1065/2007 (sin algoritmo publicado; como python-stdnum) |
+| `ES_CIF` | Luhn sobre las 7 cifras, como dígito o como letra `JABCDEFGHI` (ambas formas) | Orden EHA/451/2008 (sin algoritmo); ADR-0009 |
+| `ES_NSS` | mod 97; si el número < 10^7, `(número + provincia·10^7) mod 97` | Sin fuente oficial de la TGSS; vectores en `tests/data/nss_vectors.md` |
+| `ES_CCC` | Dos dígitos mod 11, pesos 1, 2, 4, 8, 5, 10, 9, 7, 3, 6 | AEB (2001) |
+| `IBAN` | ISO 13616 mod 97 + estructura del país; los ES exigen además un CCC válido | Registro IBAN (vía python-stdnum) |
+| `IT_CODICE_FISCALE`, `EU_VAT` | python-stdnum | — |
+
+**Invariante 10:** en `tests/property/`, cada validador español se compara con python-stdnum en 5.000 casos generados (la mitad con el control correcto calculado por stdnum). El NSS, que stdnum no tiene, se prueba con vectores documentados y con la propiedad "cambiar cualquier cifra lo invalida".
+
+**En el texto:** cada patrón solo propone candidatos; un span se devuelve si su validador lo acepta. Los patrones siguen el ADR-0008 (repeticiones acotadas, cuantificadores posesivos, límites que impiden encontrar un DNI dentro de una palabra más larga) y hay pruebas con textos maliciosos de 50.000 caracteres. El IBAN se corta a la longitud de su país, sacada del registro IBAN.
+
+**Limitaciones conocidas:**
+- Cifras Unicode (de ancho completo, árabes…) no se detectan todavía: haría falta normalizar el texto conservando las posiciones (issue aparte).
+- Controles débiles implican falsos positivos: NSS 1/97, CCC 1/121, Luhn 1/10. Es un fallo seguro (se enmascara de más).
+- "CCC" aquí es la cuenta bancaria, no el código de cuenta de cotización de la Seguridad Social.
+- Faker genera NSS con otra fórmula cuando el número empieza por 0: no sirve de referencia (se tendrá en cuenta en el benchmark).
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
@@ -50,4 +75,4 @@ El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decision
 
 ## Limitaciones
 
-- Todavía no detecta ni enmascara nada: eso empieza en el issue 2.
+- Detecta identificadores con dígito de control, pero todavía no enmascara nada: eso llega en el issue 4.
