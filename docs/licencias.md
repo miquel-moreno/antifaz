@@ -13,6 +13,7 @@ En lo que se distribuye (la librería y la imagen) **no entra nada no comercial 
 | Paquete | Licencia | Por qué se acepta |
 |---|---|---|
 | certifi | MPL-2.0 | Certificados raíz que usa httpx para HTTPS. Se usa sin modificar; MPL solo obliga a publicar cambios en sus propios archivos. |
+| python-stdnum | LGPL-2.1-or-later | Valida los identificadores de la UE y sirve de oráculo en los tests de DNI, NIE, CIF, CCC e IBAN (ADR-0005). Se usa sin modificar, como dependencia instalada aparte. |
 
 ## Modelos y datos
 

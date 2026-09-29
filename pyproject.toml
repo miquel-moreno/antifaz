@@ -13,10 +13,12 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "httpx>=0.28",
+    "python-stdnum>=2.2,<3",
 ]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.160",
     "mypy>=1.13",
     "pre-commit>=4.0",
     "pytest>=8.3",

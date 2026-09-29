@@ -1,4 +1,6 @@
-"""Require >= 90 % line coverage in the privacy pieces (ANTIFAZ spec 5.2).
+"""Require >= 90 % line coverage in the privacy pieces and 95 % in the validators.
+
+ANTIFAZ spec 5.2 and issue 2.
 
 Reads coverage.json (pytest --cov-report=json). Pieces without code yet are skipped.
 
@@ -10,8 +12,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PRIVACY_PIECES = ("detect", "vault", "mask", "guard", "restore")
-MINIMUM = 90.0
+# piece (path under src/antifaz/) -> minimum line coverage in %
+MINIMUMS = {
+    "detect": 90.0,
+    "detect/validators": 95.0,
+    "vault": 90.0,
+    "mask": 90.0,
+    "guard": 90.0,
+    "restore": 90.0,
+}
 
 
 def piece_coverage(report: dict[str, object], piece: str) -> tuple[int, int]:
@@ -31,15 +40,15 @@ def piece_coverage(report: dict[str, object], piece: str) -> tuple[int, int]:
 
 def check(report: dict[str, object]) -> list[str]:
     problems = []
-    for piece in PRIVACY_PIECES:
+    for piece, minimum in MINIMUMS.items():
         covered, statements = piece_coverage(report, piece)
         if statements == 0:
-            print(f"{piece:<8} no code yet")
+            print(f"{piece:<18} no code yet")
             continue
         percent = 100 * covered / statements
-        print(f"{piece:<8} {percent:5.1f} % ({covered}/{statements} lines)")
-        if percent < MINIMUM:
-            problems.append(f"{piece}: {percent:.1f} % < {MINIMUM:.0f} %")
+        print(f"{piece:<18} {percent:5.1f} % ({covered}/{statements} lines, min {minimum:.0f} %)")
+        if percent < minimum:
+            problems.append(f"{piece}: {percent:.1f} % < {minimum:.0f} %")
     return problems
 
 

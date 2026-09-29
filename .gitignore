@@ -32,3 +32,6 @@ Thumbs.db
 
 # Claude Code: personal settings stay local (the shared ones in .claude/ are committed)
 .claude/settings.local.json
+
+# Hypothesis example database (synthetic identifiers, local only)
+.hypothesis/

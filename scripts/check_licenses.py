@@ -85,8 +85,23 @@ def runtime_dependencies() -> list[tuple[str, bool]]:
     return sorted(found.items())
 
 
+def documented_packages(markdown: str) -> set[str]:
+    """Package names in the first column of the tables of docs/licencias.md."""
+    lines = [line.strip() for line in markdown.splitlines()]
+    names = set()
+    for i, line in enumerate(lines):
+        if not line.startswith("|"):
+            continue
+        is_separator = set(line) <= set("|-: ")
+        is_header = i + 1 < len(lines) and lines[i + 1].startswith("|-")
+        if not is_separator and not is_header:
+            names.add(line.strip("|").split("|")[0].strip().lower())
+    return names
+
+
 def main() -> int:
-    documented = LICENSES_DOC.read_text(encoding="utf-8").lower() if LICENSES_DOC.exists() else ""
+    text = LICENSES_DOC.read_text(encoding="utf-8") if LICENSES_DOC.exists() else ""
+    documented = documented_packages(text)
     problems = []
     for name, platform_specific in runtime_dependencies():
         try:

@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 ## [Unreleased]
 
 ### Added
+- Detector (issue 2, part 1): check-digit validators for DNI, NIE, NIF K/L/M, CIF, NSS, CCC and IBAN, plus Italian codice fiscale and EU VAT via python-stdnum; `scan(text)` returns non-overlapping spans without the value (ADR-0009). Invariant 10: the DNI, NIE, NIF K/L/M, CIF, CCC and Spanish IBAN validators agree with python-stdnum on 5,000 generated cases; the NSS, which stdnum lacks, is checked against documented vectors.
 - Project scaffold with one package per piece of the gateway (detect, policy, vault, mask, guard, providers, restore, audit, web, cli), `GET /healthz` and validation errors that never echo the request body.
 - Architecture decision records 0001-0008 (accepted), threat model, `SECURITY.md`, contributing guide and code of conduct.
 - CI: ruff, mypy --strict, tests with coverage (90 % required in the privacy pieces), gitleaks, `uv audit`, license check and CodeQL, with actions pinned by commit SHA. Dependabot for dependencies and actions.
