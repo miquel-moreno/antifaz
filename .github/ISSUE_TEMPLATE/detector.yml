@@ -1,0 +1,19 @@
+name: Missed or wrong detection
+description: A piece of personal data that Antifaz misses, or text it flags by mistake
+labels: [detection]
+body:
+  - type: markdown
+    attributes:
+      value: Use invented data only. For identifiers, generate a valid one with its algorithm.
+  - type: input
+    id: type
+    attributes:
+      label: Type of data (e.g. ES_NIE, IBAN, address)
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example text (invented) and what Antifaz did
+    validations:
+      required: true
