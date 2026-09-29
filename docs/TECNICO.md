@@ -47,12 +47,13 @@ El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decision
 | `IBAN` | ISO 13616 mod 97 + estructura del país; los ES exigen además un CCC válido | Registro IBAN (vía python-stdnum) |
 | `IT_CODICE_FISCALE`, `EU_VAT` | python-stdnum | — |
 
-**Invariante 10:** en `tests/property/`, cada validador español se compara con python-stdnum en 5.000 casos generados (la mitad con el control correcto calculado por stdnum). El NSS, que stdnum no tiene, se prueba con vectores documentados y con la propiedad "cambiar cualquier cifra lo invalida".
+**Invariante 10:** en `tests/property/`, cada validador español se compara con python-stdnum en 5.000 casos generados (una parte con el control correcto calculado por stdnum, para probar también el lado "válido"). El NSS, que stdnum no tiene, se prueba con vectores documentados y con la propiedad "cambiar cualquier cifra lo invalida".
 
-**En el texto:** cada patrón solo propone candidatos; un span se devuelve si su validador lo acepta. Los patrones siguen el ADR-0008 (repeticiones acotadas, cuantificadores posesivos, límites que impiden encontrar un DNI dentro de una palabra más larga) y hay pruebas con textos maliciosos de 50.000 caracteres. El IBAN se corta a la longitud de su país, sacada del registro IBAN.
+**En el texto:** cada patrón solo propone candidatos; un span se devuelve si su validador lo acepta. Los patrones siguen el ADR-0008 (repeticiones acotadas, cuantificadores posesivos, límites que impiden encontrar un DNI dentro de una palabra más larga) y hay pruebas con textos maliciosos de 50.000 caracteres. El IBAN se corta a la longitud de su país, sacada del registro IBAN, y se busca avanzando carácter a carácter tras un candidato falso, para que ningún candidato tape a otro IBAN. Se aceptan mayúsculas y minúsculas y los separadores habituales (espacio, punto, guion; barra en el NSS). La resolución de solapamientos es O(n log n): un texto con 20.000 DNI se resuelve en menos de 2 s.
 
 **Limitaciones conocidas:**
-- Cifras Unicode (de ancho completo, árabes…) no se detectan todavía: haría falta normalizar el texto conservando las posiciones (issue aparte).
+- Cifras Unicode (de ancho completo, árabes…) y separadores raros (tabulador, espacio duro NBSP, espacio de ancho cero) no se detectan todavía: haría falta normalizar el texto conservando las posiciones (issue aparte).
+- Las tarjetas (`CREDIT_CARD`) tienen validador (Luhn) pero todavía no se buscan en el texto: llegan con los patrones (PR 2b), igual que email, teléfono, IP, pasaporte, matrícula, dirección y fecha de nacimiento.
 - Controles débiles implican falsos positivos: NSS 1/97, CCC 1/121, Luhn 1/10. Es un fallo seguro (se enmascara de más).
 - "CCC" aquí es la cuenta bancaria, no el código de cuenta de cotización de la Seguridad Social.
 - Faker genera NSS con otra fórmula cuando el número empieza por 0: no sirve de referencia (se tendrá en cuenta en el benchmark).

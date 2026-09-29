@@ -1,5 +1,6 @@
 """Overlap resolution: validator beats pattern, then longer, then earlier, then type order."""
 
+from bisect import bisect_left
 from collections.abc import Iterable
 
 from antifaz.detect.types import EntityType, Layer, Span
@@ -18,14 +19,21 @@ def _priority(span: Span) -> tuple[int, int, int, int, str]:
     )
 
 
-def _overlaps(a: Span, b: Span) -> bool:
-    return a.start < b.end and b.start < a.end
-
-
 def resolve(spans: Iterable[Span]) -> list[Span]:
-    """Keep the best non-overlapping spans, sorted by start. Spans that touch both stay."""
+    """Keep the best non-overlapping spans, sorted by start. Spans that touch both stay.
+
+    Kept spans never overlap each other, so they stay sorted by start and a candidate only
+    needs checking against its two neighbours: O(n log n) even for a huge prompt full of
+    identifiers (a quadratic check was a way to block the gateway).
+    """
+    starts: list[int] = []
     kept: list[Span] = []
     for candidate in sorted(set(spans), key=_priority):
-        if not any(_overlaps(candidate, span) for span in kept):
-            kept.append(candidate)
-    return sorted(kept, key=lambda span: (span.start, span.end))
+        i = bisect_left(starts, candidate.start)
+        if i > 0 and kept[i - 1].end > candidate.start:
+            continue
+        if i < len(kept) and kept[i].start < candidate.end:
+            continue
+        starts.insert(i, candidate.start)
+        kept.insert(i, candidate)
+    return kept

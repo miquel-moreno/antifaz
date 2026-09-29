@@ -12,6 +12,8 @@ from tests.conftest import SENTINEL_DNI
 
 T = EntityType
 
+# B64717838, RCCMNL83S18D969H and FR61954506077 are the examples in python-stdnum's own
+# documentation; the rest are invented or published test vectors (AEB, intervia).
 CASES = [
     ("Mi DNI es 12345678Z.", "12345678Z", T.ES_DNI),
     ("DNI: 12345678-Z, gracias", "12345678-Z", T.ES_DNI),
@@ -133,3 +135,69 @@ def test_scan_of_long_adversarial_input_is_fast(text: str) -> None:
 def test_a_truncated_iban_is_not_reported() -> None:
     # Long enough to look like an IBAN, shorter than the 24 characters of a Spanish one.
     assert scan("IBAN ES07 0012 0345 0300 00") == []
+
+
+# Found by the privacy review of PR 2a: common real-world formats that must not slip through.
+MORE_FORMATS = [
+    ("DNI 12345678 Z", "12345678 Z", T.ES_DNI),
+    ("DNI 12.345.678 Z", "12.345.678 Z", T.ES_DNI),
+    ("dni 12345678z", "12345678z", T.ES_DNI),
+    ("NIE X 2482300 W", "X 2482300 W", T.ES_NIE),
+    ("NIE X-2.482.300-W", "X-2.482.300-W", T.ES_NIE),
+    ("cif b64717838", "b64717838", T.ES_CIF),
+    ("CIF B 64717838", "B 64717838", T.ES_CIF),
+    ("CIF B-64.717.838", "B-64.717.838", T.ES_CIF),
+    ("iban es07 0012 0345 03 0000067890", "es07 0012 0345 03 0000067890", T.IBAN),
+    ("IBAN ES07-0012-0345-0300-0006-7890", "ES07-0012-0345-0300-0006-7890", T.IBAN),
+    ("NSS 28/12345678-40", "28/12345678-40", T.ES_NSS),
+    ("NSS 28 1234567840", "28 1234567840", T.ES_NSS),
+    ("cuenta 0012 0345 0300 0006 7890", "0012 0345 0300 0006 7890", T.ES_CCC),
+    ("cuenta 0012-0345 03-0000067890", "0012-0345 03-0000067890", T.ES_CCC),
+    ("cf rccmnl83s18d969h", "rccmnl83s18d969h", T.IT_CODICE_FISCALE),
+    ("VAT fr61954506077", "fr61954506077", T.EU_VAT),
+    ("VAT FR 61954506077", "FR 61954506077", T.EU_VAT),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "value", "entity_type"), MORE_FORMATS, ids=[c[1] for c in MORE_FORMATS]
+)
+def test_scan_finds_other_common_formats(text: str, value: str, entity_type: EntityType) -> None:
+    spans = scan(text)
+    assert [(text[s.start : s.end], s.type) for s in spans] == [(value, entity_type)]
+
+
+@pytest.mark.parametrize(
+    "one",
+    ["ES0700120345030000067890", "ES07 0012 0345 0300 0006 7890", "DE89 3704 0044 0532 0130 00"],
+)
+@pytest.mark.parametrize("count", [2, 3])
+def test_consecutive_ibans_are_all_found(one: str, count: int) -> None:
+    text = " ".join([one] * count)
+    spans = scan(text)
+    assert [text[s.start : s.end] for s in spans] == [one] * count
+
+
+# Found by the code review of PR 2a.
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        (
+            "GB29NWBK60161331926819 DE89370400440532013000",
+            ["GB29NWBK60161331926819", "DE89370400440532013000"],
+        ),
+        ("ref AB12 ES0700120345030000067890", ["ES0700120345030000067890"]),
+        ("CP08 ES07 0012 0345 03 0000067890", ["ES07 0012 0345 03 0000067890"]),
+    ],
+)
+def test_a_false_iban_start_does_not_hide_a_real_iban(text: str, values: list[str]) -> None:
+    assert [text[s.start : s.end] for s in scan(text)] == values
+
+
+def test_many_valid_identifiers_are_resolved_quickly() -> None:
+    # A large prompt full of valid DNIs must not be a way to block the gateway.
+    text = f"{SENTINEL_DNI} " * 20_000
+    started = time.perf_counter()
+    spans = scan(text)
+    assert time.perf_counter() - started < 2.0
+    assert len(spans) == 20_000

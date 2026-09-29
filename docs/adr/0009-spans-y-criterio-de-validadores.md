@@ -13,7 +13,7 @@ El detector también necesitaba un tipo común para decir "aquí hay un dato".
 
 ## Decisión
 
-- Los validadores aceptan lo mismo que python-stdnum: CIF con letra o dígito de control para cualquier letra de entidad válida; NIF K/L/M con 7 cifras y la letra del DNI.
+- Sobre el valor sin separadores (espacios, puntos, guiones y barras), los validadores aceptan lo mismo que python-stdnum: CIF con letra o dígito de control para cualquier letra de entidad válida; NIF K/L/M con 7 cifras y la letra del DNI.
 - `Span = (start, end, type, layer, confidence)`: inmutable y **sin el valor**. Quien necesite el texto lo recorta del original; así el dato no puede acabar en un `repr` ni en un log.
 - Solapamientos: validador antes que patrón; después el más largo; después el que empieza antes; y en un empate exacto, el orden de definición de `EntityType`.
 
