@@ -15,7 +15,8 @@ jobs:
     name: Analyze (${{ matrix.language }})
     # Code scanning on private repositories needs GitHub Advanced Security. It runs once
     # the repository is public; until then it is skipped instead of failing.
-    if: ${{ !github.event.repository.private }}
+    # Written as "== false" so that a missing value (e.g. on scheduled runs) also skips.
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

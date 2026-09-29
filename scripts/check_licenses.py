@@ -70,7 +70,7 @@ def license_texts(name: str) -> list[str]:
 def runtime_dependencies() -> list[tuple[str, bool]]:
     """(name, only on some platforms) of the locked runtime dependencies, from uv."""
     exported = subprocess.run(
-        ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"],  # noqa: S607
+        ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"],  # noqa: S607 - uv from PATH, fixed args
         cwd=ROOT,
         capture_output=True,
         text=True,

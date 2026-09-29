@@ -1,7 +1,9 @@
 """The CI helper scripts: license rule and privacy-coverage rule."""
 
+from pathlib import Path
+
 import pytest
-from scripts.check_coverage import check
+from scripts.check_coverage import check, main
 from scripts.check_licenses import Verdict, classify
 
 
@@ -14,6 +16,10 @@ from scripts.check_licenses import Verdict, classify
         (["PSF-2.0"], Verdict.OK),
         (["LGPL-2.1-or-later"], Verdict.WEAK_COPYLEFT),
         (["MPL-2.0"], Verdict.WEAK_COPYLEFT),
+        (
+            ["", "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"],
+            Verdict.WEAK_COPYLEFT,
+        ),
         (["GPL-3.0-only"], Verdict.FORBIDDEN),
         (["AGPL-3.0-or-later"], Verdict.FORBIDDEN),
         (
@@ -51,6 +57,14 @@ def test_privacy_pieces_need_ninety_percent() -> None:
     )
 
     assert check(report) == ["mask: 80.0 % < 90 %"]
+
+
+def test_paths_outside_the_package_do_not_count() -> None:
+    assert check(coverage_report({"detect/other_project.py": (0, 10)})) == []
+
+
+def test_a_missing_coverage_file_is_a_clear_failure(tmp_path: Path) -> None:
+    assert main(tmp_path / "coverage.json") == 1
 
 
 def test_pieces_without_code_are_skipped() -> None:

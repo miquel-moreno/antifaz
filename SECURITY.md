@@ -30,5 +30,5 @@ errors or metrics, or compromises the gateway itself (SSRF, key exposure, denial
 service).
 
 Out of scope: data that the detector does not find. No detector is perfect; the
-benchmark (`docs/benchmark.md`) says how much slips through. Better detection is very
+benchmark (`docs/benchmark.md`, from v0.1) says how much slips through. Better detection is very
 welcome as a normal issue or pull request.

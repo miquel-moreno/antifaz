@@ -20,7 +20,9 @@ def piece_coverage(report: dict[str, object], piece: str) -> tuple[int, int]:
     files = report.get("files", {})
     assert isinstance(files, dict)
     for path, data in files.items():
-        if Path(path).as_posix().split("src/antifaz/", 1)[-1].startswith(f"{piece}/"):
+        # coverage.json keeps the OS separator; on Linux, Path() would not convert "\\".
+        posix = path.replace("\\", "/")
+        if "src/antifaz/" in posix and posix.split("src/antifaz/", 1)[1].startswith(f"{piece}/"):
             summary = data["summary"]
             covered += int(summary["covered_lines"])
             statements += int(summary["num_statements"])
@@ -42,6 +44,9 @@ def check(report: dict[str, object]) -> list[str]:
 
 
 def main(path: Path = ROOT / "coverage.json") -> int:
+    if not path.exists():
+        print(f"{path.name} not found: run the tests with --cov-report=json first", file=sys.stderr)
+        return 1
     problems = check(json.loads(path.read_text(encoding="utf-8")))
     if problems:
         print("Privacy coverage too low:\n- " + "\n- ".join(problems), file=sys.stderr)

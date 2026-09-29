@@ -4,6 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+MAX_LOCATIONS = 10
+
 
 class AppError(Exception):
     """Base error. Subclasses set a status code and a stable error code."""
@@ -26,12 +28,25 @@ async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=error_body(exc.code, exc.message))
 
 
+def _safe_location(loc: tuple[object, ...]) -> str:
+    """Where the problem is, without anything the client wrote.
+
+    Only the source ("body", "query"...) and list indexes are kept. Every other part is
+    replaced by "*": a dict key sent by the client (e.g. {"12345678Z": 1}) is client data.
+    """
+    parts = [str(loc[0])] if loc else []
+    parts += [str(p) if isinstance(p, int) else "*" for p in loc[1:]]
+    return ".".join(parts)
+
+
 async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
     # FastAPI's default 422 echoes the received input, which may contain personal data.
-    # Only the location of each problem is returned, never the values.
-    if not isinstance(exc, RequestValidationError):  # pragma: no cover
+    # Only a sanitised location of each problem is returned, never values or keys.
+    if not isinstance(exc, RequestValidationError):  # pragma: no cover - registered only for it
         raise exc
-    fields = sorted({".".join(str(part) for part in e.get("loc", ())) for e in exc.errors()})
+    fields = sorted({_safe_location(tuple(e.get("loc", ()))) for e in exc.errors()})
+    if len(fields) > MAX_LOCATIONS:  # a body with thousands of errors must not grow the answer
+        fields = [*fields[:MAX_LOCATIONS], "..."]
     message = "invalid request: check " + ", ".join(fields) if fields else "invalid request"
     return JSONResponse(status_code=422, content=error_body("invalid_request", message))
 
