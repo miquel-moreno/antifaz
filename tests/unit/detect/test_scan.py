@@ -201,3 +201,21 @@ def test_many_valid_identifiers_are_resolved_quickly() -> None:
     spans = scan(text)
     assert time.perf_counter() - started < 2.0
     assert len(spans) == 20_000
+
+
+# Found by the synthetic benchmark: an accented letter before a value is part of a word.
+@pytest.mark.parametrize(
+    ("text", "value", "entity_type"),
+    [
+        ("El meu DNI és 16257107-V i visc", "16257107-V", T.ES_DNI),
+        ("El meu DNI és 41.327.016-H", "41.327.016-H", T.ES_DNI),
+    ],
+)
+def test_an_accented_word_before_a_value_does_not_start_another_value(
+    text: str, value: str, entity_type: EntityType
+) -> None:
+    assert [(text[s.start : s.end], s.type) for s in scan(text)] == [(value, entity_type)]
+
+
+def test_a_value_glued_to_an_accented_letter_is_not_reported() -> None:
+    assert scan("cafés12345678Z") == []
