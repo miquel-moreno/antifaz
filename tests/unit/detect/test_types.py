@@ -46,6 +46,16 @@ def test_entity_types_cover_the_identifiers_of_this_stage() -> None:
         "IT_CODICE_FISCALE",
         "EU_VAT",
         "CREDIT_CARD",
+        "EMAIL",
+        "IP",
+        "PHONE",
+        "ES_PASSPORT",
+        "ES_PLATE",
+        "ADDRESS",
+        "DATE_OF_BIRTH",
+        "PT_NIF",
+        "FR_NIR",
+        "DE_IDNR",
     ]
     assert {layer.value for layer in Layer} == {"VALIDATOR", "PATTERN"}
     assert {c.value for c in Confidence} == {"HIGH", "MEDIUM"}
