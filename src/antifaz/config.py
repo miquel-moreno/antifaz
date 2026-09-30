@@ -8,6 +8,7 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 import json
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator
@@ -67,6 +68,16 @@ class Settings(BaseSettings):
     )
     # Browser origins allowed on the proxy routes. Empty: every request with Origin is refused.
     allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    # Names and addresses with a NER model in separate processes (ADR-0016). Off by default;
+    # when on, the model in ner_model_dir must match detect/ner/manifest.json or the gateway
+    # refuses to start (antifaz.detect.ner.setup).
+    ner_enabled: bool = False
+    ner_model_dir: Path | None = None
+    ner_timeout_seconds: float = Field(default=10.0, gt=0, le=600)
+    ner_workers: int = Field(default=1, ge=1, le=64)
+    ner_threshold: float = Field(default=0.5, gt=0, le=1)
+    ner_cache_entries: int = Field(default=10_000, ge=0, le=1_000_000)
 
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod

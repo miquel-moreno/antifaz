@@ -7,6 +7,7 @@ built at import time, so a refused start (ADR-0015) is never an import side effe
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio.to_thread
 import httpx
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
@@ -18,7 +19,9 @@ from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.middleware import request_id_middleware
 from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
-from antifaz.detect.scan import scan
+from antifaz.detect.ner.engine import NerDetector
+from antifaz.detect.ner.setup import ner_from_settings
+from antifaz.detect.scan import Scanner, scan
 from antifaz.logging import configure_logging
 from antifaz.mask import Detector
 from antifaz.policy import DEFAULT_POLICY, Policy
@@ -34,15 +37,20 @@ def create_app(
     settings: Settings | None = None,
     *,
     http_client: httpx.AsyncClient | None = None,
-    detector: Detector = scan,
+    detector: Detector | None = None,
     policy: Policy = DEFAULT_POLICY,
+    ner: NerDetector | None = None,
 ) -> FastAPI:
-    """Build the app. Tests inject `http_client` (httpx.MockTransport) and `detector`.
+    """Build the app. Tests inject `http_client` (httpx.MockTransport), `detector` and `ner`
+    (a NER detector on the fake backend).
 
-    Raises UnsafeConfigError (without any key in the message) if the gateway would start open.
+    Raises UnsafeConfigError (without any key in the message) if the gateway would start open,
+    or if the NER is on and its model or backend is missing (ADR-0016). The NER workers start
+    with the app (a model that cannot load stops the startup) and stop with it.
     """
     settings = settings or get_settings()
     check_safe_to_start(settings)
+    ner = ner if ner is not None else ner_from_settings(settings)
     configure_logging(settings.log_level)
     api_key = settings.antifaz_api_key.get_secret_value() if settings.antifaz_api_key else ""
 
@@ -51,8 +59,12 @@ def create_app(
         client = http_client or build_client(settings)
         app.state.http_client = client
         try:
+            if ner is not None:
+                await anyio.to_thread.run_sync(ner.start)
             yield
         finally:
+            if ner is not None:
+                await anyio.to_thread.run_sync(ner.close)
             if http_client is None:  # an injected client belongs to whoever created it
                 await client.aclose()
 
@@ -68,7 +80,7 @@ def create_app(
         redirect_slashes=False,
     )
     app.state.settings = settings
-    app.state.detector = detector
+    app.state.detector = detector or (Scanner(ner) if ner is not None else scan)
     app.state.policy = policy
     app.state.stream_counters = StreamCounters()
     register_error_handlers(app)

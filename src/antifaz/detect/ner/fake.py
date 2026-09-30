@@ -77,6 +77,8 @@ def create(
     triggers: bool = False,
     score: float = 0.9,
     sleep_seconds: float = 30.0,
+    model_dir: str | None = None,
 ) -> FakeBackend:
-    """Factory used by the worker processes (and by tests in the same process)."""
+    """Factory used by the worker processes (and by tests in the same process). `model_dir`
+    is what the real backend gets from the settings; the fake does not need it."""
     return FakeBackend(names, triggers=triggers, score=score, sleep_seconds=sleep_seconds)

@@ -68,6 +68,9 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 addopts = "-q"
+markers = [
+    "ner_model: needs the real NER model (skipped unless ANTIFAZ_NER_MODEL_DIR is set; issue 6b)",
+]
 
 [tool.coverage.run]
 source = ["src/antifaz"]
