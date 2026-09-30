@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from antifaz.detect.scan import scan
-from antifaz.errors import AttachmentBlocked, UnmaskableField
+from antifaz.errors import AttachmentBlocked, NestingTooDeep, UnmaskableField
 from antifaz.mask import Detector, mask
 from antifaz.policy import DEFAULT_POLICY, Policy
 from antifaz.restore import restore
@@ -37,6 +37,32 @@ ATTACHMENT_KEYS = frozenset(
 # Base64 inside a text (a data: URL) is a binary in disguise: the detector cannot read it.
 _DATA_URL = re.compile(r"data:[^,\s]{0,100};base64,", re.IGNORECASE)
 _NO_KEYS: frozenset[str] = frozenset()
+# Deepest nesting of objects and arrays the gateway accepts. Real requests stay far below;
+# deeper bodies are blocked before any recursive walk (a RecursionError would be a 500).
+MAX_DEPTH = 100
+
+
+def _too_deep(node: Any) -> bool:
+    """True if `node` nests objects and arrays deeper than MAX_DEPTH (iterative, no recursion)."""
+    stack: list[tuple[Any, int]] = [(node, 1)]
+    while stack:
+        current, depth = stack.pop()
+        children = (
+            current.values() if isinstance(current, dict) else current
+            if isinstance(current, list) else ()
+        )  # fmt: skip
+        for child in children:
+            if isinstance(child, dict | list):
+                if depth + 1 > MAX_DEPTH:
+                    return True
+                stack.append((child, depth + 1))
+    return False
+
+
+def check_depth(node: Any) -> None:
+    """Block a body nested deeper than MAX_DEPTH."""
+    if _too_deep(node):
+        raise NestingTooDeep()
 
 
 def parse_container(text: str) -> Any | None:
@@ -45,7 +71,9 @@ def parse_container(text: str) -> Any | None:
         parsed = json.loads(text)
     except ValueError:
         return None
-    return parsed if isinstance(parsed, dict | list) else None
+    if not isinstance(parsed, dict | list) or _too_deep(parsed):
+        return None  # too deep: it stays a string and is masked as text
+    return parsed
 
 
 def check_attachments(node: Any, allowed_types: frozenset[str] | None) -> None:
@@ -53,16 +81,17 @@ def check_attachments(node: Any, allowed_types: frozenset[str] | None) -> None:
 
     With `allowed_types=None` only the attachment keys are checked (data for a tool).
     """
-    if isinstance(node, dict):
-        kind = node.get("type")
-        typed = allowed_types is not None and kind is not None and kind not in allowed_types
-        if ATTACHMENT_KEYS.intersection(node) or typed:
-            raise AttachmentBlocked()
-        for value in node.values():
-            check_attachments(value, allowed_types)
-    elif isinstance(node, list):
-        for item in node:
-            check_attachments(item, allowed_types)
+    stack = [node]  # iterative: a deeply nested body cannot raise RecursionError
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            kind = current.get("type")
+            typed = allowed_types is not None and kind is not None and kind not in allowed_types
+            if ATTACHMENT_KEYS.intersection(current) or typed:
+                raise AttachmentBlocked()
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
 
 
 def _is_number(value: object) -> bool:
@@ -171,7 +200,9 @@ def restore_strings(node: Any, vault: Vault) -> Any:
 
 __all__ = [
     "ATTACHMENT_KEYS",
+    "MAX_DEPTH",
     "check_attachments",
+    "check_depth",
     "mask_body",
     "parse_container",
     "restore_strings",

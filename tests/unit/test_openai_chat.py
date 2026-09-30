@@ -367,3 +367,32 @@ def test_base64_data_url_in_text_blocks() -> None:
     text = "mira data:image/png;base64,iVBORw0KGgo="
     with pytest.raises(AttachmentBlocked):
         mask_request({"messages": [{"role": "user", "content": text}]})
+
+
+def _nested(depth: int, leaf: object) -> object:
+    node = leaf
+    for _ in range(depth):
+        node = [node]
+    return node
+
+
+def test_a_body_nested_too_deep_is_blocked_without_recursion() -> None:
+    from antifaz.errors import NestingTooDeep
+    from antifaz.providers.json_walk import MAX_DEPTH, check_attachments, check_depth
+
+    deep = _nested(10_000, "12345678Z")
+    check_attachments(deep, None)  # iterative: no RecursionError
+    with pytest.raises(NestingTooDeep):
+        check_depth(deep)
+    check_depth(_nested(MAX_DEPTH - 1, "x"))  # the body itself is one level
+    body = {"model": "m", "messages": [{"role": "user", "content": "x"}], "x": deep}
+    with pytest.raises(NestingTooDeep):
+        mask_request(body)
+
+
+def test_too_deep_json_arguments_stay_a_string_and_are_masked() -> None:
+    from antifaz.providers.json_walk import MAX_DEPTH, parse_container
+
+    arguments = json.dumps(_nested(MAX_DEPTH + 1, "12345678Z"))
+    assert parse_container(arguments) is None
+    assert parse_container(json.dumps(_nested(3, "x"))) == _nested(3, "x")

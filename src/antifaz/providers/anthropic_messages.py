@@ -27,6 +27,7 @@ from antifaz.policy import DEFAULT_POLICY, Policy
 from antifaz.providers.json_walk import (
     ATTACHMENT_KEYS,
     check_attachments,
+    check_depth,
     mask_body,
     restore_strings,
     walk,
@@ -190,6 +191,7 @@ def mask_request(
     detector: Detector = scan,
 ) -> tuple[dict[str, Any], Vault]:
     """Masked copy of a Messages (or count_tokens) body and the table of this request."""
+    check_depth(body)  # before any recursive walk
     _check(body)
     without_thinking, kept = _split_thinking(body)
     _check_thinking(list(kept.values()), policy, detector)
