@@ -1,13 +1,16 @@
 """Structured JSON logging with a per-request id.
 
-Only a fixed set of fields is written. Request and response bodies are never logged
-(an allowlist of fields and a PII filter arrive with the proxy in issue 5).
+Only a fixed set of fields is written. Request and response bodies, headers and keys are never
+logged. The httpx and httpcore loggers stay at WARNING whatever LOG_LEVEL says (ADR-0013).
 """
 
 import json
 import logging
 from contextvars import ContextVar
 from datetime import UTC, datetime
+
+# Their DEBUG output describes each request to the provider: never above WARNING.
+QUIET_LOGGERS = ("httpx", "httpcore")
 
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
@@ -32,3 +35,5 @@ def configure_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

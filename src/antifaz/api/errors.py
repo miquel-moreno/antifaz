@@ -4,6 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from antifaz.errors import AntifazBlocked
+
 MAX_LOCATIONS = 10
 
 
@@ -16,6 +18,68 @@ class AppError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class UnauthorizedError(AppError):
+    status_code = 401
+    code = "unauthorized"
+
+    def __init__(self) -> None:
+        super().__init__("missing or invalid Antifaz key")
+
+
+class NotConfiguredError(AppError):
+    status_code = 503
+    code = "not_configured"
+
+    def __init__(self) -> None:
+        super().__init__("the gateway is missing a key in its configuration")
+
+
+class InvalidRequestError(AppError):
+    code = "invalid_request"
+
+    def __init__(self) -> None:
+        super().__init__("the body must be a JSON object in UTF-8")
+
+
+class PayloadTooLargeError(AppError):
+    status_code = 413
+    code = "payload_too_large"
+
+    def __init__(self) -> None:
+        super().__init__("request body too large")
+
+
+class StreamingNotSupportedError(AppError):
+    code = "streaming_not_supported"
+
+    def __init__(self) -> None:
+        super().__init__("streaming is not supported yet")
+
+
+class UpstreamTimeoutError(AppError):
+    status_code = 504
+    code = "upstream_timeout"
+
+    def __init__(self) -> None:
+        super().__init__("the provider did not answer in time")
+
+
+class UpstreamUnavailableError(AppError):
+    status_code = 502
+    code = "upstream_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("could not reach the provider")
+
+
+class BadUpstreamResponseError(AppError):
+    status_code = 502
+    code = "bad_upstream_response"
+
+    def __init__(self) -> None:
+        super().__init__("the provider sent an answer that is not valid JSON")
 
 
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
@@ -39,6 +103,13 @@ def _safe_location(loc: tuple[object, ...]) -> str:
     return ".".join(parts)
 
 
+async def _blocked_handler(_: Request, exc: Exception) -> JSONResponse:
+    # The message is fixed per class (antifaz.errors): it never carries values.
+    if not isinstance(exc, AntifazBlocked):  # pragma: no cover - registered only for it
+        raise exc
+    return JSONResponse(status_code=400, content=error_body("antifaz_blocked", exc.message))
+
+
 async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
     # FastAPI's default 422 echoes the received input, which may contain personal data.
     # Only a sanitised location of each problem is returned, never values or keys.
@@ -53,4 +124,5 @@ async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
 
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _app_error_handler)
+    app.add_exception_handler(AntifazBlocked, _blocked_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)

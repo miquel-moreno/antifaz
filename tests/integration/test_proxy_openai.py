@@ -1,0 +1,494 @@
+"""POST /v1/chat/completions against a fake upstream (httpx.MockTransport). No real LLM calls."""
+
+import json
+import logging
+from collections.abc import Callable, Iterator, Sequence
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from antifaz import Span, guard
+from antifaz.api.app import create_app
+from antifaz.config import Settings
+from antifaz.detect.scan import scan
+from tests.conftest import SENTINEL_DNI
+
+# Obviously fake keys, only for tests.
+GATEWAY_KEY = "test-gateway-key-not-real"
+PROVIDER_KEY = "test-provider-key-not-real"
+UPSTREAM = "https://upstream.invalid/v1"
+AUTH = {"Authorization": f"Bearer {GATEWAY_KEY}"}
+
+Handler = Callable[[httpx.Request], httpx.Response]
+
+
+class FakeUpstream:
+    """Records every request and answers with the given handler."""
+
+    def __init__(self, handler: Handler | None = None) -> None:
+        self.requests: list[httpx.Request] = []
+        self.handler = handler or echo
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self.handler(request)
+
+
+def echo(request: httpx.Request) -> httpx.Response:
+    """Answers with the last user message as the assistant content (placeholders included)."""
+    body = json.loads(request.content)
+    content = body["messages"][-1]["content"]
+    return httpx.Response(
+        200,
+        json={
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
+        },
+    )
+
+
+def _settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "antifaz_api_key": SecretStr(GATEWAY_KEY),
+        "openai_api_key": SecretStr(PROVIDER_KEY),
+        "openai_base_url": UPSTREAM,
+        "_env_file": None,
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+
+
+def _client(
+    upstream: FakeUpstream,
+    settings: Settings | None = None,
+    detector: Callable[[str], Sequence[Span]] = scan,
+) -> Iterator[TestClient]:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app = create_app(settings or _settings(), http_client=http, detector=detector)
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def upstream() -> FakeUpstream:
+    return FakeUpstream()
+
+
+@pytest.fixture
+def proxy(upstream: FakeUpstream) -> Iterator[TestClient]:
+    yield from _client(upstream)
+
+
+def _chat(content: object) -> dict[str, object]:
+    return {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": content}]}
+
+
+# --- Auth -------------------------------------------------------------------------------
+
+
+def test_missing_key_is_rejected(proxy: TestClient, upstream: FakeUpstream) -> None:
+    response = proxy.post("/v1/chat/completions", json=_chat("hola"))
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthorized"
+    assert upstream.requests == []
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["Bearer wrong", f"Basic {GATEWAY_KEY}", GATEWAY_KEY, "Bearer ", f"Bearer {GATEWAY_KEY}x"],
+)
+def test_wrong_key_is_rejected(proxy: TestClient, upstream: FakeUpstream, header: str) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", json=_chat("hola"), headers={"Authorization": header}
+    )
+
+    assert response.status_code == 401
+    assert GATEWAY_KEY not in response.text
+    assert upstream.requests == []
+
+
+def test_gateway_without_key_configured_refuses(upstream: FakeUpstream) -> None:
+    for client in _client(upstream, _settings(antifaz_api_key=None)):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == 503
+        assert upstream.requests == []
+
+
+def test_gateway_without_provider_key_refuses(upstream: FakeUpstream) -> None:
+    for client in _client(upstream, _settings(openai_api_key=None)):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == 503
+        assert upstream.requests == []
+
+
+def test_right_key_reaches_upstream_with_provider_key_only(
+    proxy: TestClient, upstream: FakeUpstream
+) -> None:
+    response = proxy.post(
+        "/v1/chat/completions",
+        json=_chat("hola"),
+        headers={**AUTH, "X-Custom": "client", "OpenAI-Organization": "org-client"},
+    )
+
+    assert response.status_code == 200
+    (sent,) = upstream.requests
+    assert sent.headers["Authorization"] == f"Bearer {PROVIDER_KEY}"
+    assert GATEWAY_KEY not in str(sent.headers)
+    assert "x-custom" not in sent.headers
+    assert "openai-organization" not in sent.headers
+    assert GATEWAY_KEY.encode() not in sent.content
+
+
+# --- Destination --------------------------------------------------------------------------
+
+
+def test_client_cannot_choose_the_destination(proxy: TestClient, upstream: FakeUpstream) -> None:
+    body = {**_chat("hola"), "base_url": "http://169.254.169.254/"}
+    response = proxy.post(
+        "/v1/chat/completions?base_url=http://evil.invalid",
+        json=body,
+        headers={**AUTH, "X-Forwarded-Host": "evil.invalid", "X-Base-URL": "http://evil.invalid"},
+    )
+
+    assert response.status_code == 200
+    (sent,) = upstream.requests
+    assert str(sent.url) == f"{UPSTREAM}/chat/completions"
+
+
+# --- Masking and restore ------------------------------------------------------------------
+
+
+def test_round_trip_restores_values_for_the_client(
+    proxy: TestClient, upstream: FakeUpstream
+) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", json=_chat(f"Mi DNI es {SENTINEL_DNI}"), headers=AUTH
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == f"Mi DNI es {SENTINEL_DNI}"
+    (sent,) = upstream.requests
+    assert SENTINEL_DNI.encode() not in sent.content
+    assert b"[[ES_DNI_1]]" in sent.content
+
+
+def test_tool_call_arguments_round_trip(upstream: FakeUpstream) -> None:
+    def tool_echo(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        arguments = body["messages"][-1]["tool_calls"][0]["function"]["arguments"]
+        message = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "f", "arguments": arguments}}
+            ],
+        }
+        return httpx.Response(200, json={"choices": [{"index": 0, "message": message}]})
+
+    upstream.handler = tool_echo
+    arguments = json.dumps({"dni": SENTINEL_DNI, "nota": 'con "comillas" y \\ barra'})
+    body = {
+        "model": "m",
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "c0",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": arguments},
+                    }
+                ],
+            }
+        ],
+    }
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=body, headers=AUTH)
+
+        assert response.status_code == 200
+        got = response.json()["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        assert json.loads(got) == json.loads(arguments)
+        assert SENTINEL_DNI.encode() not in upstream.requests[0].content
+
+
+def test_streaming_is_refused_for_now(proxy: TestClient, upstream: FakeUpstream) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", json={**_chat("hola"), "stream": True}, headers=AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "streaming_not_supported"
+    assert upstream.requests == []
+
+
+def test_attachment_is_blocked(proxy: TestClient, upstream: FakeUpstream) -> None:
+    content = [
+        {"type": "text", "text": SENTINEL_DNI},
+        {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}},
+    ]
+    response = proxy.post("/v1/chat/completions", json=_chat(content), headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "antifaz_blocked"
+    assert SENTINEL_DNI not in response.text
+    assert upstream.requests == []
+
+
+def test_detector_failure_blocks(upstream: FakeUpstream) -> None:
+    def broken(_: str) -> Sequence[Span]:
+        raise RuntimeError(SENTINEL_DNI)
+
+    for client in _client(upstream, detector=broken):
+        response = client.post("/v1/chat/completions", json=_chat(SENTINEL_DNI), headers=AUTH)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "antifaz_blocked"
+        assert SENTINEL_DNI not in response.text
+        assert upstream.requests == []
+
+
+def _misses_repeats(text: str) -> Sequence[Span]:
+    """A detector that only reports the first appearance: the guard must catch the rest."""
+    spans = scan(text)
+    return spans[:1]
+
+
+def test_guard_blocks_what_the_masker_missed(upstream: FakeUpstream) -> None:
+    for client in _client(upstream, detector=_misses_repeats):
+        response = client.post(
+            "/v1/chat/completions",
+            json=_chat(f"{SENTINEL_DNI} y {SENTINEL_DNI}"),
+            headers=AUTH,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "antifaz_blocked"
+        assert SENTINEL_DNI not in response.text
+        assert upstream.requests == []
+
+
+def test_guard_checks_the_exact_bytes_sent(
+    proxy: TestClient, upstream: FakeUpstream, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[bytes | str] = []
+    original = guard.check
+
+    def recording(payload: bytes | str, vault: object) -> None:
+        seen.append(payload)
+        original(payload, vault)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(guard, "check", recording)
+
+    response = proxy.post("/v1/chat/completions", json=_chat(f"DNI {SENTINEL_DNI}"), headers=AUTH)
+
+    assert response.status_code == 200
+    assert seen == [upstream.requests[0].content]
+
+
+def test_invalid_json_is_rejected_without_echo(proxy: TestClient, upstream: FakeUpstream) -> None:
+    for raw in (b"{" + SENTINEL_DNI.encode(), b"[1, 2]", b"\xff\xfe"):
+        response = proxy.post(
+            "/v1/chat/completions",
+            content=raw,
+            headers={**AUTH, "Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_request"
+        assert SENTINEL_DNI not in response.text
+    assert upstream.requests == []
+
+
+def test_too_large_body_is_rejected(upstream: FakeUpstream) -> None:
+    for client in _client(upstream, _settings(max_body_bytes=100)):
+        response = client.post("/v1/chat/completions", json=_chat("a" * 200), headers=AUTH)
+
+        assert response.status_code == 413
+        assert upstream.requests == []
+
+
+# --- Upstream errors ----------------------------------------------------------------------
+
+
+def test_upstream_error_is_passed_through(upstream: FakeUpstream) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": {"message": "rate limit", "type": "rate_limit"}},
+            headers={"x-provider-secret-header": "1"},
+        )
+
+    upstream.handler = fail
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == 429
+        assert response.json() == {"error": {"message": "rate limit", "type": "rate_limit"}}
+        assert "x-provider-secret-header" not in response.headers
+
+
+def _raiser(error: type[httpx.HTTPError]) -> Handler:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error(f"boom {SENTINEL_DNI}", request=request)  # type: ignore[call-arg]
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [(httpx.ReadTimeout, 504), (httpx.ConnectTimeout, 504), (httpx.ConnectError, 502)],
+)
+def test_transport_errors_have_fixed_messages(
+    upstream: FakeUpstream, error: type[httpx.HTTPError], status: int
+) -> None:
+    upstream.handler = _raiser(error)
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == status
+        assert SENTINEL_DNI not in response.text
+        assert "boom" not in response.text
+
+
+def test_non_json_upstream_answer_is_a_502(upstream: FakeUpstream) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        200, content=b"<html>" + SENTINEL_DNI.encode()
+    )
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == 502
+        assert SENTINEL_DNI not in response.text
+
+
+# --- Invariant 8: the sentinel never reaches logs or error bodies --------------------------
+
+
+def test_sentinel_never_in_logs_or_error_bodies(
+    upstream: FakeUpstream, caplog: pytest.LogCaptureFixture
+) -> None:
+    for name in ("", "httpx", "httpcore", "http", "uvicorn", "fastapi", "antifaz"):
+        caplog.set_level(logging.DEBUG, logger=name or None)
+    bodies: list[str] = []
+
+    def answer_with_sentinel(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"index": 0, "message": {"content": f"clear {SENTINEL_DNI}"}}]},
+        )
+
+    def error_echoing_request(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, content=request.content)
+
+    scenarios: list[tuple[Handler, Callable[[str], Sequence[Span]]]] = [
+        (echo, scan),
+        (answer_with_sentinel, scan),
+        (error_echoing_request, scan),
+        (_raiser(httpx.ReadTimeout), scan),
+        (echo, _misses_repeats),  # guard block
+    ]
+    for handler, detector in scenarios:
+        upstream.handler = handler
+        for client in _client(upstream, detector=detector):
+            response = client.post(
+                "/v1/chat/completions",
+                json=_chat(f"{SENTINEL_DNI} {SENTINEL_DNI}"),
+                headers=AUTH,
+            )
+            if response.status_code >= 400:
+                bodies.append(response.text)
+
+    assert len(bodies) == 3
+    for body in bodies:
+        assert SENTINEL_DNI not in body
+    logs = caplog.text + "".join(str(r.__dict__) for r in caplog.records)
+    for secret in (SENTINEL_DNI, GATEWAY_KEY, PROVIDER_KEY):
+        assert secret not in logs
+
+
+def test_httpx_loggers_are_quiet_by_default() -> None:
+    create_app(_settings())
+
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING
+
+
+# --- Invariant 2 end to end: guard OFF, the upstream still gets no hidden value -----------
+
+VALUES = ["12345678Z", "X1234567L", "ana@example.com", "ES9121000418450200051332"]
+
+
+def _compact(text: str) -> str:
+    return "".join(c for c in text.casefold() if c.isalnum())
+
+
+def test_invariant_2_without_guard(upstream: FakeUpstream, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(guard, "check", lambda payload, vault: None)  # ONLY in this test
+
+    arguments = json.dumps({"dni": VALUES[0], "otros": [VALUES[1], {"mail": VALUES[2]}]})
+    body = {
+        "model": "m",
+        "messages": [
+            {"role": "system", "content": f"Cliente {VALUES[3]}"},
+            {"role": "user", "content": [{"type": "text", "text": f"soy {VALUES[0]}"}]},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "c",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": arguments},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c", "content": f"resultado {VALUES[2]}"},
+            {"role": "user", "content": "gracias"},
+        ],
+        "campo_nuevo": f"{VALUES[1]}",
+        "user": VALUES[2],
+    }
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=body, headers=AUTH)
+
+        assert response.status_code == 200
+    (sent,) = upstream.requests
+    raw = sent.content.decode()
+    decoded = json.dumps(json.loads(raw), ensure_ascii=False)
+    for value in VALUES:
+        assert value not in raw
+        assert value not in decoded
+        assert _compact(value) not in _compact(decoded)
+
+
+def test_placeholders_from_another_request_are_not_restored(
+    proxy: TestClient, upstream: FakeUpstream
+) -> None:
+    proxy.post("/v1/chat/completions", json=_chat(f"DNI {SENTINEL_DNI}"), headers=AUTH)
+
+    response = proxy.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+    upstream.handler = lambda request: httpx.Response(
+        200, json={"choices": [{"message": {"content": "[[ES_DNI_1]]"}}]}
+    )
+    response = proxy.post("/v1/chat/completions", json=_chat("sin datos"), headers=AUTH)
+    assert response.json()["choices"][0]["message"]["content"] == "[[ES_DNI_1]]"
+
+
+def test_email_detector_type_is_used(upstream: FakeUpstream) -> None:
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=_chat("ana@example.com"), headers=AUTH)
+
+        assert response.status_code == 200
+        assert b"[[EMAIL_1]]" in upstream.requests[0].content

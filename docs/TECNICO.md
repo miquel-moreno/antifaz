@@ -9,7 +9,7 @@ make install   # dependencias + hooks de pre-commit
 make check     # lint + tipos + tests + gitleaks
 make audit     # vulnerabilidades conocidas en las dependencias (uv audit, experimental)
 make licenses  # licencias de lo que se distribuye
-make dev       # API en http://localhost:8000 (de momento solo /healthz)
+make dev       # API en http://localhost:8000 (/healthz y /v1/chat/completions)
 ```
 
 `docker compose up` llega en el issue 7.
@@ -135,6 +135,39 @@ antifaz mask -             # lee de stdin
 
 Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
 
+## Proxy compatible con OpenAI Chat (issue 5, PR 5a)
+
+Configura `.env` a partir de `.env.example`: `ANTIFAZ_API_KEY` (la clave que usan tus clientes), `OPENAI_API_KEY` y, si quieres otro servidor compatible, `OPENAI_BASE_URL`. Sin las dos claves, el proxy responde 503.
+
+```bash
+curl http://localhost:8000/v1/chat/completions   -H "Authorization: Bearer $ANTIFAZ_API_KEY" -H "Content-Type: application/json"   -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
+```
+
+Con el SDK de OpenAI basta con `base_url="http://localhost:8000/v1"` y `api_key=<ANTIFAZ_API_KEY>`.
+
+Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), propuesta):
+
+1. Comprueba la clave de Antifaz con `hmac.compare_digest`. Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
+2. Lee el cuerpo con un tope (`MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
+3. Reúne **todas** las cadenas del cuerpo (mensajes, partes de texto, `name`, resultados de herramientas y cualquier campo nuevo) y llama a `mask()` una sola vez. Los `arguments` de las llamadas a herramientas se parsean como JSON y se enmascaran sus valores. Las claves de los objetos no se cambian: si alguna contiene un dato, la petición se bloquea.
+4. Imágenes, audio, ficheros o `file_id` → 400 `antifaz_blocked`.
+5. Serializa una vez y la guardia de salida revisa **esos mismos bytes** justo antes de enviarlos.
+6. Envía a `OPENAI_BASE_URL` con `OPENAI_API_KEY`. La URL nunca sale del cliente.
+7. Restaura `content`, `refusal` y los `arguments` de las herramientas (parseando el JSON, así siguen siendo JSON válido aunque el dato tenga comillas). El resto de campos pasa sin tocar.
+
+Errores:
+
+| Caso | Respuesta |
+|---|---|
+| Sin clave o clave incorrecta | 401 `unauthorized` |
+| Dato en un sitio que no se puede enmascarar, adjunto, detector roto o guardia | 400 `antifaz_blocked`, mensaje fijo |
+| `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
+| El proveedor tarda más de `UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
+| No se puede conectar | 502 `upstream_unavailable` |
+| El proveedor responde con error (4xx/5xx) | Su cuerpo **tal cual**: solo vio texto enmascarado, así que puede mostrar marcadores `[[TIPO_N]]` |
+
+Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en `WARNING`. Un test (invariante 8) pasa un DNI centinela por respuestas, errores del proveedor, tiempos agotados y bloqueos de la guardia, con todos los loggers en `DEBUG`, y comprueba que no aparece ni en los logs ni en los cuerpos de error. Otro (invariante 2) quita la guardia **solo en el test** y comprueba que el proveedor falso no recibe ningún valor oculto, tampoco en argumentos ni resultados de herramientas.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
@@ -143,7 +176,7 @@ Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en
 | `persist-credentials: false` en cada checkout | El token de GitHub no queda guardado en el disco del runner para pasos posteriores |
 | `uv audit` fijado a uv 0.12.20 | Comprueba vulnerabilidades conocidas (OSV) del `uv.lock`. Es un comando experimental de uv: si cambia, se ajusta aquí |
 | Comprobación de licencias propia (`scripts/check_licenses.py`) | Regla sencilla y auditable: nada GPL/AGPL/no comercial en lo que se distribuye; copyleft débil solo si está anotado en `docs/licencias.md` |
-| Cobertura ≥ 90 % en `detect`, `vault`, `mask`, `guard` y `restore` (`scripts/check_coverage.py`) | Son las piezas de privacidad: un fallo ahí significa datos personales enviados |
+| Cobertura ≥ 90 % en `detect`, `vault`, `mask`, `guard`, `restore`, `providers` y `api` (`scripts/check_coverage.py`) | Son las piezas de privacidad: un fallo ahí significa datos personales enviados |
 | CodeQL solo cuando el repo sea público | En repos privados necesita GitHub Advanced Security (de pago); mientras tanto el job se salta en lugar de fallar |
 | Manejador propio de errores 422 | El de FastAPI devuelve el cuerpo recibido, que podría llevar un DNI. El nuestro solo dice qué campo está mal |
 | Hooks de Claude Code con tests | Bloquean los casos comunes de leer `.env`, imprimir variables secretas, `--no-verify` y force push. Son **defensa en profundidad, no una barrera**: quien ejecuta código arbitrario puede saltárselos, y la revisión de privacidad encontró varios caminos (ver el modelo de amenazas). La barrera real es gitleaks en CI |
@@ -153,5 +186,7 @@ Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en
 
 ## Limitaciones
 
-- `mask()` y `restore()` funcionan como librería; la pasarela HTTP, la guardia de salida y el streaming llegan después (issues 4b y 5).
+- El proxy solo habla OpenAI Chat y sin streaming; Anthropic Messages y el streaming llegan en el resto del issue 5.
+- Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.
+- Un tipo de adjunto nuevo con un nombre que no conocemos se trataría como texto (se enmascara, pero no se bloquea).
 - Los nombres de persona no se detectan hasta el issue 6 (NER): hoy pasan en claro.
