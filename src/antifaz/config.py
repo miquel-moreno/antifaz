@@ -5,19 +5,27 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # Every variable starts with ANTIFAZ_: a shell set up for Claude Code or the SDKs
+    # (ANTHROPIC_BASE_URL, OPENAI_API_KEY...) must not make Antifaz call itself.
+    model_config = SettingsConfigDict(
+        env_prefix="ANTIFAZ_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "antifaz"
     log_level: str = "INFO"
 
     # Key the clients send as "Authorization: Bearer ..." (or "x-api-key" on the Anthropic
     # routes). Without it the proxy refuses to work.
-    antifaz_api_key: SecretStr | None = None
+    antifaz_api_key: SecretStr | None = Field(default=None, validation_alias="ANTIFAZ_API_KEY")
 
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: SecretStr | None = None
