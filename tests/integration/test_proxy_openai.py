@@ -21,7 +21,12 @@ from tests.integration.fakes import (
     Handler,
     compact,
     misses_repeats,
+    openai_sse,
+    openai_text,
+    pieces_of,
     raiser,
+    sse_payloads,
+    sse_response,
 )
 
 UPSTREAM = "https://upstream.invalid/v1"
@@ -32,6 +37,9 @@ def echo(request: httpx.Request) -> httpx.Response:
     """Answers with the last user message as the assistant content (placeholders included)."""
     body = json.loads(request.content)
     content = body["messages"][-1]["content"]
+    if body.get("stream"):  # the same answer as server-sent events, in pieces of 3 characters
+        text = content if isinstance(content, str) else json.dumps(content)
+        return sse_response(openai_sse(pieces_of(text)))[0]
     return httpx.Response(
         200,
         json={
@@ -213,14 +221,97 @@ def test_tool_call_arguments_round_trip(upstream: FakeUpstream) -> None:
         assert SENTINEL_DNI.encode() not in upstream.requests[0].content
 
 
-def test_streaming_is_refused_for_now(proxy: TestClient, upstream: FakeUpstream) -> None:
+def test_streaming_round_trip_restores_content(proxy: TestClient, upstream: FakeUpstream) -> None:
+    text = f"Mi DNI es {SENTINEL_DNI} y el correo ana@example.com."
     response = proxy.post(
-        "/v1/chat/completions", json={**_chat("hola"), "stream": True}, headers=AUTH
+        "/v1/chat/completions", json={**_chat(text), "stream": True}, headers=AUTH
     )
 
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert openai_text(response.text) == text
+    assert response.text.endswith("data: [DONE]\n\n")
+    (sent,) = upstream.requests
+    assert SENTINEL_DNI.encode() not in sent.content
+    assert json.loads(sent.content)["stream"] is True
+
+
+@pytest.mark.parametrize("options", [{"include_usage": True}, {"include_obfuscation": False}, None])
+def test_stream_options_in_the_allowlist_pass(
+    proxy: TestClient, upstream: FakeUpstream, options: object
+) -> None:
+    body = {**_chat("hola"), "stream": True, "stream_options": options}
+    response = proxy.post("/v1/chat/completions", json=body, headers=AUTH)
+
+    assert response.status_code == 200
+    assert json.loads(upstream.requests[0].content)["stream_options"] == options
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"include_usage": "yes"}, {"include_usage": True, "x": "12345678Z"}, "include_usage", []],
+)
+def test_other_stream_options_are_refused(
+    proxy: TestClient, upstream: FakeUpstream, options: object
+) -> None:
+    body = {**_chat("hola"), "stream": True, "stream_options": options}
+    response = proxy.post("/v1/chat/completions", json=body, headers=AUTH)
+
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "streaming_not_supported"
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert "12345678Z" not in response.text
     assert upstream.requests == []
+
+
+def test_stream_answered_with_json_is_restored_as_json(upstream: FakeUpstream) -> None:
+    def json_answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        body.pop("stream")  # a provider that ignores `stream` and answers JSON
+        return echo(httpx.Request("POST", request.url, json=body))
+
+    upstream.handler = json_answer
+    for client in _client(upstream):
+        response = client.post(
+            "/v1/chat/completions",
+            json={**_chat(f"DNI {SENTINEL_DNI}"), "stream": True},
+            headers=AUTH,
+        )
+        assert response.status_code == 200
+        assert response.json()["choices"][0]["message"]["content"] == f"DNI {SENTINEL_DNI}"
+
+
+def test_stream_tool_call_arguments_round_trip(upstream: FakeUpstream) -> None:
+    arguments = json.dumps({"dni": SENTINEL_DNI, "nota": 'dijo "hola" \\ y ya'})
+
+    def tool_stream(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)["messages"][0]["tool_calls"][0]["function"]["arguments"]
+        head = {"id": "c", "object": "chat.completion.chunk"}
+        calls = [{"index": 0, "id": "call_1", "type": "function", "function": {"name": "f"}}]
+        calls += [
+            {"index": 0, "function": {"arguments": sent[i : i + 4]}} for i in range(0, len(sent), 4)
+        ]
+        events = [{**head, "choices": [{"index": 0, "delta": {"tool_calls": [c]}}]} for c in calls]
+        events.append(
+            {**head, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+        )
+        text = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+        return sse_response(text, split=5)[0]
+
+    upstream.handler = tool_stream
+    call = {"id": "call_0", "type": "function", "function": {"name": "f", "arguments": arguments}}
+    body = {"model": "m", "stream": True, "messages": [{"role": "assistant", "tool_calls": [call]}]}
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=body, headers=AUTH)
+        assert response.status_code == 200
+        pieces = [
+            c["function"].get("arguments", "")
+            for p in sse_payloads(response.text)
+            if isinstance(p, dict)
+            for choice in p["choices"]
+            for c in choice["delta"].get("tool_calls", [])
+        ]
+        assert json.loads("".join(pieces)) == json.loads(arguments)
+    assert SENTINEL_DNI.encode() not in upstream.requests[0].content
 
 
 def test_attachment_is_blocked(proxy: TestClient, upstream: FakeUpstream) -> None:

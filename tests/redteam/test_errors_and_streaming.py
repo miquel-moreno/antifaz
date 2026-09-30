@@ -95,10 +95,15 @@ def test_error_del_proveedor_que_repite_la_peticion(
     assert DNI not in caplog.text
 
 
-@pytest.mark.parametrize("route", ROUTES.keys())
-@pytest.mark.parametrize("stream", [True, "true", 1])
-def test_streaming_se_rechaza(route: str, stream: object) -> None:
-    """El atacante pide stream (o lo disfraza de texto o número) para saltarse la restauración."""
+@pytest.mark.parametrize(
+    ("route", "stream"),
+    [
+        *((route, stream) for route in ROUTES for stream in ("true", 1)),
+        ("count_tokens", True),
+    ],
+)
+def test_stream_disfrazado_se_rechaza(route: str, stream: object) -> None:
+    """El atacante disfraza stream de texto o número, o lo pide donde no hay streaming."""
     module, path, auth, body = ROUTES[route]
     upstream = FakeUpstream(module.echo)
     for client in module._client(upstream):

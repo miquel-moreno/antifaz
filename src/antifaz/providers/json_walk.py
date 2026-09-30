@@ -245,6 +245,19 @@ def restore_strings(node: Any, vault: Vault) -> Any:
     return walk(node, lambda value: restore(value, vault), lambda name: name, nested=True)
 
 
+def restore_json_text(text: str, vault: Vault) -> str:
+    """Tool arguments or input written as JSON text, restored (invariant 4).
+
+    Parsed, every string value restored and serialized again, so the result is valid JSON even
+    if a value has quotes or backslashes. Text that is not a JSON object or array is restored
+    as plain text.
+    """
+    parsed = parse_container(text)
+    if parsed is None:
+        return restore(text, vault)
+    return json.dumps(restore_strings(parsed, vault), ensure_ascii=False)
+
+
 __all__ = [
     "ATTACHMENT_KEYS",
     "MAX_DEPTH",
@@ -256,6 +269,7 @@ __all__ = [
     "is_attachment_key",
     "mask_body",
     "parse_container",
+    "restore_json_text",
     "restore_strings",
     "too_deep",
     "walk",

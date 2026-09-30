@@ -16,6 +16,7 @@ from antifaz.api import anthropic, health, openai
 from antifaz.api.errors import register_error_handlers
 from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.middleware import request_id_middleware
+from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
 from antifaz.detect.scan import scan
 from antifaz.logging import configure_logging
@@ -69,6 +70,7 @@ def create_app(
     app.state.settings = settings
     app.state.detector = detector
     app.state.policy = policy
+    app.state.stream_counters = StreamCounters()
     register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(openai.router)
