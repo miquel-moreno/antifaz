@@ -23,6 +23,8 @@ dependencies = [
 # pinned by commit and SHA-256 (`make ner-model`).
 ner = [
     "gliner>=0.2.29",
+    # transformers needs it to read the SentencePiece tokenizer of mDeBERTa (spm.model).
+    "protobuf>=5.0",
     "torch>=2.6",
     "transformers>=4.51.3",
 ]
@@ -81,6 +83,12 @@ strict = true
 python_version = "3.12"
 mypy_path = "src"
 plugins = ["pydantic.mypy"]
+
+# The `ner` extra is not installed in CI, and gliner ships no type hints: the backend
+# (detect/ner/gliner.py) type-checks the same with or without them.
+[[tool.mypy.overrides]]
+module = ["gliner", "gliner.*", "torch", "torch.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

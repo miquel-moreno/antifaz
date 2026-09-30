@@ -10,6 +10,7 @@ from pydantic import SecretStr, ValidationError
 
 from antifaz.api.app import create_app
 from antifaz.config import Settings, UnsafeConfigError
+from antifaz.detect.ner import setup
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.pool import NerUnavailableError
 from antifaz.detect.ner.setup import GLINER_FACTORY, ner_from_settings
@@ -59,6 +60,7 @@ def test_ner_is_off_by_default() -> None:
     assert settings.ner_timeout_seconds == 10.0
     assert settings.ner_threshold == 0.5
     assert settings.ner_cache_entries == 10_000
+    assert settings.ner_torch_threads == 0
     assert ner_from_settings(settings) is None
 
 
@@ -70,6 +72,7 @@ def test_ner_settings_are_read_from_the_environment(monkeypatch: pytest.MonkeyPa
         "ANTIFAZ_NER_WORKERS": "2",
         "ANTIFAZ_NER_THRESHOLD": "0.7",
         "ANTIFAZ_NER_CACHE_ENTRIES": "0",
+        "ANTIFAZ_NER_TORCH_THREADS": "4",
     }.items():
         monkeypatch.setenv(name, value)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
@@ -77,6 +80,7 @@ def test_ner_settings_are_read_from_the_environment(monkeypatch: pytest.MonkeyPa
     assert settings.ner_model_dir == Path("/models/gliner")
     assert (settings.ner_timeout_seconds, settings.ner_workers) == (3.5, 2)
     assert (settings.ner_threshold, settings.ner_cache_entries) == (0.7, 0)
+    assert settings.ner_torch_threads == 4
 
 
 @pytest.mark.parametrize(
@@ -88,6 +92,8 @@ def test_ner_settings_are_read_from_the_environment(monkeypatch: pytest.MonkeyPa
         {"ner_threshold": 0},
         {"ner_threshold": 1.5},
         {"ner_cache_entries": -1},
+        {"ner_torch_threads": -1},
+        {"ner_torch_threads": 257},
     ],
 )
 def test_invalid_ner_settings_are_refused(values: dict[str, object]) -> None:
@@ -100,8 +106,8 @@ def test_enabled_without_a_model_directory_refuses_to_start() -> None:
         ner_from_settings(_settings(ner_enabled=True))
 
 
-def test_enabled_with_the_placeholder_manifest_refuses_to_start(tmp_path: Path) -> None:
-    # This version ships no model: turning the NER on can never start "without NER" silently.
+def test_enabled_with_a_directory_without_the_model_refuses_to_start(tmp_path: Path) -> None:
+    # Turning the NER on can never start "without NER" silently.
     with pytest.raises(UnsafeConfigError, match="manifest"):
         create_app(_settings(ner_enabled=True, ner_model_dir=tmp_path))
 
@@ -118,13 +124,34 @@ def test_a_model_that_does_not_match_its_manifest_refuses_to_start(
     assert error.value.__context__ is None
 
 
-def test_a_missing_backend_refuses_to_start(model: tuple[Path, Path]) -> None:
+def test_a_missing_backend_refuses_to_start(
+    model: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
     directory, manifest = model
     settings = _settings(ner_enabled=True, ner_model_dir=directory)
-    assert GLINER_FACTORY.startswith("antifaz.detect.ner.")
-    for factory in (GLINER_FACTORY, "no_such_package_xyz.backend:create"):
-        with pytest.raises(UnsafeConfigError, match="antifaz\\[ner\\]"):
-            ner_from_settings(settings, manifest_path=manifest, factory=factory)
+    with pytest.raises(UnsafeConfigError, match="antifaz\\[ner\\]"):
+        ner_from_settings(settings, manifest_path=manifest, factory="no_such_xyz.backend:create")
+    # The GLiNER backend module is always there; the extra (gliner, torch) may not be.
+    monkeypatch.setitem(setup.BACKEND_REQUIRES, GLINER_FACTORY, ("no_such_package_xyz",))
+    with pytest.raises(UnsafeConfigError, match="antifaz\\[ner\\]"):
+        ner_from_settings(settings, manifest_path=manifest, factory=GLINER_FACTORY)
+
+
+def test_the_gliner_backend_needs_the_ner_extra() -> None:
+    assert GLINER_FACTORY == "antifaz.detect.ner.gliner:create"
+    assert set(setup.BACKEND_REQUIRES[GLINER_FACTORY]) >= {"gliner", "torch", "transformers"}
+
+
+def test_the_torch_threads_setting_reaches_the_backend(model: tuple[Path, Path]) -> None:
+    directory, manifest = model
+    settings = _settings(ner_enabled=True, ner_model_dir=directory, ner_torch_threads=3)
+    detector = ner_from_settings(
+        settings, manifest_path=manifest, factory=FAKE_FACTORY, options={"names": {}}
+    )
+    assert detector is not None
+    options = json.loads(detector._predictor._options)  # type: ignore[attr-defined]
+    assert options["threads"] == 3
+    detector.close()
 
 
 def test_a_matching_model_and_backend_build_the_detector(model: tuple[Path, Path]) -> None:
