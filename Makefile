@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract secrets check audit licenses bench workflows
+.PHONY: help install dev lint format typecheck test contract secrets check audit licenses bench workflows ner-model
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -19,6 +19,8 @@ help:
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
 	@echo "licenses   Licenses of the runtime dependencies"
 	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
+	@echo "           make bench NER=1: also with the NER model (needs make ner-model)"
+	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
 
 install:
 	uv sync
@@ -62,4 +64,10 @@ licenses:
 	uv run python -m scripts.check_licenses
 
 bench:
-	uv run python -m evals.run
+	uv run python -m evals.run $(if $(NER),--ner,)
+
+# The optional NER: its extra (CPU-only torch) and the model pinned in detect/ner/manifest.json,
+# checked by size and SHA-256. Note: a plain `uv sync` (make install) removes the extra again.
+ner-model:
+	uv sync --extra ner
+	uv run python -m scripts.download_ner_model

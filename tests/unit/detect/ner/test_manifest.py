@@ -10,6 +10,7 @@ import pytest
 
 from antifaz.detect.ner.manifest import (
     DEFAULT_MANIFEST,
+    FileEntry,
     Manifest,
     ModelMismatchError,
     load_manifest,
@@ -53,15 +54,26 @@ def manifest(tmp_path: Path) -> Manifest:
     )
 
 
-def test_the_shipped_manifest_is_a_placeholder_until_the_model_arrives() -> None:
+def test_the_shipped_manifest_pins_the_reviewed_model() -> None:
     shipped = load_manifest(DEFAULT_MANIFEST)
     assert shipped.model == "urchade/gliner_multi_pii-v1"
-    assert shipped.files == {}
+    assert shipped.revision == "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
+    assert shipped.files["pytorch_model.bin"] == FileEntry(
+        1_155_900_362, "3003753fba99e40645cf088c7367a2c6211fc174897dc64f1f9c147c29d18d2d"
+    )
+    assert set(shipped.files) == {
+        "gliner_config.json",
+        "pytorch_model.bin",
+        "mdeberta-v3-base/config.json",
+        "mdeberta-v3-base/spm.model",
+        "mdeberta-v3-base/tokenizer_config.json",
+    }
 
 
-def test_a_placeholder_manifest_refuses_any_directory(model_dir: Path) -> None:
+def test_a_manifest_without_files_refuses_any_directory(tmp_path: Path, model_dir: Path) -> None:
+    empty = load_manifest(_manifest(tmp_path, {}))
     with pytest.raises(ModelMismatchError, match="no model files"):
-        verify_model_dir(model_dir, load_manifest(DEFAULT_MANIFEST))
+        verify_model_dir(model_dir, empty)
 
 
 def test_a_matching_directory_passes(model_dir: Path, manifest: Manifest) -> None:

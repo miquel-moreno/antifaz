@@ -5,8 +5,9 @@ directory must hold EXACTLY the files of the manifest (none missing, none extra,
 links) with the same sizes and hashes. Otherwise the gateway refuses to start. The manifest's
 own digest goes into the NER cache key, so a new model never reuses old spans.
 
-The shipped `manifest.json` is a placeholder without files until the model arrives (issue 6b):
-it refuses every directory.
+The shipped `manifest.json` pins `urchade/gliner_multi_pii-v1` and the tokenizer of
+`microsoft/mdeberta-v3-base` by commit; its "sources" say where `make ner-model` downloads each
+file from (scripts/download_ner_model.py). A manifest without files refuses every directory.
 """
 
 import hashlib

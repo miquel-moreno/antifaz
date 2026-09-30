@@ -36,5 +36,8 @@ Thumbs.db
 # Hypothesis example database (synthetic identifiers, local only)
 .hypothesis/
 
+# The NER model is downloaded by `make ner-model`, never committed (large, third-party)
+models/
+
 # MEDDOCAN is downloaded at bench time, never committed (third-party data)
 evals/datasets/.cache/
