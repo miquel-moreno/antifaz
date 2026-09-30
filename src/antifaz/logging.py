@@ -1,7 +1,9 @@
 """Structured JSON logging with a per-request id.
 
 Only a fixed set of fields is written. Request and response bodies, headers and keys are never
-logged. The httpx and httpcore loggers stay at WARNING whatever ANTIFAZ_LOG_LEVEL says (ADR-0013).
+logged. The httpx and httpcore loggers (and their httpx2 and httpcore2 forks, which Starlette's
+TestClient and the official SDKs use when installed) stay at WARNING whatever ANTIFAZ_LOG_LEVEL
+says (ADR-0013).
 """
 
 import json
@@ -10,7 +12,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 
 # Their DEBUG output describes each request to the provider: never above WARNING.
-QUIET_LOGGERS = ("httpx", "httpcore")
+QUIET_LOGGERS = ("httpx", "httpcore", "httpx2", "httpcore2")
 
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 

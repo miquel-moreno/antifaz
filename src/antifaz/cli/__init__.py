@@ -1,8 +1,9 @@
-"""Command line: `antifaz scan <file>` and `antifaz mask <file>` (`-` reads stdin).
+"""Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`.
 
 Uses the library functions directly. `scan` prints `TYPE start end` per detection and
 `mask` prints the masked text. Neither prints values nor the placeholder table, and errors
-are generic messages that never echo the input.
+are generic messages that never echo the input. `verify` (cli/verify.py) plants synthetic
+data with the current configuration and checks that none reaches a fake provider.
 
 Forbidden: No dependency on the database for scan.
 """
@@ -33,6 +34,11 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("file", help="UTF-8 text file, or - for stdin")
+    commands.add_parser(
+        "verify",
+        help="plant synthetic data with your configuration and check that none reaches a fake "
+        "provider (never calls a real one)",
+    )
     return parser
 
 
@@ -47,6 +53,11 @@ def _read(name: str) -> str | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "verify":
+        # Imported here: scan and mask do not need the web app and its dependencies.
+        from antifaz.cli.verify import verify_from_environment
+
+        return verify_from_environment()
     text = _read(args.file)
     if text is None:
         print("antifaz: cannot read the input as UTF-8 text", file=sys.stderr)

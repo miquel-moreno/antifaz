@@ -1,0 +1,5 @@
+{
+  "provenance": "hand-written",
+  "status": 401,
+  "body": {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}, "request_id": "req_contract_0401"}
+}

@@ -82,7 +82,7 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 86.9 |
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
-| Latencia p50 / p95 por documento | 1.98 ms / 3.76 ms |
+| Latencia p50 / p95 por documento | 2.80 ms / 5.74 ms |
 <!-- bench:end -->
 
 ## Resultados en el conjunto sintético
@@ -156,5 +156,5 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 2220 |
 | Fugas por cada 100 (todos los tipos) | 0.0 |
 | Fugas por cada 100 (tipos cubiertos) | 0.0 |
-| Latencia p50 / p95 por documento | 0.23 ms / 0.32 ms |
+| Latencia p50 / p95 por documento | 0.29 ms / 0.39 ms |
 <!-- bench-synthetic:end -->
