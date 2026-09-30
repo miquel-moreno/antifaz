@@ -21,6 +21,8 @@ MINIMUMS = {
     "mask": 90.0,
     "guard": 90.0,
     "restore": 90.0,
+    "providers": 90.0,
+    "api": 90.0,
 }
 
 

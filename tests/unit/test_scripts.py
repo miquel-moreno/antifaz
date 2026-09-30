@@ -52,7 +52,7 @@ def test_privacy_pieces_need_ninety_percent() -> None:
         {
             "src/antifaz/detect/validators/dni.py": (19, 20),  # 95 % -> ok
             "src\\antifaz\\mask\\core.py": (8, 10),  # 80 % -> too low (Windows path)
-            "src/antifaz/api/app.py": (1, 10),  # not a privacy piece
+            "src/antifaz/cli/__init__.py": (1, 10),  # not a privacy piece
         }
     )
 
