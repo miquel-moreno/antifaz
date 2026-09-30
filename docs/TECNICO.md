@@ -145,7 +145,7 @@ curl http://localhost:8000/v1/chat/completions   -H "Authorization: Bearer $ANTI
 
 Con el SDK de OpenAI basta con `base_url="http://localhost:8000/v1"` y `api_key=<ANTIFAZ_API_KEY>`.
 
-Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), propuesta):
+Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), aceptada):
 
 1. Comprueba la clave de Antifaz con `hmac.compare_digest`. Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
 2. Lee el cuerpo con un tope (`MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
@@ -169,6 +169,28 @@ Errores:
 
 Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en `WARNING`. Un test (invariante 8) pasa un DNI centinela por respuestas, errores del proveedor, tiempos agotados y bloqueos de la guardia, con todos los loggers en `DEBUG`, y comprueba que no aparece ni en los logs ni en los cuerpos de error. Otro (invariante 2) quita la guardia **solo en el test** y comprueba que el proveedor falso no recibe ningún valor oculto, tampoco en argumentos ni resultados de herramientas.
 
+## Proxy de Anthropic Messages (issue 5, PR 5b)
+
+Configura `ANTIFAZ_API_KEY` y `ANTHROPIC_API_KEY` en `.env` (y `ANTHROPIC_BASE_URL` solo si usas otro servidor; va **sin** `/v1`). Sin las dos claves, responde 503.
+
+```bash
+curl http://localhost:8000/v1/messages   -H "x-api-key: $ANTIFAZ_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json"   -d '{"model": "claude-sonnet-4-5", "max_tokens": 200, "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
+```
+
+Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y `ANTHROPIC_API_KEY=<ANTIFAZ_API_KEY>` (o `ANTHROPIC_AUTH_TOKEN`, que llega como `Bearer`). Aviso: Claude Code usa streaming, que llega en la parte 5c; hasta entonces sus peticiones reciben 400 `streaming_not_supported`. Ojo también con arrancar Antifaz en una terminal que ya tenga esas variables para Claude Code: Antifaz lee `ANTHROPIC_BASE_URL` y `ANTHROPIC_API_KEY` del entorno igual que de `.env`, y se llamaría a sí mismo.
+
+Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los mismos que en OpenAI (clave, tope de tamaño, un solo `mask()`, una sola serialización revisada por la guardia, errores); el código de esos pasos es compartido (`api/proxy.py` y `providers/json_walk.py`). Lo propio de Anthropic:
+
+1. **Clave**: en `x-api-key` (lo que envían Claude Code y el SDK) o en `Authorization: Bearer`. Se comparan las dos con `hmac.compare_digest`. Al proveedor solo le llega `x-api-key` con `ANTHROPIC_API_KEY`.
+2. **Cabeceras**: solo se reenvían `anthropic-version` y `anthropic-beta`, y solo si su valor son letras, dígitos, `.`, `_`, `-` y comas (hasta 200 caracteres); si no → 400 `invalid_header`. Si el cliente no manda `anthropic-version`, Antifaz no se la inventa (el proveedor devolverá su error).
+3. **Bloques permitidos** en `messages[].content`: `text`, `tool_use`, `tool_result`, `thinking` y `redacted_thinking`. En `system` y dentro de `tool_result.content`, solo `text`. Cualquier otro (`image`, `document`, `search_result`, `container_upload`, `server_tool_use`, resultados de herramientas del servidor, `citations` o uno nuevo) → 400 `antifaz_blocked`. `cache_control` y la `input` de `tool_use` no pasan por la lista (son ajustes y datos para la herramienta), pero sus textos se enmascaran. `tools`, `tool_choice` y `thinking` (el ajuste) son del desarrollador: sus textos se enmascaran sin lista de tipos. `metadata.user_id` y cualquier campo nuevo se enmascaran como texto.
+4. **Razonamiento (invariante 9)**: los bloques `thinking` y `redacted_thinking` de los mensajes se copian **sin tocar**, con su `signature` o `data`: no se enmascaran ni se escapan (sus `[[` siguen igual). Vienen del modelo, que solo vio texto enmascarado, así que llevan marcadores, no datos. Aun así se pasan por el detector: si uno lleva un dato que hay que ocultar (alguien lo editó), la petición se bloquea, porque no se puede enmascarar sin romper la firma. La guardia sigue revisando todos los bytes. Un bloque con forma de `thinking` dentro de la `input` de una herramienta no cuenta: se enmascara como cualquier dato.
+5. **Respuesta**: se restauran los bloques `text` y los textos de `tool_use.input` (los valores, no las claves). `thinking`, `redacted_thinking`, las firmas y los bloques desconocidos pasan sin tocar.
+6. **`count_tokens`**: se enmascara igual que `/v1/messages` y la respuesta del proveedor (solo números) se devuelve tal cual.
+7. `stream: true` → 400 `streaming_not_supported` (parte 5c).
+
+"Sin tocar" quiere decir que las cadenas son idénticas: el proxy trabaja con el JSON parseado, así que el formato (espacios, escapes `é`) puede cambiar al volver a serializar, pero no el contenido ni la firma. Los tests comparan el bloque serializado dentro de los bytes enviados y de la respuesta.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
@@ -187,7 +209,8 @@ Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en
 
 ## Limitaciones
 
-- El proxy solo habla OpenAI Chat y sin streaming; Anthropic Messages y el streaming llegan en el resto del issue 5.
+- El proxy habla OpenAI Chat y Anthropic Messages, sin streaming (llega en la parte 5c). Claude Code necesita streaming.
+- En Anthropic se bloquean las `citations`, los documentos y las herramientas del servidor (búsqueda web…): fallar cerrado es a propósito.
 - Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.
 - El detector no decodifica base64, hexadecimal ni otras codificaciones dentro del texto (solo bloquea las URL `data:...;base64,`).
 - Los errores del proveedor se devuelven con los marcadores `[[TIPO_N]]` sin restaurar.
