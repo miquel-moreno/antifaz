@@ -9,7 +9,7 @@ make install   # dependencias + hooks de pre-commit
 make check     # lint + tipos + tests + gitleaks
 make audit     # vulnerabilidades conocidas en las dependencias (uv audit, experimental)
 make licenses  # licencias de lo que se distribuye
-make dev       # API en http://localhost:8000 (/healthz y /v1/chat/completions)
+make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
 ```
 
 `docker compose up` llega en el issue 7.
@@ -155,7 +155,7 @@ Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en
 
 ## Proxy compatible con OpenAI Chat (issue 5, PR 5a)
 
-Configura `.env` a partir de `.env.example`: `ANTIFAZ_API_KEY` (la clave que usan tus clientes), `ANTIFAZ_OPENAI_API_KEY` y, si quieres otro servidor compatible, `ANTIFAZ_OPENAI_BASE_URL`. Todas las variables de Antifaz empiezan por `ANTIFAZ_`: así no se mezclan con las que usan Claude Code o los SDK en la misma terminal (si no, Antifaz podría llamarse a sí mismo y enviar su propia clave). Sin las dos claves, el proxy responde 503.
+Configura `.env` a partir de `.env.example`: `ANTIFAZ_API_KEY` (la clave que usan tus clientes), `ANTIFAZ_OPENAI_API_KEY` y, si quieres otro servidor compatible, `ANTIFAZ_OPENAI_BASE_URL`. Todas las variables de Antifaz empiezan por `ANTIFAZ_`: así no se mezclan con las que usan Claude Code o los SDK en la misma terminal (si no, Antifaz podría llamarse a sí mismo y enviar su propia clave). Sin `ANTIFAZ_API_KEY` válida, Antifaz no arranca; sin la clave del proveedor, esta ruta responde 503 (ver [La puerta](#la-puerta-cerrada-por-defecto-issue-20)).
 
 ```bash
 curl http://localhost:8000/v1/chat/completions   -H "Authorization: Bearer $ANTIFAZ_API_KEY" -H "Content-Type: application/json"   -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
@@ -165,7 +165,7 @@ Con el SDK de OpenAI basta con `base_url="http://localhost:8000/v1"` y `api_key=
 
 Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), aceptada):
 
-1. Comprueba la clave de Antifaz con `hmac.compare_digest`. Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
+1. La puerta ya comprobó la clave de Antifaz, el `Origin` y el `Content-Type` (ver [La puerta](#la-puerta-cerrada-por-defecto-issue-20)). Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
 2. Lee el cuerpo con un tope (`ANTIFAZ_MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
 3. Reúne **todas** las cadenas del cuerpo (mensajes, partes de texto, `name`, resultados de herramientas y cualquier campo nuevo) y llama a `mask()` una sola vez. Los `arguments` de las llamadas a herramientas se parsean como JSON y se enmascaran sus valores. Las claves de los objetos no se cambian: si alguna contiene un dato, la petición se bloquea.
 4. Solo pasan partes de tipo `text`, `refusal` o `function`: imágenes, documentos, audio, ficheros, `file_id`, claves como `source` o `data`, o un texto con una URL `data:...;base64,` → 400 `antifaz_blocked`. Los números pasan por el detector: si uno es un dato (un teléfono escrito como número), se bloquea. `NaN`/`Infinity` o un `stream` que no sea booleano → 400.
@@ -177,7 +177,12 @@ Errores:
 
 | Caso | Respuesta |
 |---|---|
-| Sin clave o clave incorrecta | 401 `unauthorized` |
+| Sin clave, clave incorrecta o cabecera de clave repetida | 401 `unauthorized` |
+| Cabecera `Origin` no permitida | 403 `origin_not_allowed` |
+| `Content-Type` que no es `application/json` (UTF-8) | 415 `unsupported_media_type` |
+| Claves repetidas en el JSON (también si solo cambian en mayúsculas) | 400 `invalid_request` |
+| `Host` que no está en `ANTIFAZ_ALLOWED_HOSTS` | 400 `Invalid host header` (texto) |
+| La respuesta del proveedor repite una clave configurada | 502 `bad_upstream_response` |
 | Dato en un sitio que no se puede enmascarar, adjunto, detector roto o guardia | 400 `antifaz_blocked`, mensaje fijo |
 | `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
 | El proveedor tarda más de `ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
@@ -189,7 +194,7 @@ Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en
 
 ## Proxy de Anthropic Messages (issue 5, PR 5b)
 
-Configura `ANTIFAZ_API_KEY` y `ANTIFAZ_ANTHROPIC_API_KEY` en `.env` (y `ANTIFAZ_ANTHROPIC_BASE_URL` solo si usas otro servidor; va **sin** `/v1`). Sin las dos claves, responde 503.
+Configura `ANTIFAZ_API_KEY` y `ANTIFAZ_ANTHROPIC_API_KEY` en `.env` (y `ANTIFAZ_ANTHROPIC_BASE_URL` solo si usas otro servidor; va **sin** `/v1`). Sin la clave de Anthropic, estas rutas responden 503.
 
 ```bash
 curl http://localhost:8000/v1/messages   -H "x-api-key: $ANTIFAZ_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json"   -d '{"model": "claude-sonnet-4-5", "max_tokens": 200, "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
@@ -199,7 +204,7 @@ Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_
 
 Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los mismos que en OpenAI (clave, tope de tamaño, un solo `mask()`, una sola serialización revisada por la guardia, errores); el código de esos pasos es compartido (`api/proxy.py` y `providers/json_walk.py`). Lo propio de Anthropic:
 
-1. **Clave**: en `x-api-key` (lo que envían Claude Code y el SDK) o en `Authorization: Bearer`. Se comparan las dos con `hmac.compare_digest`. Al proveedor solo le llega `x-api-key` con `ANTIFAZ_ANTHROPIC_API_KEY`.
+1. **Clave**: en `x-api-key` (lo que envían Claude Code y el SDK) o en `Authorization: Bearer`, comprobada por la puerta como en todas las rutas. Al proveedor solo le llega `x-api-key` con `ANTIFAZ_ANTHROPIC_API_KEY`.
 2. **Cabeceras**: solo se reenvían `anthropic-version` y `anthropic-beta`, y solo si su valor son letras, dígitos, `.`, `_`, `-` y comas (hasta 200 caracteres); si no → 400 `invalid_header`. Si el cliente no manda `anthropic-version`, Antifaz no se la inventa (el proveedor devolverá su error).
 3. **Bloques permitidos** en `messages[].content`: `text`, `tool_use`, `tool_result`, `thinking` y `redacted_thinking`. En `system` y dentro de `tool_result.content`, solo `text`. Cualquier otro (`image`, `document`, `search_result`, `container_upload`, `server_tool_use`, resultados de herramientas del servidor, `citations` o uno nuevo) → 400 `antifaz_blocked`. `cache_control` no pasa por la lista. La `input` de `tool_use` puede tener cualquier `type` (son datos para la herramienta), pero las claves de adjunto (`source`, `data`, `file_id`…) y las URL `data:...;base64,` se bloquean también ahí. Ajustes con claves fijas: `thinking` solo `type` y `budget_tokens`; `tool_choice` solo `type`, `name` y `disable_parallel_tool_use`; otra clave → bloqueo. En `tools` no hay lista de tipos (hay herramientas del servidor como `web_search_20250305`), pero fuera de `input_schema` las claves de adjunto bloquean; dentro de `input_schema` no, porque una propiedad puede llamarse `data` o `file`, y solo se bloquea un objeto con `"type": "base64"`, que no es un tipo de JSON Schema (más las URL `data:` que se bloquean en todo el cuerpo). Todos sus textos se enmascaran. `metadata.user_id` y cualquier campo nuevo se enmascaran como texto.
 4. **Razonamiento (invariante 9)**: los bloques `thinking` y `redacted_thinking` de los mensajes se copian **sin tocar**, con su `signature` o `data`: no se enmascaran ni se escapan (sus `[[` siguen igual). Vienen del modelo, que solo vio texto enmascarado, así que llevan marcadores, no datos. Aun así se pasan por el detector: si uno lleva un dato que hay que ocultar (alguien lo editó), la petición se bloquea, porque no se puede enmascarar sin romper la firma. La guardia sigue revisando todos los bytes. Solo se aceptan sus claves exactas (`thinking`: `type`, `thinking`, `signature`; `redacted_thinking`: `type`, `data`), todas de texto; otra clave → bloqueo. `signature` y `data` son opacos (firma y razonamiento cifrado) y no se pueden revisar: riesgo aceptado en el ADR-0013. Los marcadores que ya lleva el razonamiento (de un turno anterior) se **reservan**: un dato nuevo de esta petición no recibe ese número (si `[[ES_DNI_1]]` está en el razonamiento, el DNI nuevo es `[[ES_DNI_2]]`), y como los reservados no están en la tabla, la respuesta los deja tal cual en vez de poner un valor equivocado. Un bloque con forma de `thinking` dentro de la `input` de una herramienta no cuenta: se enmascara como cualquier dato.
@@ -208,6 +213,45 @@ Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los
 7. `stream: true` → 400 `streaming_not_supported` (parte 5c). El código de estado 2xx del proveedor se devuelve igual (en las dos rutas). Un texto con un sustituto suelto de UTF-16 (`"\ud800"`), que no se puede enviar en UTF-8, → 400 `invalid_request`.
 
 "Sin tocar" quiere decir que las cadenas son idénticas: el proxy trabaja con el JSON parseado, así que el formato (espacios, escapes `é`) puede cambiar al volver a serializar, pero no el contenido ni la firma. Los tests comparan el bloque serializado dentro de los bytes enviados y de la respuesta.
+
+## La puerta cerrada por defecto (issue 20)
+
+Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
+
+**Arranque.** Antifaz se niega a arrancar, y dice qué variable falla sin mostrar su valor, si:
+
+- `ANTIFAZ_API_KEY` falta, tiene menos de 32 caracteres, empieza por `change-me` (el valor de `.env.example`) o no es ASCII imprimible sin espacios. Genera una con `openssl rand -hex 32`;
+- `ANTIFAZ_OPENAI_API_KEY` o `ANTIFAZ_ANTHROPIC_API_KEY` empiezan por `change-me`;
+- `ANTIFAZ_ALLOWED_HOSTS` está vacía o tiene `*`, o `ANTIFAZ_ALLOWED_ORIGINS` tiene `*` o `null`.
+
+La app ya no se crea al importar el módulo: `uvicorn --factory antifaz.api.app:create_app` (es lo que hace `make dev`).
+
+**Variables nuevas** (listas separadas por comas, o en JSON: `["a", "b"]`):
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `ANTIFAZ_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Valores aceptados en la cabecera `Host` (sin el puerto). Otro → 400. Admite `*.ejemplo.com`, no `*` |
+| `ANTIFAZ_ALLOWED_ORIGINS` | vacía | Orígenes de navegador aceptados, exactos (`https://intranet.ejemplo.com`). Vacía: toda petición con `Origin` → 403 |
+
+**En cada petición**, en este orden:
+
+1. `Host` en la lista (si no, 400). Protege del DNS rebinding: una web ajena que apunta su dominio a la IP de la pasarela.
+2. Ruta pública solo `/healthz`, con coincidencia exacta sobre la ruta ya decodificada (`scope["path"]`). Cualquier otra ruta, exista o no, pide la clave: `/healthz/`, `//v1/messages` o `/docs` también.
+3. **Clave** en `Authorization: Bearer` o en `x-api-key` (en todas las rutas), con `hmac.compare_digest`. Si la cabecera viene dos veces → 401.
+4. **`Origin`**: si viene y no está en `ANTIFAZ_ALLOWED_ORIGINS` → 403. No hay CORS: el navegador nunca recibe `Access-Control-Allow-Origin`, así que una web ajena no puede leer la respuesta ni pasar el preflight.
+5. **`Content-Type`**: en todo lo que no sea `GET`, `HEAD` u `OPTIONS`, debe ser `application/json` (con `charset=utf-8` como único parámetro opcional). Un formulario o `text/plain`, que el navegador manda sin preflight → 415.
+6. Al leer el cuerpo, un objeto con **claves repetidas** → 400. Cuentan como repetidas las que solo cambian en mayúsculas o anchura (`content` y `Content`), porque unos programas las leen como la misma y otros no.
+
+Además: sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra final (`/v1/messages/` → 404); los WebSocket se cierran siempre; el log de cada petición solo escribe la ruta si es una ruta registrada (si no, `-`), para que una clave o un DNI pegados en la URL no acaben en el log; y si el proveedor devuelve en su respuesta alguna de las claves configuradas, se descarta con un 502 fijo.
+
+**Detrás de Docker o de un proxy inverso** (nginx, Traefik, Caddy):
+
+- Pon en `ANTIFAZ_ALLOWED_HOSTS` el nombre con el que llegan los clientes (`antifaz`, el nombre del servicio en compose, o `antifaz.ejemplo.com`). Si el proxy reescribe `Host`, pon el que reescribe. `X-Forwarded-Host` no se mira.
+- El proxy no debe añadir cabeceras CORS ni un `Origin` propio.
+- `/healthz` es pública: si el proxy la expone, solo dice la versión.
+- Si la sirves bajo un prefijo (`--root-path`), `/healthz` puede pedir clave: la lista pública compara la ruta exacta y, si no coincide, falla cerrada.
+
+**Tests.** `tests/redteam/test_invariants_12_13.py` recorre las rutas que la app registra de verdad (con `iter_route_contexts`, porque en FastAPI `app.routes` guarda los routers incluidos y no sus rutas), cada una con GET, HEAD, POST, PUT, PATCH, DELETE y OPTIONS y con alias (barra final, doble barra, mayúsculas, último carácter codificado): sin clave, 401 salvo `/healthz`. Cada ruta del proxy pasa por la guardia de salida con los mismos bytes que recibe el proveedor, y si la guardia bloquea no sale nada (invariante 12). Otro test usa claves canario y recorre 401, 400, 403, 404, 413, 415, 502 y 504, errores del proveedor y un proveedor que devuelve las cabeceras que recibió, con los loggers en `DEBUG`: ninguna clave aparece en logs, cuerpos ni cabeceras (invariante 13). Los ataques están en `tests/redteam/test_gateway.py`.
 
 ## Decisiones técnicas del issue 1
 
@@ -234,5 +278,8 @@ Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los
 - Los errores del proveedor se devuelven con los marcadores `[[TIPO_N]]` sin restaurar.
 - El tamaño de la respuesta del proveedor no tiene tope en v0.1.
 - `Bearer` en la cabecera `Authorization` distingue mayúsculas: `bearer` se rechaza.
+- Un esquema de herramienta con dos propiedades que solo cambian en mayúsculas (`id` e `ID`) se rechaza con 400 (ADR-0015).
+- Si el proveedor devuelve la clave recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), ese fragmento llega al cliente: solo se detecta la clave completa.
+- La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
 - Los nombres de persona no se detectan hasta el issue 6 (NER): hoy pasan en claro.

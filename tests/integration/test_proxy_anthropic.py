@@ -62,6 +62,7 @@ def _settings(**overrides: object) -> Settings:
         "antifaz_api_key": SecretStr(GATEWAY_KEY),
         "anthropic_api_key": SecretStr(PROVIDER_KEY),
         "anthropic_base_url": UPSTREAM,
+        "allowed_hosts": ["testserver"],
         "_env_file": None,
     }
     values.update(overrides)
@@ -138,9 +139,9 @@ def test_wrong_or_missing_key_is_rejected(
     assert upstream.requests == []
 
 
-@pytest.mark.parametrize("missing", ["antifaz_api_key", "anthropic_api_key"])
-def test_gateway_without_keys_refuses(upstream: FakeUpstream, missing: str) -> None:
-    for client in _client(upstream, _settings(**{missing: None})):
+def test_gateway_without_provider_key_refuses(upstream: FakeUpstream) -> None:
+    # Without the gateway key the app does not even start (tests/unit/test_config.py).
+    for client in _client(upstream, _settings(anthropic_api_key=None)):
         response = client.post("/v1/messages", json=_msg("hola"), headers=KEY)
 
         assert response.status_code == 503

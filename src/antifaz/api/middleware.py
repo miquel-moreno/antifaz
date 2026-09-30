@@ -15,6 +15,7 @@ logger = logging.getLogger("http")
 REQUEST_ID_HEADER = "X-Request-ID"
 # The client's id is logged and echoed, so it must be short and plain: no room for data.
 SAFE_REQUEST_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+_KNOWN_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 
 
 async def request_id_middleware(
@@ -27,10 +28,13 @@ async def request_id_middleware(
     try:
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - start) * 1000
+        # Only a registered route path is logged: any other path is client text (a key or a
+        # DNI pasted in the URL would end up in the log).
+        path = request.scope["path"]
         logger.info(
             "%s %s -> %s (%.1f ms)",
-            request.method,
-            request.url.path,
+            request.method if request.method in _KNOWN_METHODS else "-",
+            path if path in request.app.state.route_paths else "-",
             response.status_code,
             elapsed_ms,
         )

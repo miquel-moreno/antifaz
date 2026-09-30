@@ -11,7 +11,7 @@ from pydantic import SecretStr
 
 from antifaz import Span, guard
 from antifaz.api.app import create_app
-from antifaz.config import Settings
+from antifaz.config import Settings, UnsafeConfigError
 from antifaz.detect.scan import scan
 from tests.conftest import SENTINEL_DNI
 from tests.integration.fakes import (
@@ -53,6 +53,7 @@ def _settings(**overrides: object) -> Settings:
         "antifaz_api_key": SecretStr(GATEWAY_KEY),
         "openai_api_key": SecretStr(PROVIDER_KEY),
         "openai_base_url": UPSTREAM,
+        "allowed_hosts": ["testserver"],
         "_env_file": None,
     }
     values.update(overrides)
@@ -109,12 +110,9 @@ def test_wrong_key_is_rejected(proxy: TestClient, upstream: FakeUpstream, header
     assert upstream.requests == []
 
 
-def test_gateway_without_key_configured_refuses(upstream: FakeUpstream) -> None:
-    for client in _client(upstream, _settings(antifaz_api_key=None)):
-        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
-
-        assert response.status_code == 503
-        assert upstream.requests == []
+def test_gateway_without_key_configured_does_not_start() -> None:
+    with pytest.raises(UnsafeConfigError):
+        create_app(_settings(antifaz_api_key=None))
 
 
 def test_gateway_without_provider_key_refuses(upstream: FakeUpstream) -> None:

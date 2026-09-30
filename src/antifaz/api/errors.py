@@ -28,6 +28,22 @@ class UnauthorizedError(AppError):
         super().__init__("missing or invalid Antifaz key")
 
 
+class OriginNotAllowedError(AppError):
+    status_code = 403
+    code = "origin_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__("requests from a web browser are not accepted")
+
+
+class UnsupportedMediaTypeError(AppError):
+    status_code = 415
+    code = "unsupported_media_type"
+
+    def __init__(self) -> None:
+        super().__init__("Content-Type must be application/json (UTF-8)")
+
+
 class NotConfiguredError(AppError):
     status_code = 503
     code = "not_configured"
@@ -40,7 +56,10 @@ class InvalidRequestError(AppError):
     code = "invalid_request"
 
     def __init__(self) -> None:
-        super().__init__("the body must be a JSON object in UTF-8")
+        super().__init__(
+            "the body must be a JSON object in UTF-8, without repeated keys "
+            "(keys that differ only in case count as repeated)"
+        )
 
 
 class InvalidHeaderError(AppError):
@@ -97,6 +116,13 @@ class BadUpstreamResponseError(AppError):
 
     def __init__(self) -> None:
         super().__init__("the provider sent an answer that is not valid JSON")
+
+
+class UpstreamEchoedKeyError(BadUpstreamResponseError):
+    """The provider's answer repeats a configured key: it is dropped, never returned."""
+
+    def __init__(self) -> None:
+        AppError.__init__(self, "the provider's answer contained a key and was dropped")
 
 
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
