@@ -5,6 +5,11 @@ in what is distributed. Weak copyleft used unmodified (LGPL, MPL, EPL) is allowe
 must be listed in docs/licencias.md. A dependency without license metadata fails until
 its license is checked by hand and added to VERIFIED_BY_HAND.
 
+The optional extras ship too (`antifaz[ner]`), so the locked packages of every extra are
+checked. CI does not install the `ner` extra (torch is large): for a package of an extra that is
+not installed, the license recorded by hand in RECORDED_EXTRA (read from its metadata with the
+extra installed) is used, and a test checks that record against the metadata when it is there.
+
     uv run python -m scripts.check_licenses
 """
 
@@ -20,6 +25,42 @@ LICENSES_DOC = ROOT / "docs" / "licencias.md"
 
 # name -> license, for packages whose metadata says nothing (checked on their repository).
 VERIFIED_BY_HAND: dict[str, str] = {}
+
+# Packages that only the `ner` extra brings, with the license their metadata states (read on
+# 2026-09-30 from the versions in uv.lock, the extra installed). Used only when the package is
+# not installed (CI); tests/unit/test_scripts.py compares it with the metadata when it is.
+RECORDED_EXTRA: dict[str, str] = {
+    "colorama": "BSD License",
+    "filelock": "MIT",
+    "fsspec": "BSD-3-Clause",
+    "gliner": "Apache-2.0",
+    "hf-xet": "Apache-2.0",
+    "huggingface-hub": "Apache-2.0",
+    "jinja2": "BSD License",
+    "markdown-it-py": "MIT",
+    "markupsafe": "BSD-3-Clause",
+    "mdurl": "MIT",
+    "mpmath": "BSD",
+    "networkx": "BSD-3-Clause",
+    "numpy": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "packaging": "Apache-2.0 OR BSD-2-Clause",
+    "pygments": "BSD-2-Clause",
+    "regex": "Apache-2.0 AND CNRI-Python",
+    "rich": "MIT",
+    "safetensors": "Apache Software License",
+    "sentencepiece": "Apache-2.0",
+    "setuptools": "MIT",
+    "shellingham": "ISC License",
+    "sympy": "BSD",
+    "tokenizers": "Apache Software License",
+    "torch": (
+        "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
+        "AND BSL-1.0 AND MIT"
+    ),
+    "tqdm": "MPL-2.0 AND MIT",
+    "transformers": "Apache 2.0 License",
+    "typer": "MIT",
+}
 
 FORBIDDEN = re.compile(
     r"(?<!L)\bA?GPL|GNU (Affero )?General Public|SSPL|Server Side Public|BUSL|Business Source"
@@ -60,7 +101,17 @@ def classify(license_texts: list[str]) -> Verdict:
 def license_texts(name: str) -> list[str]:
     if name in VERIFIED_BY_HAND:
         return [VERIFIED_BY_HAND[name]]
-    meta = metadata.metadata(name)
+    try:
+        meta = metadata.metadata(name)
+    except metadata.PackageNotFoundError:
+        if name not in RECORDED_EXTRA:
+            raise
+        return [RECORDED_EXTRA[name]]  # a package of an extra that is not installed (CI)
+    return metadata_texts(meta)
+
+
+def metadata_texts(meta: metadata.PackageMetadata) -> list[str]:
+    """Every license statement of a package's metadata (expression, field, classifiers)."""
     # Some packages paste the whole license text in "License": its first line is enough.
     license_field = (meta.get("License") or "").strip().splitlines()
     texts = [meta.get("License-Expression") or "", license_field[0] if license_field else ""]
@@ -68,9 +119,18 @@ def license_texts(name: str) -> list[str]:
 
 
 def runtime_dependencies() -> list[tuple[str, bool]]:
-    """(name, only on some platforms) of the locked runtime dependencies, from uv."""
+    """(name, only on some platforms) of the locked runtime dependencies (every extra
+    included), from uv."""
     exported = subprocess.run(
-        ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"],  # noqa: S607 - uv from PATH, fixed args
+        [  # noqa: S607 - uv from PATH, fixed args
+            "uv",
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--all-extras",
+            "--no-emit-project",
+            "--no-hashes",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

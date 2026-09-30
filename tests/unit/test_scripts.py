@@ -1,8 +1,11 @@
 """The CI helper scripts: license rule and privacy-coverage rule."""
 
+import subprocess
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+from scripts import check_licenses
 from scripts.check_coverage import check, main
 from scripts.check_licenses import Verdict, classify, documented_packages
 
@@ -84,3 +87,56 @@ def test_validators_need_ninety_five_percent() -> None:
     report = coverage_report({"src/antifaz/detect/validators/dni.py": (93, 100)})
 
     assert check(report) == ["detect/validators: 93.0 % < 95 %"]
+
+
+def test_license_check_reads_the_optional_extras_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `ner` extra ships with Antifaz too: its locked packages are checked like the rest."""
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="fastapi==1.0\ntorch==2.0 ; x\n")
+
+    monkeypatch.setattr(check_licenses.subprocess, "run", fake_run)
+
+    assert check_licenses.runtime_dependencies() == [("fastapi", False), ("torch", True)]
+    assert "--all-extras" in seen[0]
+
+
+def test_a_package_of_an_extra_that_is_not_installed_uses_its_recorded_license(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI never installs torch: the licenses of the extra, read by hand from their metadata,
+    stand in for the missing metadata."""
+
+    def missing(name: str) -> object:
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(check_licenses.metadata, "metadata", missing)
+
+    assert check_licenses.license_texts("torch") == [check_licenses.RECORDED_EXTRA["torch"]]
+    with pytest.raises(metadata.PackageNotFoundError):
+        check_licenses.license_texts("not-a-recorded-package")
+
+
+def test_every_recorded_license_is_allowed_and_weak_copyleft_is_documented() -> None:
+    documented = documented_packages(check_licenses.LICENSES_DOC.read_text(encoding="utf-8"))
+    for name, text in check_licenses.RECORDED_EXTRA.items():
+        verdict = classify([text])
+        assert verdict in (Verdict.OK, Verdict.WEAK_COPYLEFT), name
+        if verdict is Verdict.WEAK_COPYLEFT:
+            assert name in documented, name
+
+
+def test_recorded_licenses_match_the_installed_metadata() -> None:
+    """Where the extra is installed, what was recorded by hand must say the same."""
+    checked = 0
+    for name, text in check_licenses.RECORDED_EXTRA.items():
+        try:
+            meta = metadata.metadata(name)
+        except metadata.PackageNotFoundError:
+            continue
+        checked += 1
+        assert classify(check_licenses.metadata_texts(meta)) is classify([text]), name
+    if not checked:
+        pytest.skip("the ner extra is not installed")
