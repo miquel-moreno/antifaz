@@ -74,6 +74,14 @@ class UpstreamUnavailableError(AppError):
         super().__init__("could not reach the provider")
 
 
+class UpstreamRedirectError(AppError):
+    status_code = 502
+    code = "upstream_redirect"
+
+    def __init__(self) -> None:
+        super().__init__("the provider answered with a redirect, which is not followed")
+
+
 class BadUpstreamResponseError(AppError):
     status_code = 502
     code = "bad_upstream_response"

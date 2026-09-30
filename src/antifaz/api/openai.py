@@ -23,6 +23,7 @@ from antifaz.api.errors import (
     PayloadTooLargeError,
     StreamingNotSupportedError,
     UnauthorizedError,
+    UpstreamRedirectError,
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
@@ -55,10 +56,14 @@ async def _read_body(request: Request, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _reject_constant(_: str) -> object:
+    raise ValueError("NaN and Infinity are not valid JSON")
+
+
 def _parse(raw: bytes) -> dict[str, Any]:
     parsed: object = None
     try:
-        parsed = json.loads(raw.decode("utf-8"))
+        parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError, RecursionError):
         parsed = None
     # Raised outside the except block: the decode error (which may quote the body) is dropped.
@@ -91,14 +96,19 @@ async def chat_completions(request: Request) -> Response:
     settings: Settings = state.settings
     _authorize(request, settings)
     body = _parse(await _read_body(request, settings.max_body_bytes))
-    if body.get("stream") is True:
+    stream = body.get("stream", False)
+    if not isinstance(stream, bool):
+        raise InvalidRequestError()
+    if stream:
         raise StreamingNotSupportedError()
 
     masked, vault = mask_request(body, policy=state.policy, detector=state.detector)
-    payload = json.dumps(masked, ensure_ascii=False).encode("utf-8")
+    payload = json.dumps(masked, ensure_ascii=False, allow_nan=False).encode("utf-8")
     guard.check(payload, vault)  # the same bytes that are sent, right before sending
     upstream = await _send(state.http_client, settings, payload)
 
+    if 300 <= upstream.status_code < 400:
+        raise UpstreamRedirectError()  # never followed: the destination is fixed in settings
     if upstream.status_code >= 400:
         # The provider only saw masked text: its error is returned as it is (not restored).
         return Response(

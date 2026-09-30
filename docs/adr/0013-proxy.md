@@ -15,7 +15,9 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 - Un recorrido por formato reúne **todas** las cadenas del cuerpo en un orden estable y llama a `mask()` **una sola vez** por petición. Así la numeración de marcadores es la misma en toda la conversación (invariante 5) y hay una sola tabla por petición.
 - Campos conocidos y desconocidos se tratan igual: toda cadena se enmascara de forma genérica (ADR-0006). Los números, booleanos y `null` pasan tal cual.
 - Los argumentos de herramientas (`tool_calls[].function.arguments`) son JSON dentro de una cadena: se parsean, se enmascaran los valores de texto y se vuelven a serializar. Las **claves** son el esquema de la herramienta y no se cambian: entran en la misma llamada a `mask()` y, si alguna tuviera algo que ocultar (o un `[[` que escapar), la petición se **bloquea** porque no se puede enmascarar sin romper el formato. Lo mismo vale para las claves de cualquier objeto del cuerpo. Si los argumentos no son JSON válido, se enmascaran como texto.
-- Adjuntos (`image_url`, `input_audio`, `file`, `file_id`, `audio`, partes de tipo imagen, audio o fichero) → **bloqueo** con mensaje fijo. No se puede revisar lo que no es texto (invariante 7).
+- Adjuntos, con **lista de permitidos**: un objeto con `type` solo pasa si el tipo es `text`, `refusal` o `function`; cualquier otro (`image`, `document`, `input_image`, uno que salga mañana…) → **bloqueo** con mensaje fijo. Además, las claves `source`, `data`, `image`, `document`, `image_url`, `input_audio`, `file`, `file_id`, `file_data` y `audio` bloquean en cualquier sitio, y también un texto con una URL `data:...;base64,`. No se puede revisar lo que no es texto (invariante 7). Excepción: `tools`, `functions`, `response_format` y `tool_choice` son esquemas del desarrollador (`"type": "object"`, una propiedad llamada `data`…); sus textos se enmascaran igual, pero no pasan por estas dos listas.
+- Los números (no los booleanos) pasan por el detector como texto (`str(n)`): no pueden llevar un marcador, así que si esconden un dato (un teléfono como `612345678`) la petición se **bloquea**.
+- `NaN` e `Infinity` no son JSON válido: 400. `stream` solo puede ser `true`, `false` o no estar.
 - Los bloques de razonamiento (`thinking`, `redacted_thinking` y su `signature`, en Anthropic) se copian **sin tocar**: la firma dejaría de valer (invariante 9).
 - El cuerpo enmascarado se serializa **una sola vez**, y `guard.check()` revisa **esos mismos bytes** justo antes de enviarlos. No hay una segunda serialización que la guardia no haya visto.
 - `stream: true` se rechaza con un 400 fijo hasta la parte 5c.
@@ -34,6 +36,7 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 **Errores.**
 
 - Los errores del proveedor (4xx/5xx) se devuelven tal cual: el proveedor solo vio texto enmascarado, así que no contienen datos en claro. No se restauran.
+- Una redirección (3xx) del proveedor no se sigue: 502.
 - Los errores propios llevan mensajes fijos (sin valores ni cuerpo) y se lanzan `from None`. Tiempo agotado → 504; fallo de conexión → 502.
 - Nunca se escriben en logs cuerpos, cabeceras ni claves. Los loggers de `httpx` y `httpcore` quedan en `WARNING` (invariante 8).
 
@@ -46,6 +49,6 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 ## Consecuencias
 
 - Invariantes que cubre esta decisión: 2, 3, 4, 7, 8 y 9.
-- Un campo nuevo del proveedor con texto se enmascara sin tocar el código; un adjunto nuevo con un nombre desconocido pasaría como texto (y se enmascararía), no como binario revisado.
+- Un campo nuevo del proveedor con texto se enmascara sin tocar el código; un tipo de parte nuevo se bloquea hasta que se añada a la lista de permitidos.
 - Si una clave de un objeto contiene un dato personal, la petición se bloquea aunque sea legítima: falla cerrada a propósito.
 - Los errores del proveedor pueden mostrar marcadores `[[TIPO_N]]` en lugar de los datos.

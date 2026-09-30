@@ -296,3 +296,74 @@ def test_response_with_unexpected_shape_passes_untouched() -> None:
     assert restore_response({"choices": [1, {"message": 2}]}, vault) == {
         "choices": [1, {"message": 2}]
     }
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "image", "source": {"type": "base64", "data": "AAAA"}},
+        {"type": "document", "source": {"type": "text", "data": "hola"}},
+        {"type": "input_image", "detail": "auto"},
+        {"type": "audio_nuevo", "x": "y"},
+        {"type": "text", "text": "hola", "data": "AAAA"},
+    ],
+)
+def test_parts_outside_the_allowlist_block(part: dict[str, object]) -> None:
+    with pytest.raises(AttachmentBlocked):
+        mask_request({"messages": [{"role": "user", "content": [part]}]})
+
+
+def test_attachment_keys_block_in_unknown_fields() -> None:
+    for extra in ({"source": {"x": 1}}, {"image": "x"}, {"document": "x"}):
+        with pytest.raises(AttachmentBlocked):
+            mask_request({"messages": [], "nuevo": extra})
+
+
+def test_refusal_parts_and_tool_schemas_are_allowed() -> None:
+    body = {
+        "messages": [{"role": "assistant", "content": [{"type": "refusal", "refusal": "no"}]}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "f",
+                    "parameters": {"type": "object", "properties": {"data": {"type": "string"}}},
+                },
+            }
+        ],
+        "response_format": {"type": "json_schema", "json_schema": {"name": "x", "schema": {}}},
+    }
+
+    masked, _ = mask_request(body)
+
+    assert masked == body
+
+
+@pytest.mark.parametrize("number", [612345678, 281234567840, 612345678.0])
+def test_numbers_with_personal_data_block(number: object) -> None:
+    with pytest.raises(UnmaskableField):
+        mask_request({"messages": [], "metadata": {"tel": number}})
+
+
+def test_numbers_in_tool_arguments_are_checked() -> None:
+    arguments = json.dumps({"tel": 612345678})
+    body = {
+        "messages": [{"role": "assistant", "tool_calls": [{"function": {"arguments": arguments}}]}]
+    }
+
+    with pytest.raises(UnmaskableField):
+        mask_request(body)
+
+
+def test_plain_numbers_and_booleans_pass() -> None:
+    body = {"messages": [], "max_tokens": 100, "temperature": 0.7, "store": True}
+
+    masked, _ = mask_request(body)
+
+    assert masked == body
+
+
+def test_base64_data_url_in_text_blocks() -> None:
+    text = "mira data:image/png;base64,iVBORw0KGgo="
+    with pytest.raises(AttachmentBlocked):
+        mask_request({"messages": [{"role": "user", "content": text}]})

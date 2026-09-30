@@ -150,7 +150,7 @@ Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), propuesta):
 1. Comprueba la clave de Antifaz con `hmac.compare_digest`. Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
 2. Lee el cuerpo con un tope (`MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
 3. Reúne **todas** las cadenas del cuerpo (mensajes, partes de texto, `name`, resultados de herramientas y cualquier campo nuevo) y llama a `mask()` una sola vez. Los `arguments` de las llamadas a herramientas se parsean como JSON y se enmascaran sus valores. Las claves de los objetos no se cambian: si alguna contiene un dato, la petición se bloquea.
-4. Imágenes, audio, ficheros o `file_id` → 400 `antifaz_blocked`.
+4. Solo pasan partes de tipo `text`, `refusal` o `function`: imágenes, documentos, audio, ficheros, `file_id`, claves como `source` o `data`, o un texto con una URL `data:...;base64,` → 400 `antifaz_blocked`. Los números pasan por el detector: si uno es un dato (un teléfono escrito como número), se bloquea. `NaN`/`Infinity` o un `stream` que no sea booleano → 400.
 5. Serializa una vez y la guardia de salida revisa **esos mismos bytes** justo antes de enviarlos.
 6. Envía a `OPENAI_BASE_URL` con `OPENAI_API_KEY`. La URL nunca sale del cliente.
 7. Restaura `content`, `refusal` y los `arguments` de las herramientas (parseando el JSON, así siguen siendo JSON válido aunque el dato tenga comillas). El resto de campos pasa sin tocar.
@@ -164,6 +164,7 @@ Errores:
 | `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
 | El proveedor tarda más de `UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
 | No se puede conectar | 502 `upstream_unavailable` |
+| El proveedor responde con una redirección (3xx) | 502 `upstream_redirect` (no se sigue) |
 | El proveedor responde con error (4xx/5xx) | Su cuerpo **tal cual**: solo vio texto enmascarado, así que puede mostrar marcadores `[[TIPO_N]]` |
 
 Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en `WARNING`. Un test (invariante 8) pasa un DNI centinela por respuestas, errores del proveedor, tiempos agotados y bloqueos de la guardia, con todos los loggers en `DEBUG`, y comprueba que no aparece ni en los logs ni en los cuerpos de error. Otro (invariante 2) quita la guardia **solo en el test** y comprueba que el proveedor falso no recibe ningún valor oculto, tampoco en argumentos ni resultados de herramientas.
@@ -188,5 +189,9 @@ Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en
 
 - El proxy solo habla OpenAI Chat y sin streaming; Anthropic Messages y el streaming llegan en el resto del issue 5.
 - Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.
-- Un tipo de adjunto nuevo con un nombre que no conocemos se trataría como texto (se enmascara, pero no se bloquea).
+- El detector no decodifica base64, hexadecimal ni otras codificaciones dentro del texto (solo bloquea las URL `data:...;base64,`).
+- Los errores del proveedor se devuelven con los marcadores `[[TIPO_N]]` sin restaurar.
+- El tamaño de la respuesta del proveedor no tiene tope en v0.1.
+- `Bearer` en la cabecera `Authorization` distingue mayúsculas: `bearer` se rechaza.
+- En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
 - Los nombres de persona no se detectan hasta el issue 6 (NER): hoy pasan en claro.

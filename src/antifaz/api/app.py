@@ -36,7 +36,8 @@ def create_app(
         try:
             yield
         finally:
-            await client.aclose()
+            if http_client is None:  # an injected client belongs to whoever created it
+                await client.aclose()
 
     app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
     app.state.settings = settings

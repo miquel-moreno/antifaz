@@ -16,7 +16,8 @@ VALUES = ["12345678Z", "X1234567L", "ana@example.com", "612 345 678"]
 FILLER = ['"', "\\", "\\u0041", "[[", "[[ES_DNI_1]]", "]]", "!", "\n", "ñ", "​", "{", "a b"]
 
 text = st.lists(st.sampled_from(VALUES) | st.sampled_from(FILLER), max_size=6).map("".join)
-leaf = text | st.integers() | st.booleans() | st.none()
+# Small numbers: a number holding personal data blocks the request (tested apart).
+leaf = text | st.integers(-99999, 99999) | st.booleans() | st.none()
 keys = st.sampled_from(["a", "nota", "dni", "lista"])
 json_values = st.recursive(
     leaf,

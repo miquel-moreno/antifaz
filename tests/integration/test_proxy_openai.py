@@ -492,3 +492,63 @@ def test_email_detector_type_is_used(upstream: FakeUpstream) -> None:
 
         assert response.status_code == 200
         assert b"[[EMAIL_1]]" in upstream.requests[0].content
+
+
+@pytest.mark.parametrize("raw", [b'{"messages": [], "t": NaN}', b'{"messages": [], "t": Infinity}'])
+def test_nan_and_infinity_are_rejected(
+    proxy: TestClient, upstream: FakeUpstream, raw: bytes
+) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", content=raw, headers={**AUTH, "Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 400
+    assert upstream.requests == []
+
+
+@pytest.mark.parametrize("value", ["true", 1, None, "yes"])
+def test_stream_must_be_a_boolean(proxy: TestClient, upstream: FakeUpstream, value: object) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", json={**_chat("hola"), "stream": value}, headers=AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert upstream.requests == []
+
+
+def test_stream_false_is_accepted(proxy: TestClient) -> None:
+    response = proxy.post(
+        "/v1/chat/completions", json={**_chat("hola"), "stream": False}, headers=AUTH
+    )
+
+    assert response.status_code == 200
+
+
+def test_upstream_redirect_is_a_502(upstream: FakeUpstream) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        302, headers={"Location": "http://evil.invalid"}
+    )
+    for client in _client(upstream):
+        response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
+
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "upstream_redirect"
+        assert "evil" not in response.text
+    assert len(upstream.requests) == 1
+
+
+def test_injected_http_client_is_not_closed(upstream: FakeUpstream) -> None:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    with TestClient(create_app(_settings(), http_client=http)):
+        pass
+
+    assert not http.is_closed
+
+
+def test_own_http_client_is_closed() -> None:
+    app = create_app(_settings())
+    with TestClient(app):
+        client = app.state.http_client
+
+    assert client.is_closed
