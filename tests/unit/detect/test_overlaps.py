@@ -31,10 +31,25 @@ def test_a_span_that_contains_another_wins_whatever_its_layer() -> None:
     assert resolve([dni, email]) == [email]
 
 
-def test_a_ner_span_containing_a_validator_span_wins() -> None:
+def test_a_ner_span_never_swallows_a_validator_or_pattern_span() -> None:
+    # "Carmen 12345678Z" seen as one name: the DNI stays a DNI (so a policy that allows names
+    # still masks it) and the name is trimmed around it.
     person = span(0, 30, EntityType.PERSON, N)
     dni = span(10, 19, EntityType.ES_DNI, V)
-    assert resolve([dni, person]) == [person]
+    email = span(20, 28, EntityType.EMAIL, P)
+    assert resolve([dni, person, email]) == [
+        span(0, 10, EntityType.PERSON, N),
+        dni,
+        span(19, 20, EntityType.PERSON, N),
+        email,
+        span(28, 30, EntityType.PERSON, N),
+    ]
+
+
+def test_a_ner_span_containing_another_ner_span_wins() -> None:
+    outer = span(0, 20, EntityType.PERSON, N)
+    inner = span(5, 10, EntityType.ADDRESS, N)
+    assert resolve([inner, outer]) == [outer]
 
 
 def test_ner_has_the_lowest_priority_in_a_partial_overlap() -> None:

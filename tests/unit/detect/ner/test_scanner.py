@@ -51,10 +51,13 @@ def test_the_ner_reads_the_normalised_view_and_spans_cover_the_original() -> Non
     assert spans[0].layer is Layer.NER
 
 
-def test_a_ner_span_containing_a_dni_masks_it_whole() -> None:
+def test_a_ner_span_containing_a_dni_keeps_the_dni_as_a_dni() -> None:
     ner, _ = fake_detector({f"Carmen {SENTINEL_DNI}": "person"})
     text = f"Soy Carmen {SENTINEL_DNI}."
-    assert _values(text, Scanner(ner)(text)) == [(f"Carmen {SENTINEL_DNI}", EntityType.PERSON)]
+    assert _values(text, Scanner(ner)(text)) == [
+        ("Carmen ", EntityType.PERSON),
+        (SENTINEL_DNI, EntityType.ES_DNI),
+    ]
 
 
 def test_a_dni_beats_a_ner_span_that_overlaps_it_in_part_and_the_rest_is_kept() -> None:

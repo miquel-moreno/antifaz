@@ -105,3 +105,15 @@ def test_every_input_span_is_kept_whole_or_overlaps_a_kept_span(spans: list[Span
     result = resolve(spans)
     for span in set(spans) - set(result):
         assert any(span.start < kept.end and kept.start < span.end for kept in result)
+
+
+@settings(max_examples=1000, deadline=None)
+@given(spans=spans_strategy, text=RESOLVE_TEXT)
+def test_ner_spans_never_change_the_validator_and_pattern_result(
+    spans: list[Span], text: str
+) -> None:
+    """Review of 6a: whatever the NER finds, validator and pattern spans come out as without it
+    (a NER "name" around a DNI must not turn the DNI into a PERSON a policy could allow)."""
+    others = [s for s in spans if s.layer is not Layer.NER]
+    with_ner = [s for s in resolve(spans, text) if s.layer is not Layer.NER]
+    assert with_ner == resolve(others, text)

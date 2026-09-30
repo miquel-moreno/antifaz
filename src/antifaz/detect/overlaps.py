@@ -65,12 +65,15 @@ def _has_alnum(text: str | None, span: Span) -> bool:
 def resolve(spans: Iterable[Span], text: str | None = None) -> list[Span]:
     """Non-overlapping spans, sorted by start, covering everything the input spans covered.
 
-    A span that contains another one entirely wins, whatever its layer (ADR-0010: masking
-    more is the safe failure): spans that are not inside another one are placed first, so a
-    container always beats what it contains. For partial overlaps the priority order picks
-    the winner, and the loser is TRIMMED to the parts nobody else covers (ADR-0016), so no
-    detected letter or digit is left in clear. With `text`, trimmed pieces without any letter
-    or digit (a space, a dash) are dropped. Spans that only touch are both kept.
+    Validator and pattern spans are placed first, so the NER never changes them (ADR-0016).
+    Among them, a span that contains another one entirely wins, whatever its layer (ADR-0010:
+    masking more is the safe failure): spans that are not inside another one are placed
+    first, so a container always beats what it contains. The same holds among NER spans. For
+    partial overlaps the priority order picks the winner, and the loser is TRIMMED to the
+    parts nobody else covers (ADR-0016), so no detected letter or digit is left in clear: a
+    NER "name" around a DNI becomes the name without the DNI, and the DNI. With `text`,
+    trimmed pieces without any letter or digit (a space, a dash) are dropped. Spans that only
+    touch are both kept.
 
     Kept spans never overlap each other, so they stay sorted by start and a candidate is only
     compared with the kept spans it overlaps (found by bisection). The pieces of one candidate
@@ -78,10 +81,15 @@ def resolve(spans: Iterable[Span], text: str | None = None) -> list[Span]:
     is still resolved quickly (a quadratic check was a way to block the gateway).
     """
     unique = set(spans)
-    inside = _contained(unique)
+    ner = {span for span in unique if span.layer is Layer.NER}
+    # The container rule only works inside the same side: validators and patterns among
+    # themselves, NER spans among themselves. A NER span never swallows a validator or pattern
+    # span (a policy that allows names would then send a DNI inside a "name" in clear).
+    inside = _contained(unique - ner) | _contained(ner)
     starts: list[int] = []
     kept: list[Span] = []
-    for candidate in sorted(unique, key=lambda s: (s in inside, *_priority(s))):
+    order = sorted(unique, key=lambda s: (s.layer is Layer.NER, s in inside, *_priority(s)))
+    for candidate in order:
         pieces = _free_pieces(candidate, starts, kept)
         if len(pieces) == 1 and pieces[0] == candidate:
             keep = [candidate]  # untouched: kept even without letters (validators decided)

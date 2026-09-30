@@ -134,3 +134,10 @@ def test_a_short_value_glued_to_a_masked_one_is_masked_as_the_guard_would_see_it
     )
     for text in result.texts:
         guard.check(text, result.vault)
+
+
+def test_a_dni_inside_a_ner_name_is_masked_even_if_the_policy_allows_names() -> None:
+    policy = Policy(entities=MappingProxyType({EntityType.PERSON: Action.ALLOW}))
+    scanner = Scanner(fake_detector({f"Carmen {SENTINEL_DNI}": "person"})[0])
+    result = mask(f"Soy Carmen {SENTINEL_DNI}.", policy, detector=scanner)
+    assert result.text == "Soy Carmen [[ES_DNI_1]]."
