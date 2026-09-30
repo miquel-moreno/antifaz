@@ -138,3 +138,18 @@ def test_muchos_campos_desconocidos(
     )
     assert response.status_code in (200, 400)
     assert_not_sent(upstream_anthropic, DNI)
+
+
+@pytest.mark.parametrize("depth", [1_000, 100_000])
+def test_respuesta_del_proveedor_muy_profunda(depth: int) -> None:
+    """El proveedor responde con un JSON anidado miles de veces: 502 fijo, nunca 500."""
+    raw = '{"choices": ' + "[" * depth + "1" + "]" * depth + "}"
+    upstream = FakeUpstream(lambda _: httpx.Response(200, content=raw.encode()))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app = create_app(oai._settings(), http_client=http)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/v1/chat/completions", json=openai_body("hola"), headers=OPENAI_AUTH
+        )
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "bad_upstream_response"

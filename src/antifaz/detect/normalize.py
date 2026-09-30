@@ -3,7 +3,8 @@
 Before the patterns run (ADR-0014), every character that only hides a value is folded:
 
 - invisible format characters (Unicode category Cf: zero-width space, ZWNJ/ZWJ, soft
-  hyphen, word joiner, BOM, bidi marks...) are dropped;
+  hyphen, word joiner, BOM, bidi marks...), combining marks (Mn: accents written apart,
+  variation selectors) and the Hangul fillers are dropped;
 - characters whose NFKC form is a single ASCII letter or digit (full-width digits and
   letters, mathematical letters, superscripts) become that ASCII character;
 - odd spaces (tab, no-break space, thin and other Unicode spaces) become a plain space;
@@ -44,8 +45,12 @@ _SPACES = "\t\u00a0\u1680\u202f\u205f\u3000" + "".join(map(chr, range(0x2000, 0x
 # Ordinal indicators stay: addresses use them ("3.\u00ba 2.\u00aa") and they never hide an id.
 _KEPT = frozenset("\u00aa\u00ba")
 
-# Blocks searched for Cf characters and for NFKC forms that are one ASCII letter or digit.
-_CF_RANGES = ((0x0000, 0x3000), (0xFE00, 0x10000), (0x1D100, 0x1D200), (0xE0000, 0xE0080))
+# Blocks searched for invisible characters (Cf) and combining marks (Mn, which includes the
+# variation selectors) and for NFKC forms that are one ASCII letter or digit.
+_DROP_RANGES = ((0x0000, 0x10000), (0x1D100, 0x1D200), (0xE0000, 0xE0200))
+_DROP_CATEGORIES = frozenset({"Cf", "Mn"})
+# Hangul fillers render as blank space but are letters (Lo): dropped too.
+_HANGUL_FILLERS = "".join(map(chr, (0x115F, 0x1160, 0x3164, 0xFFA0)))
 _NFKC_RANGES = ((0x00A0, 0x0100), (0x2070, 0x20A0), (0x2100, 0x2150), (0x2460, 0x24F0),
                 (0xFF00, 0xFF70), (0x1D400, 0x1D800))  # fmt: skip
 
@@ -66,7 +71,9 @@ def _build() -> tuple[dict[int, str | None], str]:
             table[ord(char)] = folded
     table.update({ord(char): latin for char, latin in HOMOGLYPHS.items()})
     table.update({ord(char): " " for char in _SPACES})
-    dropped = "".join(c for c in _codepoints(_CF_RANGES) if unicodedata.category(c) == "Cf")
+    dropped = _HANGUL_FILLERS + "".join(
+        c for c in _codepoints(_DROP_RANGES) if unicodedata.category(c) in _DROP_CATEGORIES
+    )
     table.update({ord(char): None for char in dropped})
     return table, dropped
 

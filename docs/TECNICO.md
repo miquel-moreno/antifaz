@@ -75,7 +75,7 @@ Los identificadores de la UE que son solo cifras necesitan contexto porque, sin 
 
 Antes de buscar, `detect/normalize.py` crea una vista normalizada del texto con un mapa de posiciones; el texto original no se toca:
 
-- Se quitan los caracteres de formato invisibles (categoría Unicode Cf: espacio de ancho cero, ZWNJ/ZWJ, guion blando, BOM, word joiner, marcas de dirección…).
+- Se quitan los caracteres de formato invisibles (categoría Unicode Cf: espacio de ancho cero, ZWNJ/ZWJ, guion blando, BOM, word joiner, marcas de dirección…), las marcas combinantes (Mn: acentos escritos aparte, selectores de variante) y los rellenos hangul.
 - Los caracteres cuyo NFKC es **una** letra o cifra ASCII pasan a ese carácter (cifras y letras de ancho completo, letras matemáticas, superíndices). Los ordinales `º` y `ª` se quedan como están (los usan las direcciones).
 - Tabulador, espacio duro (NBSP) y los demás espacios Unicode pasan a un espacio normal. Los saltos de línea se conservan.
 - Homoglifos: las letras cirílicas `А В Е К М Н О Р С Т Х У З` y griegas `Α Β Ε Ζ Η Ι Κ Μ Ν Ο Ρ Τ Υ Χ` (y sus minúsculas) pasan a la latina que imitan (tabla `HOMOGLYPHS`; `З` y `Ζ` → `Z`).
@@ -84,9 +84,9 @@ Cada carácter se sustituye por uno o se elimina, así que las posiciones se dev
 
 **Separadores:** DNI, NIE y NIF K/L/M aceptan un solo espacio, punto o guion entre grupos (`12 345 678 Z`, `12.345.678-Z`, `X 1 234 567 L`) y **un** salto de línea (`\n` o `\r\n`) en cualquier punto de las cifras o antes de la letra. El IBAN acepta un salto de línea entre grupos. Los recuentos siguen siendo exactos (8 o 7 cifras) y la letra o el mod 97 siguen siendo obligatorios; dos saltos de línea o dos espacios seguidos no valen.
 
-**Límites relajados para los tipos con control fuerte:** DNI, NIE, NIF K/L/M e IBAN pueden ir pegados a letras (`DNI12345678Z`, `NIEX1234567L`, `ref abc12345678Zxyz`, `IBANES91…`), pero nunca a cifras: un DNI dentro de una tira más larga de cifras sigue sin ser un DNI. Si hay separador antes de la letra de control, la letra no puede ir seguida de otra letra (en "12345678 casas" la "c" no es la letra de control). CIF, NSS, CCC, codice fiscale y NIF-IVA mantienen los límites estrictos (controles más débiles; "DNI és 16257107-V" sigue sin ser un CIF).
+**Límites relajados para los tipos con control fuerte:** DNI, NIE, NIF K/L/M e IBAN pueden ir pegados a letras (`DNI12345678Z`, `NIEX1234567L`, `ref abc12345678Zxyz`, `IBANES91…`), pero nunca a cifras: un DNI dentro de una tira más larga de cifras sigue sin ser un DNI. Tampoco se relaja dentro de una tira toda hexadecimal de 16 caracteres o más (hashes): con 20.000 valores aleatorios, 0 falsos DNI en SHA-1 y SHA-256 y 2 en UUID v4 (sus grupos tienen como mucho 12 caracteres; coste aceptado, se enmascara de más). Si hay separador antes de la letra de control, la letra no puede ir seguida de otra letra (en "12345678 casas" la "c" no es la letra de control). CIF, NSS, CCC, codice fiscale y NIF-IVA mantienen los límites estrictos (controles más débiles; "DNI és 16257107-V" sigue sin ser un CIF).
 
-**Cuerpos muy anidados:** un JSON con más de 100 niveles de objetos o listas se bloquea (`NestingTooDeep`, 400 `antifaz_blocked`) antes de cualquier recorrido recursivo; la comprobación de adjuntos es iterativa. Un `arguments` con JSON demasiado profundo se trata como texto y se enmascara como tal.
+**Cuerpos muy anidados:** un JSON con más de 100 niveles de objetos o listas se bloquea (`NestingTooDeep`, 400 `antifaz_blocked`) antes de cualquier recorrido recursivo; la comprobación de adjuntos es iterativa. Una respuesta del proveedor igual de profunda da un 502 `bad_upstream_response` fijo. Un `arguments` con JSON demasiado profundo se trata como texto y se enmascara como tal.
 
 **Limitaciones conocidas:**
 - Cifras de otros sistemas de numeración (árabes, devanagari…) no se convierten: su NFKC no es ASCII. Solo se cubren los homoglifos de la tabla; otros alfabetos parecidos (armenio, cherokee…) no.

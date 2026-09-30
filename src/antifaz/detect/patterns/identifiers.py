@@ -20,7 +20,7 @@ _FLAGS = re.IGNORECASE | re.ASCII
 _START = r"(?<![0-9A-Za-z\u00C0-\u024F])"
 _END = r"(?![0-9A-Za-z\u00C0-\u024F])"
 _SEP = r"[ .-]?"  # between the parts of a CIF
-_LINE_BREAK = r"\r?\n"
+_LINE_BREAK = r"(?:\r\n?|\n)"  # CRLF, CR or LF
 # Between the parts of a DNI, NIE or K/L/M NIF: one space, dot or hyphen, or one line break
 # (tabs and no-break spaces arrive as spaces: the detector normalises them, ADR-0014).
 _ID_SEP_CHAR = rf"(?:[ .-]|{_LINE_BREAK})"
@@ -46,6 +46,11 @@ def _digits(count: int, head: int) -> str:
         f"[0-9]{{{left}}}{_LINE_BREAK}[0-9]{{{count - left}}}" for left in range(1, count)
     )
     return f"(?:[0-9]{{{count}}}|{grouped}|{split})"
+
+
+# For a DNI, _digits(8, 2) is, with LB = the line break:
+#   (?:[0-9]{8}|[0-9]{2}(?:[ .][0-9]{3}){2}
+#      |[0-9]{1}LB[0-9]{7}|[0-9]{2}LB[0-9]{6}|...|[0-9]{7}LB[0-9]{1})
 
 
 def _control_letter_id(first: str, count: int, head: int) -> re.Pattern[str]:
@@ -139,6 +144,38 @@ def _iban_spans(text: str) -> Iterator[Span]:
             position = match.start() + 1
 
 
+_RELAXED = frozenset({EntityType.ES_DNI, EntityType.ES_NIE, EntityType.ES_NIF})
+_HEX = frozenset("0123456789abcdefABCDEF")
+_HEX_RUN = 16  # a run of at least this many hex characters is a hash or an id, not text
+_HEX_WINDOW = 32  # how far the run is followed on each side (keeps the check linear)
+
+
+def _inside_hex_run(text: str, start: int, end: int) -> bool:
+    """True if the alphanumeric run around text[start:end] is all hex and 16+ long.
+
+    Then the relaxed boundary does not apply: a SHA-1 or a UUID holds 8 digits and a
+    letter A-F often enough to look like a DNI. The run is followed at most _HEX_WINDOW
+    characters on each side; a longer all-hex stretch counts as a hex run.
+    """
+    if not all(char in _HEX for char in text[start:end]):
+        return False
+    left = start
+    while left > 0 and start - left < _HEX_WINDOW and text[left - 1].isascii():
+        if not text[left - 1].isalnum():
+            break
+        if text[left - 1] not in _HEX:
+            return False
+        left -= 1
+    right = end
+    while right < len(text) and right - end < _HEX_WINDOW and text[right].isascii():
+        if not text[right].isalnum():
+            break
+        if text[right] not in _HEX:
+            return False
+        right += 1
+    return right - left >= _HEX_RUN
+
+
 def find_identifiers(text: str) -> list[Span]:
     """Spans of every identifier in the text whose check digits are valid."""
     spans = [
@@ -146,6 +183,7 @@ def find_identifiers(text: str) -> list[Span]:
         for entity_type, pattern, is_valid in _PATTERNS
         for match in pattern.finditer(text)
         if is_valid(match.group())
+        and not (entity_type in _RELAXED and _inside_hex_run(text, match.start(), match.end()))
     ]
     spans.extend(_iban_spans(text))
     return spans

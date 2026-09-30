@@ -90,3 +90,22 @@ def test_libreria_mask_no_deja_el_dato_en_el_texto() -> None:
     result = mask(f"Hola, soy {DNI} y mi IBAN es {IBAN}, tel {PHONE}")
     for value in (DNI, IBAN, PHONE):
         assert value not in result.text
+
+
+# Round 2 (review): combining marks, variation selectors, a lone CR and Hangul fillers.
+ROUND_2 = {
+    "dni_selector_de_variante": ("DNI 1234\ufe0f5678Z", DNI),
+    "dni_acento_combinante": ("DNI 1234\u03015678Z", DNI),
+    "dni_retorno_de_carro": ("DNI 1234\r5678Z", DNI),
+    "dni_relleno_hangul": ("DNI 1234\u31645678Z", DNI),
+    "dni_acento_en_la_primera_cifra": ("1\u03012345678Z", DNI),
+    "dni_selector_suplementario": ("DNI 1234\U000e01005678Z", DNI),
+}
+
+
+@pytest.mark.parametrize(("text", "value"), ROUND_2.values(), ids=ROUND_2.keys())
+def test_formato_raro_ronda_2(
+    openai_proxy: TestClient, upstream_openai: FakeUpstream, text: str, value: str
+) -> None:
+    """El atacante mete marcas combinantes, selectores de variante, CR o rellenos hangul."""
+    _attack(openai_proxy, upstream_openai, text, value)

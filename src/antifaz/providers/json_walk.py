@@ -42,7 +42,7 @@ _NO_KEYS: frozenset[str] = frozenset()
 MAX_DEPTH = 100
 
 
-def _too_deep(node: Any) -> bool:
+def too_deep(node: Any) -> bool:
     """True if `node` nests objects and arrays deeper than MAX_DEPTH (iterative, no recursion)."""
     stack: list[tuple[Any, int]] = [(node, 1)]
     while stack:
@@ -61,7 +61,7 @@ def _too_deep(node: Any) -> bool:
 
 def check_depth(node: Any) -> None:
     """Block a body nested deeper than MAX_DEPTH."""
-    if _too_deep(node):
+    if too_deep(node):
         raise NestingTooDeep()
 
 
@@ -71,7 +71,7 @@ def parse_container(text: str) -> Any | None:
         parsed = json.loads(text)
     except ValueError:
         return None
-    if not isinstance(parsed, dict | list) or _too_deep(parsed):
+    if not isinstance(parsed, dict | list) or too_deep(parsed):
         return None  # too deep: it stays a string and is masked as text
     return parsed
 
@@ -206,5 +206,6 @@ __all__ = [
     "mask_body",
     "parse_container",
     "restore_strings",
+    "too_deep",
     "walk",
 ]

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from antifaz.detect.normalize import normalize
 from tests.integration import test_proxy_anthropic as anth
 from tests.integration import test_proxy_openai as oai
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream, compact
@@ -49,7 +50,13 @@ def sent_texts(upstream: FakeUpstream) -> list[str]:
 
 
 def assert_not_sent(upstream: FakeUpstream, *values: str) -> None:
-    """No value reaches the provider: as it is, NFKC-normalised or compacted (alphanumerics)."""
+    """No value reaches the provider in any sent text (raw body or decoded JSON string).
+
+    Each text is checked three ways: NFKC-normalised against the value; reduced to its
+    alphanumerics against the value's alphanumerics; and through the detector's own view
+    (normalize(): invisible characters and combining marks dropped, look-alikes folded)
+    reduced to alphanumerics, so a zero-width character between two digits hides nothing.
+    """
     texts = sent_texts(upstream)
     for value in values:
         folded = compact(value)
@@ -57,6 +64,7 @@ def assert_not_sent(upstream: FakeUpstream, *values: str) -> None:
             normal = unicodedata.normalize("NFKC", text)
             assert value not in normal
             assert folded not in compact(normal)
+            assert folded not in compact(normalize(text).text)
 
 
 def openai_body(content: object, **extra: Any) -> dict[str, Any]:

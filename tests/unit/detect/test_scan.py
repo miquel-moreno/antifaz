@@ -237,3 +237,23 @@ def test_a_value_glued_to_an_accented_letter_is_reported_if_it_has_a_control_let
     # ADR-0014: a DNI may touch letters, accented or not (the control letter decides).
     text = "cafés12345678Z"
     assert [(text[s.start : s.end], s.type) for s in scan(text)] == [("12345678Z", T.ES_DNI)]
+
+
+# Hex strings (a hash or an id): the relaxed boundary of ADR-0014 does not apply there.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "commit 2f70e239c7a5d80384275be451075e4cb7125e9e",  # SHA-1 read as a DNI before
+        "hash aaaa0bb1c2d300000003Aeee4ff5aa6bb7cc8dd9",  # holds 00000003A, a valid DNI
+        "id 00000003Abcdef0123456789",  # the DNI starts the hex run
+    ],
+)
+def test_long_hex_runs_are_not_read_as_glued_dnis(text: str) -> None:
+    assert [s for s in scan(text) if s.type is T.ES_DNI] == []
+
+
+@pytest.mark.parametrize(
+    "text", ["DNI12345678Z", "ref abc12345678Zxyz", "ref 00000003A", "x00000003Ab"]
+)
+def test_dnis_outside_long_hex_runs_are_still_reported(text: str) -> None:
+    assert [s.type for s in scan(text)] == [T.ES_DNI]

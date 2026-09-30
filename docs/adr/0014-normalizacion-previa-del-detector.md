@@ -15,9 +15,19 @@ La ronda 1 del red team (`tests/redteam/`) encontró 11 formas de pasar un DNI, 
 - **Límites relajados para los tipos con control fuerte** (DNI, NIE, NIF K/L/M, IBAN): pueden tocar letras, nunca cifras. Con separador antes de la letra de control, esa letra no puede ir seguida de otra letra. CIF, NSS, CCC, codice fiscale y NIF-IVA mantienen los límites estrictos.
 - **Profundidad máxima del JSON:** 100 niveles, comprobados de forma iterativa antes de cualquier recorrido recursivo; más profundo se bloquea con 400 `antifaz_blocked`.
 
+### Revisión (2026-09-30)
+
+- La vista también quita las **marcas combinantes** (Mn: un acento escrito aparte, los selectores de variante U+FE00–FE0F y U+E0100–E01EF) y los **rellenos hangul** (U+115F, U+1160, U+3164, U+FFA0), que se ven como un espacio vacío.
+- El salto de línea admitido es `
+`, `` o `
+`.
+- El IBAN también puede tocar letras: `_ends_at_boundary` solo comprueba que después no venga una cifra.
+- **Regla hexadecimal:** el límite relajado de DNI, NIE y NIF K/L/M no se aplica si la tira alfanumérica que contiene el candidato es toda hexadecimal (`0-9a-fA-F`) y tiene 16 caracteres o más (se sigue como mucho 32 caracteres a cada lado, para que la comprobación sea lineal). Sin esta regla, 40 de 20.000 SHA-1 y 8 de 20.000 UUID daban un DNI.
+
 ## Consecuencias
 
 - Las 11 fugas y los 4 límites Unicode conocidos (espacio de ancho cero, espacio duro, tabuladores, cifras de ancho completo) pasan a estar cubiertos por tests normales.
+- Falsos positivos medidos con la regla hexadecimal (20.000 valores aleatorios de cada tipo, 2026-09-30): SHA-1 0, SHA-256 0, UUID v4 2 con DNI (3 con cualquier detección). Los grupos de un UUID tienen como mucho 12 caracteres hexadecimales por los guiones, así que la regla no los cubre: es un coste aceptado (se enmascara de más).
 - Más falsos positivos posibles: un número de 8 cifras pegado a una letra que resulte ser su letra de control (1 de cada 23) ahora se enmascara. Es el fallo seguro.
 - Tres expectativas antiguas cambian a propósito (`A12345678ZB`, `12345678ZZ`, `X2482300WA`, `cafés12345678Z` ahora se detectan).
 - La tabla de homoglifos es corta a propósito: alfabetos no incluidos y cifras de otros sistemas de numeración siguen siendo una limitación documentada.
