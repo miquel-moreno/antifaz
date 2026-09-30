@@ -85,7 +85,8 @@ async def _prepare(request: Request, path: str, *, can_stream: bool) -> _Call:
         stream = False
     # In a worker thread: detection (patterns and the NER pool) never blocks the event loop.
     masked, vault = await anyio.to_thread.run_sync(
-        partial(mask_request, body, policy=state.policy, detector=state.detector)
+        partial(mask_request, body, policy=state.policy, detector=state.detector),
+        limiter=state.mask_limiter,
     )
     url = settings.anthropic_base_url.rstrip("/") + path
     return _Call(url, headers, masked, vault, configured_keys(settings), stream)

@@ -59,7 +59,8 @@ async def chat_completions(request: Request) -> Response:
 
     # In a worker thread: detection (patterns and the NER pool) never blocks the event loop.
     masked, vault = await anyio.to_thread.run_sync(
-        partial(mask_request, body, policy=state.policy, detector=state.detector)
+        partial(mask_request, body, policy=state.policy, detector=state.detector),
+        limiter=state.mask_limiter,
     )
     url = settings.openai_base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"}

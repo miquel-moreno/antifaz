@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from antifaz import guard
-from antifaz.api.app import create_app
+from antifaz.api.app import MASK_THREADS, create_app
 from antifaz.detect.ner.cache import SpanCache
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.pool import NerPool
@@ -178,3 +178,21 @@ def test_detection_runs_outside_the_event_loop(upstream: FakeUpstream) -> None:
 def test_healthz_says_the_state_of_the_ner_workers(upstream: FakeUpstream) -> None:
     for client in _clients(upstream):
         assert client.get("/healthz").json()["ner"] == "ok"
+
+
+def test_masking_uses_its_own_thread_limiter(upstream: FakeUpstream) -> None:
+    """Masking waits on its own limiter, never on anyio's shared default one."""
+    borrowed: list[tuple[int, float]] = []
+    scanner = Scanner()
+
+    def detector(text: str) -> list[object]:
+        limiter = app.state.mask_limiter
+        borrowed.append((limiter.borrowed_tokens, limiter.total_tokens))
+        return scanner(text)  # type: ignore[return-value]
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app = create_app(openai_tests._settings(), http_client=http, detector=detector)  # type: ignore[arg-type]
+    with TestClient(app) as client:
+        client.post("/v1/chat/completions", json=_chat("hola"), headers=OPENAI_AUTH)
+    assert borrowed and all(used == 1 for used, _ in borrowed)
+    assert borrowed[0][1] == MASK_THREADS
