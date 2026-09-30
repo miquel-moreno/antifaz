@@ -297,6 +297,38 @@ uv run antifaz verify
 
 Limitaciones de esta primera versión: los valores sembrados son fijos (los mismos que usan los tests), la política no se lee todavía de un fichero, y no revisa lo que se escribe en los logs (eso lo cubren los tests de las invariantes 8 y 13).
 
+## NER: la infraestructura (issue 6, PR 6a)
+
+Decisión en [ADR-0016](adr/0016-ner-en-procesos-aparte.md) (propuesta). Esta parte trae todo lo que rodea al modelo de nombres **sin el modelo**: el modelo real (GLiNER), su descarga y su manifiesto llegan en 6b. Hasta entonces el NER está apagado y, si se enciende, Antifaz no arranca.
+
+**Recorrido.** `mask()` pide al detector todos los textos de la petición de una vez (`Scanner.scan_many`). Para cada texto se construye la vista normalizada del ADR-0014; los patrones y el NER leen esa misma vista y sus posiciones vuelven al original con el mismo mapa:
+
+1. **Caché** (`detect/ner/cache.py`): si el texto ya pasó por el NER con el mismo modelo, etiquetas, umbral y troceador, se usan sus spans. Clave BLAKE2b con una clave secreta aleatoria por proceso; guarda solo posiciones y tipos; LRU con `ANTIFAZ_NER_CACHE_ENTRIES` entradas.
+2. **Ventanas** (`detect/ner/chunker.py`): 200 tokens que se solapan 50 (un token es una palabra de hasta 40 letras o cifras, o un signo). GLiNER lee como mucho 384 palabras y corta el resto sin avisar; con el solape, una entidad de menos de 50 tokens en la frontera se ve entera en alguna ventana.
+3. **Pool de procesos** (`detect/ner/pool.py` y `worker.py`): procesos propios con `spawn`, que cargan el modelo una vez. Hablan JSON por un `Pipe` (nunca `pickle`) con tamaño máximo; el hijo escribe en el dispositivo nulo, sin logging, sin red (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`) y solo devuelve códigos de error fijos.
+4. **Comprobación** (`detect/ner/engine.py`): una lista por ventana, `[inicio, fin, etiqueta, puntuación]` con enteros dentro de la ventana, una etiqueta pedida y una puntuación entre 0 y 1. Cualquier otra cosa → `DetectorFailed` → 400 `antifaz_blocked`.
+5. **Solapamientos**: el NER es la capa con menos prioridad, y el perdedor de un solapamiento parcial se recorta en vez de descartarse (sus trozos sin letras ni cifras se tiran). Todo carácter alfanumérico que alguna capa detectó queda enmascarado.
+6. **Propagación** (`mask/propagate.py`): cada valor que encontró el NER se enmascara en todos los textos de la petición, con la regla de la guardia (normalizado; 6 o más letras y cifras sin límites de palabra; más corto, con límites, y un vecino que se va a enmascarar cuenta como límite). Así la guardia no bloquea una petición porque el modelo vio un nombre en un mensaje y no en otro.
+
+**Fallos.** Si una llamada pasa de `ANTIFAZ_NER_TIMEOUT_SECONDS`, el proceso se mata (`kill()`), se arranca otro y la petición se bloquea con 400. Lo mismo si el proceso muere o responde algo mal formado. Si el backend lanza una excepción, el proceso sigue vivo y la petición se bloquea. El log solo dice "worker replaced" y el motivo, nunca el texto. `ProcessPoolExecutor` no sirve: no mata un proceso colgado hasta Python 3.14.
+
+**En la API**, `mask_request` corre en un hilo (`anyio.to_thread.run_sync`): ni los patrones ni la espera al NER bloquean el bucle de eventos. Los procesos arrancan con la app (si el modelo no carga, la app no arranca) y se paran con ella.
+
+**Manifiesto** (`detect/ner/manifest.json` y `manifest.py`): cada archivo del modelo con su tamaño y SHA-256. Antes de cargar se exige que el directorio tenga **exactamente** esos archivos (ni uno de menos, ni uno de más, sin enlaces simbólicos). El hash del manifiesto entra en la clave de la caché. El de 6a no tiene archivos: rechaza cualquier directorio.
+
+**Variables** (todas opcionales; el NER está apagado por defecto):
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `ANTIFAZ_NER_ENABLED` | `false` | Enciende el NER. Con `true`, si el modelo falta o no coincide con el manifiesto, o el backend no está instalado, Antifaz no arranca |
+| `ANTIFAZ_NER_MODEL_DIR` | vacía | Carpeta del modelo descargado (comando de descarga en 6b) |
+| `ANTIFAZ_NER_TIMEOUT_SECONDS` | `10` | Tiempo máximo de cada llamada al pool (hasta 16 ventanas por llamada) |
+| `ANTIFAZ_NER_WORKERS` | `1` | Procesos del pool; cada uno ocupa la memoria de un modelo |
+| `ANTIFAZ_NER_THRESHOLD` | `0.5` | Puntuación mínima de una entidad (mayor que 0, como mucho 1) |
+| `ANTIFAZ_NER_CACHE_ENTRIES` | `10000` | Textos en la caché; `0` la apaga |
+
+**Tests.** El backend falso (`detect/ner/fake.py`) busca nombres de un diccionario y, con palabras clave, se cuelga, muere, lanza una excepción con el texto, escribe el texto en stdout, stderr y el log o responde mal. Con él: el proceso colgado se mata al llegar al tiempo máximo y la siguiente petición funciona; `os._exit` bloquea; ni el log (`caplog`) ni la salida de los procesos hijos (`capfd`) llevan el nombre ni el DNI centinela (invariante 8); con la guardia apagada, el proveedor falso no recibe ningún nombre (invariante 2); `restore(mask(x)) == x` con el NER (Hypothesis); la guardia nunca bloquea lo que produjo el enmascarador con la propagación (Hypothesis). Los tests del modelo real llevan el marcador `ner_model` y se saltan si no hay `ANTIFAZ_NER_MODEL_DIR`.
+
 ## La puerta cerrada por defecto (issue 20)
 
 Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
@@ -384,4 +416,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - Si el proveedor devuelve la clave recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), ese fragmento llega al cliente: solo se detecta la clave completa.
 - La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
-- Los nombres de persona no se detectan hasta el issue 6 (NER): hoy pasan en claro.
+- Los nombres de persona no se detectan hasta el issue 6b (el modelo NER): hoy pasan en claro. La infraestructura (pool, caché, ventanas, manifiesto) ya está (6a), probada con un backend falso.
+- NER: una petición tan grande que no cabe en el tiempo máximo se bloquea (el fallo seguro). Un nombre detectado se enmascara en toda la petición, también donde es una palabra corriente ("Mar") o, si tiene 6 o más letras, dentro de otra palabra ("Marina" en "submarina"): falsos positivos aceptados (ADR-0016).
+- NER: el troceado cuenta palabras, no subpalabras del modelo; en 6b se mide con el modelo real que ninguna ventana supere su límite.
+- Dos identificadores pegados sin separador (`12345678Z12345678Z`): el primero no se detecta (un DNI nunca toca cifras) y la guardia bloquea la petición.
