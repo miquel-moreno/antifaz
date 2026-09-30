@@ -20,3 +20,15 @@ class EgressBlocked(AntifazBlocked):
     """The egress guard found a value the policy said to hide."""
 
     message = "hidden personal data found before sending; request blocked"
+
+
+class AttachmentBlocked(AntifazBlocked):
+    """The request carries an image, audio, file or file id: it cannot be checked (ADR-0006)."""
+
+    message = "attachments are not supported; request blocked"
+
+
+class UnmaskableField(AntifazBlocked):
+    """Personal data in a place that cannot be masked without breaking the format (ADR-0013)."""
+
+    message = "personal data in a field that cannot be masked; request blocked"
