@@ -5,7 +5,8 @@ through the model again and again. The key is a BLAKE2b hash KEYED with a random
 at import time (a new one on every start): without the secret, a memory dump cannot be used to
 test whether a given DNI or name went through here. The key covers the text, the model manifest,
 the labels, the threshold and the chunker version, so changing any of them misses the cache.
-Only spans (offsets and types) are stored, never the text or a value. Bounded LRU.
+Only spans (offsets and types) are stored, never the text or a value. Bounded LRU, by entries
+AND by the total number of spans (a few texts full of names cannot fill the memory).
 """
 
 import hashlib
@@ -18,6 +19,7 @@ from antifaz.detect.types import Span
 
 _SECRET = secrets.token_bytes(32)
 DEFAULT_ENTRIES = 10_000
+DEFAULT_SPANS = 200_000
 
 
 def _field(data: bytes) -> bytes:
@@ -34,14 +36,22 @@ def cache_key(
 
 
 class SpanCache:
-    """Thread-safe LRU of key -> spans, with at most `max_entries` entries (0 disables it)."""
+    """Thread-safe LRU of key -> spans, with at most `max_entries` entries (0 disables it)
+    and at most `max_spans` spans in total."""
 
-    def __init__(self, max_entries: int = DEFAULT_ENTRIES) -> None:
-        if max_entries < 0:
-            raise ValueError("max_entries cannot be negative")
+    def __init__(self, max_entries: int = DEFAULT_ENTRIES, max_spans: int = DEFAULT_SPANS) -> None:
+        if max_entries < 0 or max_spans < 0:
+            raise ValueError("the cache bounds cannot be negative")
         self._max = max_entries
+        self._max_spans = max_spans
+        self._spans = 0
         self._entries: OrderedDict[bytes, tuple[Span, ...]] = OrderedDict()
         self._lock = threading.Lock()
+
+    @property
+    def spans(self) -> int:
+        """Spans stored in total."""
+        return self._spans
 
     def get(self, key: bytes) -> tuple[Span, ...] | None:
         with self._lock:
@@ -51,13 +61,17 @@ class SpanCache:
             return spans
 
     def put(self, key: bytes, spans: Iterable[Span]) -> None:
-        if not self._max:
+        stored = tuple(spans)
+        if not self._max or len(stored) > self._max_spans:
             return
         with self._lock:
-            self._entries[key] = tuple(spans)
-            self._entries.move_to_end(key)
-            while len(self._entries) > self._max:
-                self._entries.popitem(last=False)
+            old = self._entries.pop(key, None)
+            self._spans -= len(old) if old is not None else 0
+            self._entries[key] = stored
+            self._spans += len(stored)
+            while len(self._entries) > self._max or self._spans > self._max_spans:
+                _, dropped = self._entries.popitem(last=False)
+                self._spans -= len(dropped)
 
     def __len__(self) -> int:
         return len(self._entries)

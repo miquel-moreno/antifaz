@@ -89,3 +89,30 @@ def test_it_is_safe_to_use_from_several_threads() -> None:
     for thread in threads:
         thread.join()
     assert len(cache) == 50
+
+
+def test_it_is_also_bounded_by_the_total_number_of_spans() -> None:
+    cache = SpanCache(100, max_spans=3)
+    cache.put(b"a", [SPAN, SPAN])
+    cache.put(b"b", [SPAN])
+    assert cache.spans == 3
+    cache.put(b"c", [SPAN])  # 4 spans: the least recently used entry goes
+    assert cache.get(b"a") is None
+    assert cache.spans == 2
+    cache.put(b"huge", [SPAN] * 4)  # more than the whole bound: never stored
+    assert cache.get(b"huge") is None
+    assert cache.spans == 2
+
+
+def test_replacing_an_entry_keeps_the_span_count_right() -> None:
+    cache = SpanCache(10, max_spans=10)
+    cache.put(b"a", [SPAN, SPAN])
+    cache.put(b"a", [SPAN])
+    assert cache.spans == 1
+
+
+def test_a_negative_span_bound_is_refused() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        SpanCache(10, max_spans=-1)
