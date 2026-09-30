@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from antifaz.api.errors import AppError, register_error_handlers
-from antifaz.logging import JsonFormatter, request_id_var
+from antifaz.logging import JsonFormatter, configure_logging, request_id_var
 from tests.conftest import SENTINEL_DNI
 
 
@@ -84,3 +84,18 @@ def test_validation_error_message_has_a_maximum_size() -> None:
     message = TestClient(app_with_routes()).post("/echo", json=body).json()["error"]["message"]
 
     assert message.count("body.") == 10 and message.endswith(", ...")
+
+
+def test_configure_logging_replaces_only_its_own_handler() -> None:
+    root = logging.getLogger()
+    foreign = logging.NullHandler()  # e.g. pytest's caplog handler
+    root.addHandler(foreign)
+    try:
+        configure_logging("INFO")
+        configure_logging("INFO")
+
+        ours = [h for h in root.handlers if isinstance(h.formatter, JsonFormatter)]
+        assert len(ours) == 1
+        assert foreign in root.handlers
+    finally:
+        root.removeHandler(foreign)
