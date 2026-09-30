@@ -16,7 +16,7 @@ Thanks for helping. Antifaz handles personal data, so a few rules are stricter t
 
 1. Open or pick an issue.
 2. Create a branch and make your change.
-3. Run `make install` once, then `make check` (lint, types, tests, secret scan) until it passes.
+3. Run `make install` once, then `make check` (lint, types, tests, secret scan, workflow audit) until it passes.
 4. Open a pull request with a short description. Use Conventional Commits
    (`feat:`, `fix:`, `docs:`, `test:`...).
 

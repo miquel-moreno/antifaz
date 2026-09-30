@@ -1,0 +1,8 @@
+# Every change needs the owner's review. The last matching line wins, so the
+# supply-chain files are also listed on their own: they must never lose an owner.
+* @miquel-moreno
+
+/pyproject.toml @miquel-moreno
+/uv.lock @miquel-moreno
+/.github/ @miquel-moreno
+/Dockerfile @miquel-moreno

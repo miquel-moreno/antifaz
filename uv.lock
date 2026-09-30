@@ -50,7 +50,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "python-stdnum", specifier = ">=2.2,<3" },
+    { name = "python-stdnum", specifier = ">=2.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 

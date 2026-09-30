@@ -6,7 +6,9 @@ Antifaz se distribuye con licencia **Apache-2.0** (`LICENSE` y `NOTICE`).
 
 En lo que se distribuye (la librería y la imagen) **no entra nada no comercial (NC) ni copyleft fuerte** (GPL, AGPL, SSPL…). Se permiten dependencias de **copyleft débil sin modificar** (LGPL, MPL, EPL), y cada una se anota aquí con su motivo.
 
-`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`: falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint) no se distribuyen y no cuentan.
+`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`: falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor) no se distribuyen y no cuentan.
+
+Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que se prueban y se comprueban aquí están en `uv.lock`.
 
 ## Dependencias de copyleft débil
 
