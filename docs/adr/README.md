@@ -18,3 +18,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0011](0011-antifaz-bench.md) | Antifaz-Bench: cómo se cuentan aciertos y fugas | Aceptada |
 | [0012](0012-escape-and-same-value.md) | Escape de `[[` y qué es "el mismo valor" | Aceptada |
 | [0013](0013-proxy.md) | El proxy: qué se enmascara, qué se envía y qué se restaura | Aceptada |
+| [0014](0014-normalizacion-previa-del-detector.md) | Normalización previa del detector | Aceptada |

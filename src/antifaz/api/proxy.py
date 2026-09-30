@@ -23,6 +23,7 @@ from antifaz.api.errors import (
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
+from antifaz.providers.json_walk import too_deep
 from antifaz.vault import Vault
 
 
@@ -125,8 +126,9 @@ def answer_json(upstream: httpx.Response) -> dict[str, Any]:
     answer: object = None
     try:
         answer = upstream.json()
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         answer = None
-    if not isinstance(answer, dict):
+    # Too deep to restore without recursion: a fixed 502, never a 500.
+    if not isinstance(answer, dict) or too_deep(answer):
         raise BadUpstreamResponseError() from None
     return answer

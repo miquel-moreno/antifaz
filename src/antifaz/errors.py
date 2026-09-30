@@ -32,3 +32,9 @@ class UnmaskableField(AntifazBlocked):
     """Personal data in a place that cannot be masked without breaking the format (ADR-0013)."""
 
     message = "personal data in a field that cannot be masked; request blocked"
+
+
+class NestingTooDeep(AntifazBlocked):
+    """The JSON body is nested deeper than the gateway checks (a way to hide a value)."""
+
+    message = "request nested too deeply to be checked; request blocked"

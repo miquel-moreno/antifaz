@@ -19,7 +19,12 @@ _FLAGS = re.IGNORECASE | re.ASCII
 # "DNI és 16257107-V" the "s" of "és" must not start a value.
 _START = r"(?<![0-9A-Za-z\u00C0-\u024F])"
 _END = r"(?![0-9A-Za-z\u00C0-\u024F])"
-_SEP = r"[ .-]?"  # between the parts of a DNI, NIE, NIF or CIF
+_SEP = r"[ .-]?"  # between the parts of a CIF
+_LINE_BREAK = r"(?:\r\n?|\n)"  # CRLF, CR or LF
+# Between the parts of a DNI, NIE or K/L/M NIF: one space, dot or hyphen, or one line break
+# (tabs and no-break spaces arrive as spaces: the detector normalises them, ADR-0014).
+_ID_SEP_CHAR = rf"(?:[ .-]|{_LINE_BREAK})"
+_WORD_CHAR = r"[0-9A-Za-z\u00c0-\u024f]"
 _EU_VAT_PREFIXES = (
     "AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|XI"
 )
@@ -30,22 +35,45 @@ def _compile(pattern: str) -> re.Pattern[str]:
     return re.compile(f"{_START}{pattern}{_END}", _FLAGS)
 
 
+def _digits(count: int, head: int) -> str:
+    """`count` digits: together, in groups of 3 after `head` digits separated by a dot or a
+    single space ("12.345.678", "12 345 678"), or cut once by a line break anywhere.
+
+    Every branch has a fixed length, so matching stays linear (ADR-0008).
+    """
+    grouped = f"[0-9]{{{head}}}(?:[ .][0-9]{{3}}){{{(count - head) // 3}}}"
+    split = "|".join(
+        f"[0-9]{{{left}}}{_LINE_BREAK}[0-9]{{{count - left}}}" for left in range(1, count)
+    )
+    return f"(?:[0-9]{{{count}}}|{grouped}|{split})"
+
+
+# For a DNI, _digits(8, 2) is, with LB = the line break:
+#   (?:[0-9]{8}|[0-9]{2}(?:[ .][0-9]{3}){2}
+#      |[0-9]{1}LB[0-9]{7}|[0-9]{2}LB[0-9]{6}|...|[0-9]{7}LB[0-9]{1})
+
+
+def _control_letter_id(first: str, count: int, head: int) -> re.Pattern[str]:
+    """DNI, NIE or K/L/M NIF with relaxed boundaries (ADR-0014).
+
+    Their control letter makes a random hit unlikely, so a value glued to letters is found
+    ("DNI12345678Z", "NIEX1234567L", "ref12345678Zxyz"). Digits may never touch it: a DNI
+    inside a longer run of digits is still not one. A letter only counts as glued when
+    there is no separator: with a separator the usual word boundary applies, so in
+    "12345678 casas" the "c" of the next word is not taken as the control letter.
+    """
+    before = f"(?:(?<!{_WORD_CHAR}){first}{_ID_SEP_CHAR}?|(?<![0-9]){first})" if first else ""
+    number = _digits(count, head)
+    if not first:
+        number = f"(?<![0-9]){number}"
+    letter = f"(?:[A-Z]|{_ID_SEP_CHAR}[A-Z](?!{_WORD_CHAR}))(?![0-9])"
+    return re.compile(f"{before}{number}{letter}", _FLAGS)
+
+
 _PATTERNS: tuple[tuple[EntityType, re.Pattern[str], Callable[[str], bool]], ...] = (
-    (
-        EntityType.ES_DNI,
-        _compile(rf"(?:[0-9]{{8}}|[0-9]{{2}}\.[0-9]{{3}}\.[0-9]{{3}}){_SEP}[A-Z]"),
-        dni.is_valid,
-    ),
-    (
-        EntityType.ES_NIE,
-        _compile(rf"[XYZ]{_SEP}(?:[0-9]{{7}}|[0-9]\.[0-9]{{3}}\.[0-9]{{3}}){_SEP}[A-Z]"),
-        nie.is_valid,
-    ),
-    (
-        EntityType.ES_NIF,
-        _compile(rf"[KLM]{_SEP}(?:[0-9]{{7}}|[0-9]\.[0-9]{{3}}\.[0-9]{{3}}){_SEP}[A-Z]"),
-        nif_klm.is_valid,
-    ),
+    (EntityType.ES_DNI, _control_letter_id("", 8, 2), dni.is_valid),
+    (EntityType.ES_NIE, _control_letter_id("[XYZ]", 7, 1), nie.is_valid),
+    (EntityType.ES_NIF, _control_letter_id("[KLM]", 7, 1), nif_klm.is_valid),
     (
         EntityType.ES_CIF,
         _compile(
@@ -77,11 +105,15 @@ _PATTERNS: tuple[tuple[EntityType, re.Pattern[str], Callable[[str], bool]], ...]
 
 # An IBAN may be split by single spaces or hyphens anywhere and its length depends on the
 # country, so the pattern takes up to the longest IBAN and _iban_at() cuts it to size.
-_IBAN_CANDIDATE = re.compile(rf"{_START}[A-Z]{{2}}[0-9]{{2}}(?:[ -]?[A-Z0-9]){{11,30}}+", _FLAGS)
+# Like DNI and NIE, an IBAN may touch letters (its mod-97 check makes a random hit
+# unlikely) but never digits, and a line break may cut it (ADR-0014).
+_IBAN_CANDIDATE = re.compile(
+    rf"(?<![0-9])[A-Z]{{2}}[0-9]{{2}}(?:(?:[ -]|{_LINE_BREAK})?[A-Z0-9]){{11,30}}+", _FLAGS
+)
 
 
 def _ends_at_boundary(text: str, end: int) -> bool:
-    return end == len(text) or not text[end].isascii() or not text[end].isalnum()
+    return end == len(text) or not text[end].isascii() or not text[end].isdigit()
 
 
 def _iban_at(text: str, match: re.Match[str]) -> Span | None:
@@ -112,6 +144,38 @@ def _iban_spans(text: str) -> Iterator[Span]:
             position = match.start() + 1
 
 
+_RELAXED = frozenset({EntityType.ES_DNI, EntityType.ES_NIE, EntityType.ES_NIF})
+_HEX = frozenset("0123456789abcdefABCDEF")
+_HEX_RUN = 16  # a run of at least this many hex characters is a hash or an id, not text
+_HEX_WINDOW = 32  # how far the run is followed on each side (keeps the check linear)
+
+
+def _inside_hex_run(text: str, start: int, end: int) -> bool:
+    """True if the alphanumeric run around text[start:end] is all hex and 16+ long.
+
+    Then the relaxed boundary does not apply: a SHA-1 or a UUID holds 8 digits and a
+    letter A-F often enough to look like a DNI. The run is followed at most _HEX_WINDOW
+    characters on each side; a longer all-hex stretch counts as a hex run.
+    """
+    if not all(char in _HEX for char in text[start:end]):
+        return False
+    left = start
+    while left > 0 and start - left < _HEX_WINDOW and text[left - 1].isascii():
+        if not text[left - 1].isalnum():
+            break
+        if text[left - 1] not in _HEX:
+            return False
+        left -= 1
+    right = end
+    while right < len(text) and right - end < _HEX_WINDOW and text[right].isascii():
+        if not text[right].isalnum():
+            break
+        if text[right] not in _HEX:
+            return False
+        right += 1
+    return right - left >= _HEX_RUN
+
+
 def find_identifiers(text: str) -> list[Span]:
     """Spans of every identifier in the text whose check digits are valid."""
     spans = [
@@ -119,6 +183,7 @@ def find_identifiers(text: str) -> list[Span]:
         for entity_type, pattern, is_valid in _PATTERNS
         for match in pattern.finditer(text)
         if is_valid(match.group())
+        and not (entity_type in _RELAXED and _inside_hex_run(text, match.start(), match.end()))
     ]
     spans.extend(_iban_spans(text))
     return spans

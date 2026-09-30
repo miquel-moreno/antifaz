@@ -136,6 +136,7 @@ def _phones(text: str) -> Iterator[Span]:
 # --- Payment card --------------------------------------------------------------------------
 
 _CARD_CANDIDATE = re.compile(r"(?<![0-9A-Za-z])[0-9](?:[ .-]?[0-9]){12,18}+")
+_NOT_DIGITS = str.maketrans("", "", " .-")
 _CARD_NEXT = re.compile(r"[0-9](?:[ .-]?[0-9]){12,18}+")
 
 
@@ -174,10 +175,10 @@ def is_card_prefix(digits: str) -> bool:
 
 def _card_at(text: str, match: re.Match[str]) -> Span | None:
     """The longest valid card (13-19 digits) that starts where the candidate starts."""
-    ends = [match.start() + i + 1 for i, char in enumerate(match.group()) if char.isdigit()]
-    digits = "".join(char for char in match.group() if char.isdigit())
+    digits = match.group().translate(_NOT_DIGITS)  # the candidate only has digits and " .-"
     if not is_card_prefix(digits):
         return None
+    ends = [match.start() + i + 1 for i, char in enumerate(match.group()) if char.isdigit()]
     for length in range(min(19, len(ends)), 12, -1):
         end = ends[length - 1]
         if end < len(text) and text[end].isascii() and text[end].isalnum():
