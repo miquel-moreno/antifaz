@@ -1,6 +1,6 @@
 # ADR-0014 · Normalización previa del detector
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-30)
 - **Fecha:** 2026-09-30
 - **Modifica:** los límites alfanuméricos de los patrones de identificadores (PR 2a) y la limitación conocida de Unicode de `TECNICO.md`
 
