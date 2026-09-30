@@ -43,6 +43,10 @@ class Vault:
         """Value of an upper-case token emitted in this request, or None."""
         return self._by_token.get(token)
 
+    def _tokens(self) -> frozenset[str]:
+        """Upper-case tokens emitted in this request (no values), for the stream restorer."""
+        return frozenset(self._by_token)
+
     def _hidden_values(self) -> tuple[tuple[EntityType, str], ...]:
         """(type, value) pairs that were hidden, for the egress guard (issue 4b)."""
         return tuple(self._by_value)

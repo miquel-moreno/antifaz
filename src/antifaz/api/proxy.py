@@ -97,13 +97,24 @@ def _parse(raw: bytes) -> dict[str, Any]:
     return parsed
 
 
-def refuse_streaming(body: dict[str, Any]) -> None:
-    """`stream` may only be true, false or absent; true is refused until part 5c."""
+def stream_requested(body: dict[str, Any]) -> bool:
+    """`stream` may only be true, false or absent."""
     stream = body.get("stream", False)
     if not isinstance(stream, bool):
         raise InvalidRequestError()
-    if stream:
+    return stream
+
+
+def refuse_streaming(body: dict[str, Any]) -> None:
+    """For routes that never stream (count_tokens): `stream: true` is refused."""
+    if stream_requested(body):
         raise StreamingNotSupportedError()
+
+
+def is_event_stream(upstream: httpx.Response) -> bool:
+    """True if the provider answered with server-sent events."""
+    media: str = upstream.headers.get("content-type", "").split(";", 1)[0]
+    return media.strip().lower() == "text/event-stream"
 
 
 async def send_masked(
@@ -113,33 +124,69 @@ async def send_masked(
     masked: dict[str, Any],
     vault: Vault,
     keys: Sequence[str],
+    *,
+    stream: bool = False,
 ) -> httpx.Response:
     """Serialize once, run the guard on those exact bytes and send them. 3xx is never followed.
 
     An answer that repeats one of `keys` (a careless provider echoing the headers it got) is
     dropped with a fixed 502: its body would hand the provider key to the client.
+
+    With `stream`, a successful answer in server-sent events comes back OPEN (the caller
+    relays and closes it; its events are checked for keys one by one). Any other answer
+    (an error, or JSON when the provider did not stream) is read whole and checked here.
     """
     payload = json.dumps(masked, ensure_ascii=False, allow_nan=False).encode("utf-8")
     guard.check(payload, vault)  # the same bytes that are sent, right before sending
+    request = client.build_request(
+        "POST", url, content=payload, headers={**headers, "Content-Type": "application/json"}
+    )
     try:
-        upstream = await client.post(
-            url, content=payload, headers={**headers, "Content-Type": "application/json"}
-        )
+        upstream = await client.send(request, stream=stream)
     except httpx.TimeoutException:
         timed_out = True
     except httpx.HTTPError:
         timed_out = False
     else:
-        if 300 <= upstream.status_code < 400:
-            raise UpstreamRedirectError()  # the destination is fixed in settings
-        if _echoes_a_key(upstream, keys):
-            raise UpstreamEchoedKeyError()
-        return upstream
+        return await _checked(upstream, keys, stream=stream)
     # Outside the except block: the httpx error (with the URL and maybe more) is not chained.
     raise (UpstreamTimeoutError() if timed_out else UpstreamUnavailableError()) from None
 
 
-def _json_texts(raw: bytes) -> Iterator[str]:
+async def _checked(
+    upstream: httpx.Response, keys: Sequence[str], *, stream: bool
+) -> httpx.Response:
+    if 300 <= upstream.status_code < 400:
+        await upstream.aclose()
+        raise UpstreamRedirectError()  # the destination is fixed in settings
+    if stream and upstream.is_success and is_event_stream(upstream):
+        if _holds_a_key(_content_type(upstream), keys):
+            await upstream.aclose()
+            raise UpstreamEchoedKeyError()
+        return upstream  # open: its events are checked as they arrive
+    if stream:
+        await _read_all(upstream)
+    if _echoes_a_key(upstream, keys):
+        raise UpstreamEchoedKeyError()
+    return upstream
+
+
+async def _read_all(upstream: httpx.Response) -> None:
+    """Read a streamed answer whole (an error, or JSON), with the same fixed errors."""
+    try:
+        await upstream.aread()
+    except httpx.TimeoutException:
+        timed_out = True
+    except httpx.HTTPError:
+        timed_out = False
+    else:
+        return
+    finally:
+        await upstream.aclose()
+    raise (UpstreamTimeoutError() if timed_out else UpstreamUnavailableError()) from None
+
+
+def json_texts(raw: bytes | str) -> Iterator[str]:
     """Every decoded string and key of `raw` if it is JSON ("\\u0061" and "\\/" undone)."""
     try:
         stack: list[Any] = [json.loads(raw)]
@@ -156,13 +203,69 @@ def _json_texts(raw: bytes) -> Iterator[str]:
             stack.extend(node)
 
 
+def _content_type(upstream: httpx.Response) -> bytes:
+    value: str = upstream.headers.get("content-type", "")
+    return value.encode("latin-1", "replace")
+
+
+def _holds_a_key(raw: bytes, keys: Sequence[str]) -> bool:
+    return any(key.encode() in raw for key in keys)
+
+
+def _decoded(text: str) -> list[str]:
+    """One layer down: the strings of `text` if it is JSON, and `text` with its escapes undone."""
+    out: list[str] = []
+    if text.lstrip()[:1] in ("{", "[", '"'):
+        out.extend(json_texts(text))
+    if _BACKSLASH in text:
+        try:
+            unescaped = json.loads('"' + text + '"')  # a JSON string body with its escapes
+        except (ValueError, RecursionError):
+            unescaped = None
+        if isinstance(unescaped, str) and unescaped != text:
+            out.append(unescaped)
+    return out
+
+
+_BACKSLASH = chr(92)
+# How many times a string is decoded again: JSON in a string (tool arguments) holding escapes.
+_LAYERS = 3
+
+
+def key_texts(raw: bytes | str) -> Iterator[str]:
+    """`raw` and every string inside it, decoded again where a string holds JSON or escapes.
+
+    Up to three layers, so a key written as escapes inside tool arguments (JSON inside a JSON
+    string: "\\\\u0061" on the wire) is seen in clear.
+    """
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+    pending = [(text, _LAYERS)]
+    while pending:
+        current, layers = pending.pop()
+        yield current
+        if layers:
+            pending.extend((nested, layers - 1) for nested in _decoded(current))
+
+
+def contains_key(raw: bytes | str, keys: Sequence[str]) -> bool:
+    """True if a key is in `raw` as it is or in any decoded layer of it (invariant 13)."""
+    return any(key in text for text in key_texts(raw) for key in keys)
+
+
 def _echoes_a_key(upstream: httpx.Response, keys: Sequence[str]) -> bool:
-    """True if the body (raw or its decoded JSON strings) or the content type holds a key."""
-    content_type = upstream.headers.get("content-type", "").encode("latin-1", "replace")
-    raw = upstream.content
-    if any(key.encode() in raw or key.encode() in content_type for key in keys):
+    """True if the body (raw or any decoded layer) or the content type holds a key."""
+    if _holds_a_key(_content_type(upstream), keys):
         return True
-    return any(key in text for text in _json_texts(raw) for key in keys)
+    return contains_key(upstream.content, keys)
+
+
+def restored_json(body: dict[str, Any], keys: Sequence[str], status_code: int) -> Response:
+    """The restored answer, checked for keys AFTER restoring (a value decoded from escapes in
+    tool arguments could be one): a fixed 502 if it holds one."""
+    content = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if contains_key(content, keys):
+        raise UpstreamEchoedKeyError()
+    return Response(content=content, status_code=status_code, media_type="application/json")
 
 
 def passthrough(upstream: httpx.Response) -> Response:

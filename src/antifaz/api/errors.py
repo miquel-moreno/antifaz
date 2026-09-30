@@ -83,7 +83,16 @@ class StreamingNotSupportedError(AppError):
     code = "streaming_not_supported"
 
     def __init__(self) -> None:
-        super().__init__("streaming is not supported yet")
+        super().__init__("this route does not stream: send stream false or leave it out")
+
+
+class InvalidStreamOptionsError(AppError):
+    code = "invalid_request"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "stream_options only accepts include_usage and include_obfuscation, true or false"
+        )
 
 
 class UpstreamTimeoutError(AppError):

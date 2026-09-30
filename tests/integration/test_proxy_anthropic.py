@@ -19,9 +19,15 @@ from tests.integration.fakes import (
     PROVIDER_KEY,
     FakeUpstream,
     Handler,
+    anthropic_event,
+    anthropic_sse,
+    anthropic_text,
     compact,
     misses_repeats,
+    pieces_of,
     raiser,
+    sse_payloads,
+    sse_response,
 )
 
 UPSTREAM = "https://anthropic.invalid"
@@ -43,6 +49,8 @@ def echo(request: httpx.Request) -> httpx.Response:
     if request.url.path.endswith("/count_tokens"):
         return httpx.Response(200, json={"input_tokens": 42})
     body = json.loads(request.content)
+    if body.get("stream"):  # the same answer as server-sent events, in pieces of 3 characters
+        return sse_response(anthropic_sse(pieces_of(_last_text(body))))[0]
     return httpx.Response(
         200,
         json={
@@ -321,12 +329,80 @@ def test_attachments_and_unknown_blocks_are_blocked(
     assert upstream.requests == []
 
 
-def test_streaming_is_refused_for_now(proxy: TestClient, upstream: FakeUpstream) -> None:
-    response = proxy.post("/v1/messages", json={**_msg("hola"), "stream": True}, headers=KEY)
+def test_streaming_round_trip_restores_text(proxy: TestClient, upstream: FakeUpstream) -> None:
+    text = f"Mi DNI es {SENTINEL_DNI}, escribe a ana@example.com"
+    response = proxy.post("/v1/messages", json={**_msg(text), "stream": True}, headers=KEY)
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "streaming_not_supported"
-    assert upstream.requests == []
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert anthropic_text(response.text) == text
+    assert [p["type"] for p in sse_payloads(response.text)][-1] == "message_stop"
+    (sent,) = upstream.requests
+    assert SENTINEL_DNI.encode() not in sent.content
+    assert json.loads(sent.content)["stream"] is True
+
+
+def test_streaming_tool_input_and_thinking(upstream: FakeUpstream) -> None:
+    """Tool input comes restored at the end of its block; thinking passes byte for byte."""
+
+    def stream(request: httpx.Request) -> httpx.Response:
+        tool_input = json.loads(request.content)["messages"][0]["content"][0]["text"]
+        partial = json.dumps({"dni": tool_input})
+        events = [
+            anthropic_event({"type": "message_start", "message": {"id": "m", "content": []}}),
+            anthropic_event(
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}}
+            ),
+            anthropic_event(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "Uso [[ES_DNI_1]]"},
+                }
+            ),
+            anthropic_event(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": SIGNATURE},
+                }
+            ),
+            anthropic_event({"type": "content_block_stop", "index": 0}),
+            anthropic_event(
+                {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {"type": "tool_use", "id": "t", "name": "f", "input": {}},
+                }
+            ),
+            *(
+                anthropic_event(
+                    {
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {"type": "input_json_delta", "partial_json": partial[i : i + 4]},
+                    }
+                )
+                for i in range(0, len(partial), 4)
+            ),
+            anthropic_event({"type": "content_block_stop", "index": 1}),
+            anthropic_event({"type": "message_stop"}),
+        ]
+        return sse_response("".join(events), split=7)[0]
+
+    upstream.handler = stream
+    body = {**_msg([{"type": "text", "text": f"DNI {SENTINEL_DNI}"}]), "stream": True}
+    for client in _client(upstream):
+        response = client.post("/v1/messages", json=body, headers=KEY)
+        assert response.status_code == 200
+        assert '"thinking": "Uso [[ES_DNI_1]]"' in response.text
+        assert f'"signature": "{SIGNATURE}"' in response.text
+        partials = [
+            p["delta"]["partial_json"]
+            for p in sse_payloads(response.text)
+            if p["type"] == "content_block_delta" and p["delta"]["type"] == "input_json_delta"
+        ]
+        assert [json.loads(p) for p in partials] == [{"dni": f"DNI {SENTINEL_DNI}"}]
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])

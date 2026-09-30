@@ -23,8 +23,7 @@ from antifaz.providers.json_walk import (
     check_depth,
     has_attachment_key,
     mask_body,
-    parse_container,
-    restore_strings,
+    restore_json_text,
 )
 from antifaz.restore import restore
 from antifaz.vault import Vault
@@ -57,13 +56,6 @@ def mask_request(
     return masked, vault
 
 
-def _restore_arguments(arguments: str, vault: Vault) -> str:
-    parsed = parse_container(arguments)
-    if parsed is None:
-        return restore(arguments, vault)
-    return json.dumps(restore_strings(parsed, vault), ensure_ascii=False)
-
-
 def _restore_tool_calls(message: dict[str, Any], vault: Vault) -> None:
     calls = message.get("tool_calls")
     functions = (
@@ -74,7 +66,7 @@ def _restore_tool_calls(message: dict[str, Any], vault: Vault) -> None:
     functions.append(message.get("function_call"))  # legacy single call
     for function in functions:
         if isinstance(function, dict) and isinstance(function.get("arguments"), str):
-            function["arguments"] = _restore_arguments(function["arguments"], vault)
+            function["arguments"] = restore_json_text(function["arguments"], vault)
 
 
 def restore_response(body: dict[str, Any], vault: Vault) -> dict[str, Any]:
