@@ -261,9 +261,21 @@ SDK oficial --(httpx2.ASGITransport, en el mismo proceso)--> Antifaz --(httpx.Mo
 - Los SDK reciben un `http_client` que llama a la app ASGI de Antifaz dentro del proceso (los SDK usan `httpx2`, un fork de httpx; Antifaz sigue con `httpx`). Detrás, el proveedor falso (`tests/contract/conftest.py`) sirve las respuestas de `tests/contract/fixtures/` cortadas en trozos de 37 bytes (los eventos y los marcadores llegan partidos) y guarda todo lo que recibe. Además, mientras corren, cualquier conexión que no sea a `localhost` falla, y se quitan del entorno las variables `OPENAI_*` y `ANTHROPIC_*`. Los SDK van con `max_retries=0`, para que un 429 o un 502 llegue al test.
 - Qué cubren: `chat.completions.create` (texto, herramientas, streaming de texto y de `tool_calls`, y el helper `chat.completions.stream`), `messages.create` (texto, `tool_use`, `thinking`), `messages.stream` (`text_delta`, `input_json_delta`, `thinking_delta` y `signature_delta`), `messages.count_tokens` y los errores: 401 → `AuthenticationError`, 400 → `BadRequestError`, 429 → `RateLimitError` y 502 → `InternalServerError`, con y sin streaming. También la clave de Antifaz equivocada (401) y un adjunto bloqueado (400).
 - Cada test comprueba dos cosas: que ningún valor sembrado (DNI, email, IBAN, en cualquier espaciado) ni la clave de Antifaz llegó al proveedor falso, y que el SDK recibe los valores restaurados (texto, argumentos de herramientas como JSON válido, `tool_use.input`). El razonamiento (`thinking` y su firma) sale igual que entró (invariante 9), y un marcador de un razonamiento anterior no se restaura con el dato nuevo.
-- **Respuestas escritas a mano** (de momento): copian la forma de las respuestas oficiales y solo llevan marcadores y datos inventados. Cada una dice de dónde sale (`provenance`: `hand-written` o `recorded AAAA-MM-DD model X`). Las grabaciones reales llegarán en la segunda fase de 5d, con OK de Miquel. Ver `tests/contract/fixtures/README.md`.
+- **Respuestas escritas a mano y grabadas**: las escritas a mano copian la forma de las respuestas oficiales y solo llevan marcadores y datos inventados; las `openai_recorded_*` son respuestas reales de OpenAI (ver «Prueba real» más abajo). Cada una dice de dónde sale (`provenance`: `hand-written` o `recorded AAAA-MM-DD model X`). Ver `tests/contract/fixtures/README.md`.
 - `test_fixtures_sanitised.py` revisa **todas** las respuestas guardadas: nada que parezca una clave (`sk-`, `sk-ant-`, `Bearer`, cadenas largas de alta entropía que no estén en la lista de valores falsos), ninguna cabecera `Authorization`, `x-api-key` o `Cookie`, ningún dato personal (con el detector de Antifaz y patrones de email y teléfono) fuera de la lista de ejemplos sintéticos, y un `provenance` válido. Hay tests de que ese revisor sí detecta cada caso.
 - Los SDK son dependencias **solo de desarrollo** (grupo `dev`, no se distribuyen); sus licencias están en [licencias.md](licencias.md).
+
+### Prueba real con OpenAI (2026-09-30)
+
+Primera prueba contra un proveedor de verdad, con OK de Miquel para gastar unos céntimos.
+
+- **Montaje**: el SDK oficial `openai` habla con Antifaz dentro del proceso, y Antifaz habla con la API real de OpenAI (`gpt-4.1-nano-2025-04-14`, el modelo de chat más barato sin razonamiento de la lista de la cuenta). Un transporte intermedio guardaba en memoria los bytes exactos que salían hacia OpenAI y los que volvían. Solo datos sintéticos (DNI `12345678Z`, email `ana.prueba@example.com`).
+- **4 peticiones**: (a) «repite esta frase» con el DNI y el email; (b) lo mismo en streaming; (c) llamada a una herramienta `lookup_customer(dni)`; (d) lo mismo en streaming.
+- **Lo que recibió OpenAI**: en las 4, solo marcadores (`[[ES_DNI_1]]`, `[[EMAIL_1]]`); ningún valor sintético, ni tal cual ni sin espacios ni signos.
+- **Resultado**: el cliente recibió en las 4 los valores originales restaurados; los argumentos de herramienta, como JSON válido (`{"dni": "12345678Z"}`). En streaming, OpenAI partió cada marcador en 5–7 trozos (` [[`, `ES`, `_D`, `NI`, `_`, `1`, `]]`) y Antifaz los unió bien. Con la herramienta forzada (`tool_choice`), OpenAI termina con `finish_reason: "stop"`, no `tool_calls`.
+- **Coste**: 202 tokens de entrada y 60 de salida en total (55 + 55 + 76 + 76). Con el precio público de `gpt-4.1-nano` (0,10 $ por millón de entrada y 0,40 $ por millón de salida), unos 0,00005 $: menos de una centésima de céntimo. Listar modelos no cuesta.
+- **Grabaciones**: las 4 respuestas quedaron como `tests/contract/fixtures/openai_recorded_*` (solo cuerpos, sin cabeceras, con ids falsos) y tienen sus tests de contrato.
+- **Pendiente**: la prueba real con Claude Code y la API de Anthropic (no hay crédito de Anthropic todavía).
 
 ## `antifaz verify` (issue 5, PR 5d, primera versión)
 
@@ -355,7 +367,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 
 ## Limitaciones
 
-- El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). La prueba con Claude Code de verdad y las respuestas grabadas de los proveedores reales (segunda fase de 5d) están pendientes: los tests de contrato usan respuestas escritas a mano.
+- El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). Hay una prueba real con OpenAI y sus respuestas grabadas (2026-09-30); la prueba real con Claude Code y Anthropic está pendiente (sin crédito de Anthropic), y sus tests de contrato usan respuestas escritas a mano.
 - En streaming, los argumentos de las herramientas llegan **de golpe al final de su bloque** (o de la `choice` en OpenAI), no poco a poco: así siempre son JSON válido.
 - En streaming, un marcador de esta petición con más de ~60 espacios o tabuladores dentro de `[[ ... ]]` sale sin restaurar (como marcador): es el tope de seguridad de lo retenido. Más de 4 MiB de argumentos de herramientas cortan el stream con `stream_limit_exceeded`; el texto ya restaurado de otras choices se envía antes del error.
 - Una llamada a herramienta sin `index` en OpenAI pasa sin tocar (sus argumentos no se pueden unir) y se cuenta como desconocida. En Anthropic, `input_json_delta` solo se restaura en bloques `tool_use`; en otros (herramientas del servidor…) pasa sin tocar y se cuenta.

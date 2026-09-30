@@ -216,3 +216,102 @@ async def test_attachment_is_blocked_with_bad_request_error(
 
     assert info.value.code == "antifaz_blocked"
     assert upstream.requests == []
+
+
+# Real answers from gpt-4.1-nano, recorded through Antifaz on 2026-09-30 and sanitised (see
+# fixtures/README.md). The provider split every placeholder across several stream chunks
+# (" [[", "ES", "_D", "NI", "_", "1", "]]"). A forced tool choice ends with "stop".
+RECORDED_TEXT = [
+    {"role": "user", "content": f"Repite esta frase: Mi DNI es {DNI} y mi correo es {EMAIL}."}
+]
+RECORDED_LOOKUP = [{"role": "user", "content": f"Busca el cliente con DNI {DNI}."}]
+RECORDED_TOOLS: list[Any] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_customer",
+            "description": "Look up a customer by DNI",
+            "parameters": {
+                "type": "object",
+                "properties": {"dni": {"type": "string"}},
+                "required": ["dni"],
+            },
+        },
+    }
+]
+RECORDED_GREETING = f"Mi DNI es {DNI} y mi correo es {EMAIL}."
+
+
+async def test_recorded_chat_completion_is_restored(
+    openai_client: openai.AsyncOpenAI, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("openai_recorded_chat_text.json")
+
+    completion = await openai_client.chat.completions.create(
+        model="gpt-4.1-nano", messages=RECORDED_TEXT
+    )
+
+    assert completion.choices[0].message.content == RECORDED_GREETING
+    assert completion.usage is not None and completion.usage.total_tokens == 55
+    assert_nothing_leaked(upstream)
+
+
+async def test_recorded_stream_with_split_placeholders_is_restored(
+    openai_client: openai.AsyncOpenAI, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("openai_recorded_chat_stream_text.sse")
+
+    stream = await openai_client.chat.completions.create(
+        model="gpt-4.1-nano",
+        messages=RECORDED_TEXT,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    text, finish, usage = [], None, None
+    async for chunk in stream:
+        for choice in chunk.choices:
+            text.append(choice.delta.content or "")
+            finish = choice.finish_reason or finish
+        usage = chunk.usage or usage
+
+    assert "".join(text) == RECORDED_GREETING
+    assert finish == "stop"
+    assert usage is not None and usage.total_tokens == 55
+    assert_nothing_leaked(upstream)
+
+
+async def test_recorded_tool_call_arguments_are_restored_json(
+    openai_client: openai.AsyncOpenAI, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("openai_recorded_chat_tool_call.json")
+
+    completion = await openai_client.chat.completions.create(
+        model="gpt-4.1-nano", messages=RECORDED_LOOKUP, tools=RECORDED_TOOLS
+    )
+
+    call = completion.choices[0].message.tool_calls[0]  # type: ignore[index]
+    assert call.function.name == "lookup_customer"  # type: ignore[union-attr]
+    assert json.loads(call.function.arguments) == {"dni": DNI}  # type: ignore[union-attr]
+    assert_nothing_leaked(upstream)
+
+
+async def test_recorded_streamed_tool_call_arguments_are_restored_json(
+    openai_client: openai.AsyncOpenAI, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("openai_recorded_chat_stream_tool_call.sse")
+
+    stream = await openai_client.chat.completions.create(
+        model="gpt-4.1-nano", messages=RECORDED_LOOKUP, tools=RECORDED_TOOLS, stream=True
+    )
+    names, arguments = [], []
+    async for chunk in stream:
+        for choice in chunk.choices:
+            for call in choice.delta.tool_calls or []:
+                if call.function and call.function.name:
+                    names.append(call.function.name)
+                if call.function and call.function.arguments:
+                    arguments.append(call.function.arguments)
+
+    assert names == ["lookup_customer"]
+    assert json.loads("".join(arguments)) == {"dni": DNI}
+    assert_nothing_leaked(upstream)
