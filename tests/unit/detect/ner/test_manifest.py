@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -168,3 +170,35 @@ def test_a_manifest_that_is_not_json_is_refused(tmp_path: Path) -> None:
     path.write_text("{", encoding="utf-8")
     with pytest.raises(ModelMismatchError, match="manifest"):
         load_manifest(path)
+
+
+# --- Links and special files (review of 6a) -----------------------------------------------------
+
+
+def test_a_symbolic_link_is_refused(model_dir: Path, manifest: Manifest, tmp_path: Path) -> None:
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(WEIGHTS)
+    try:
+        (model_dir / "link.bin").symlink_to(outside)
+    except OSError:
+        pytest.skip("this system does not let the test create symbolic links")
+    with pytest.raises(ModelMismatchError, match="link"):
+        verify_model_dir(model_dir, manifest)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions only exist on Windows")
+def test_a_windows_junction_is_refused(model_dir: Path, manifest: Manifest, tmp_path: Path) -> None:
+    import _winapi  # type: ignore[import-not-found,unused-ignore]  # Windows only
+
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    _winapi.CreateJunction(str(target), str(model_dir / "junction"))
+    with pytest.raises(ModelMismatchError, match="link"):
+        verify_model_dir(model_dir, manifest)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes need POSIX")
+def test_a_special_file_is_refused(model_dir: Path, manifest: Manifest) -> None:
+    os.mkfifo(model_dir / "pipe")
+    with pytest.raises(ModelMismatchError, match="not a regular file"):
+        verify_model_dir(model_dir, manifest)

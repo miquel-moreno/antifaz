@@ -11,7 +11,9 @@ it refuses every directory.
 
 import hashlib
 import json
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -101,22 +103,50 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+
+
+def _is_link(entry: "os.DirEntry[str]", info: os.stat_result) -> bool:
+    """Symbolic links, Windows junctions and any other reparse point (they can point anywhere)."""
+    attributes = getattr(info, "st_file_attributes", 0)
+    return entry.is_symlink() or entry.is_junction() or bool(attributes & _REPARSE_POINT)
+
+
 def _files(directory: Path) -> dict[str, Path]:
+    """Every regular file under `directory`. Links, junctions and special files are refused;
+    nothing is followed (os.scandir without following links, no rglob)."""
     found: dict[str, Path] = {}
-    for path in directory.rglob("*"):
-        name = path.relative_to(directory).as_posix()
-        if path.is_symlink():
-            raise ModelMismatchError(f"the model directory has a symbolic link: {name}")
-        if path.is_file():
-            found[name] = path
+    pending = [directory]
+    while pending:
+        current = pending.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                name = path.relative_to(directory).as_posix()
+                info = entry.stat(follow_symlinks=False)
+                if _is_link(entry, info):
+                    raise ModelMismatchError(f"the model directory has a link: {name}")
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(path)
+                elif stat.S_ISREG(info.st_mode):
+                    found[name] = path
+                else:
+                    raise ModelMismatchError(f"not a regular file in the model directory: {name}")
     return found
 
 
 def verify_model_dir(directory: Path, manifest: Manifest) -> None:
-    """Raise ModelMismatchError unless `directory` holds exactly the files of `manifest`."""
+    """Raise ModelMismatchError unless `directory` holds exactly the files of `manifest`.
+
+    Time of check and time of use are not the same moment (TOCTOU): the gateway checks at
+    startup and EVERY worker checks again right before it loads the model, so a file swapped
+    after startup stops the worker. A swap in the instant between that check and the load is
+    still possible, but only for someone who can already write the model directory, which is
+    as much as running code in the gateway: keep that directory read-only for its user.
+    """
     if not manifest.files:
         raise ModelMismatchError("the manifest lists no model files: there is no model yet")
-    if not directory.is_dir():
+    if directory.is_symlink() or directory.is_junction() or not directory.is_dir():
         raise ModelMismatchError("the model directory is not a directory")
     found = _files(directory)
     extra = sorted(set(found) - set(manifest.files))

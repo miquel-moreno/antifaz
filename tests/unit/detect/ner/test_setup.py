@@ -11,6 +11,7 @@ from pydantic import SecretStr, ValidationError
 from antifaz.api.app import create_app
 from antifaz.config import Settings, UnsafeConfigError
 from antifaz.detect.ner.engine import NerDetector
+from antifaz.detect.ner.pool import NerUnavailableError
 from antifaz.detect.ner.setup import GLINER_FACTORY, ner_from_settings
 from tests.nerfakes import CARMEN, FAKE_FACTORY
 
@@ -144,3 +145,17 @@ def test_a_matching_model_and_backend_build_the_detector(model: tuple[Path, Path
         assert [(s.start, s.end) for s in spans] == [(4, 4 + len(CARMEN))]
     finally:
         detector.close()
+
+
+def test_every_worker_checks_the_model_again_when_it_starts(model: tuple[Path, Path]) -> None:
+    """TOCTOU: a file changed between the startup check and a worker start stops that worker."""
+    directory, manifest = model
+    settings = _settings(ner_enabled=True, ner_model_dir=directory)
+    detector = ner_from_settings(
+        settings, manifest_path=manifest, factory=FAKE_FACTORY, options={"names": {}}
+    )
+    assert detector is not None
+    (directory / "weights.safetensors").write_bytes(WEIGHTS[:-1] + b"?")
+    with pytest.raises(NerUnavailableError):
+        detector.start()
+    detector.close()

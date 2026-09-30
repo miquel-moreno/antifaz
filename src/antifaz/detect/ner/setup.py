@@ -74,6 +74,11 @@ def ner_from_settings(
         {"model_dir": str(settings.ner_model_dir), **(options or {})},
         workers=settings.ner_workers,
         timeout=settings.ner_timeout_seconds,
+        verify={
+            "model_dir": str(settings.ner_model_dir),
+            "manifest": str(manifest_path),
+            "digest": manifest.digest,
+        },
     )
     cache = SpanCache(settings.ner_cache_entries) if settings.ner_cache_entries else None
     return NerDetector(

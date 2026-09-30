@@ -87,6 +87,7 @@ class NerPool:
         failure_threshold: int = DEFAULT_FAILURE_THRESHOLD,
         backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
         max_backoff_seconds: float = DEFAULT_MAX_BACKOFF_SECONDS,
+        verify: Mapping[str, str] | None = None,
     ) -> None:
         split_factory(factory)  # a malformed path fails here, not in a child process
         if workers < 1 or timeout <= 0 or load_timeout <= 0:
@@ -95,6 +96,8 @@ class NerPool:
             raise ValueError("the NER circuit breaker needs a threshold and positive backoffs")
         self._factory = factory
         self._options = json.dumps(dict(options or {}))
+        # {"model_dir", "manifest", "digest"}: every worker checks the model before loading it.
+        self._verify = json.dumps(dict(verify or {}))
         self._size = workers
         self._timeout = timeout
         self._load_timeout = load_timeout
@@ -177,7 +180,7 @@ class NerPool:
         parent, child = _CONTEXT.Pipe(duplex=True)
         process = _CONTEXT.Process(
             target=worker_main,
-            args=(child, self._factory, self._options),
+            args=(child, self._factory, self._options, self._verify),
             name="antifaz-ner",
             daemon=True,
         )

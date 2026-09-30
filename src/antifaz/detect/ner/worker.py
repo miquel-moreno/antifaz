@@ -12,9 +12,11 @@ import logging
 import os
 import sys
 import warnings
+from pathlib import Path
 from typing import Protocol
 
 from antifaz.detect.ner.backend import NerBackend, load_factory
+from antifaz.detect.ner.manifest import ModelMismatchError, load_manifest, verify_model_dir
 
 
 class Pipe(Protocol):
@@ -49,14 +51,31 @@ def _silence() -> None:  # pragma: no cover - only in the worker process
     warnings.simplefilter("ignore")
 
 
-def main(conn: Pipe, factory: str, options: str) -> None:  # pragma: no cover - in child
+def main(conn: Pipe, factory: str, options: str, verify: str) -> None:  # pragma: no cover
     """Entry point of a worker process (the pool tests run it for real)."""
     _silence()
     os.environ.update(OFFLINE_ENV)
-    run(conn, factory, options)
+    run(conn, factory, options, verify)
 
 
-def _load(factory: str, options: str) -> NerBackend | None:
+def _verified(verify: str) -> bool:
+    """With {"model_dir", "manifest", "digest"}: the model is still exactly the manifest's."""
+    try:
+        check = json.loads(verify)
+        if not check:
+            return True
+        manifest = load_manifest(Path(check["manifest"]))
+        if manifest.digest != check["digest"]:
+            return False
+        verify_model_dir(Path(check["model_dir"]), manifest)
+    except (ModelMismatchError, OSError, ValueError, KeyError, TypeError):
+        return False
+    return True
+
+
+def _load(factory: str, options: str, verify: str) -> NerBackend | None:
+    if not _verified(verify):
+        return None
     try:
         return load_factory(factory)(**json.loads(options))
     except Exception:  # any failure is one fixed code; the error may quote the model files
@@ -79,9 +98,10 @@ def _answer(backend: NerBackend, raw: bytes) -> bytes | None:
         return _PREDICT_FAILED
 
 
-def run(conn: Pipe, factory: str, options: str) -> None:
-    """Load the backend, say "ready" and answer requests until "stop" or the pipe closes."""
-    backend = _load(factory, options)
+def run(conn: Pipe, factory: str, options: str, verify: str = "{}") -> None:
+    """Check the model again (at every worker start: TOCTOU), load the backend, say "ready"
+    and answer requests until "stop" or the pipe closes."""
+    backend = _load(factory, options, verify)
     if backend is None:
         conn.send_bytes(_LOAD_FAILED)
         return
