@@ -1,0 +1,28 @@
+{
+  "provenance": "hand-written",
+  "status": 200,
+  "body": {
+    "id": "msg_contract_tool_0001",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5-20250929",
+    "content": [
+      {"type": "text", "text": "Busco al cliente [[ES_DNI_1]]."},
+      {
+        "type": "tool_use",
+        "id": "toolu_contract_0001",
+        "name": "buscar_cliente",
+        "input": {"dni": "[[ES_DNI_1]]", "email": "[[EMAIL_1]]", "iban": "[[IBAN_1]]"}
+      }
+    ],
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 120,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 45,
+      "service_tier": "standard"
+    }
+  }
+}

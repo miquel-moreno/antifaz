@@ -1,0 +1,5 @@
+{
+  "provenance": "hand-written",
+  "status": 502,
+  "body": {"type": "error", "error": {"type": "api_error", "message": "Bad gateway"}, "request_id": "req_contract_0502"}
+}

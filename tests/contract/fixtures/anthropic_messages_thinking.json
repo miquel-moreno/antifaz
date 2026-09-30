@@ -1,0 +1,27 @@
+{
+  "provenance": "hand-written",
+  "status": 200,
+  "body": {
+    "id": "msg_contract_thinking_0001",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5-20250929",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "El usuario da [[ES_DNI_1]]; lo confirmo sin inventar nada.",
+        "signature": "ZmFrZS1zaWduYXR1cmUtZm9yLWNvbnRyYWN0LXRlc3Rz"
+      },
+      {"type": "text", "text": "Recibido: [[ES_DNI_1]]."}
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 60,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 70,
+      "service_tier": "standard"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "provenance": "hand-written",
+  "status": 200,
+  "body": {
+    "id": "msg_contract_text_0001",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5-20250929",
+    "content": [
+      {"type": "text", "text": "Hola. Tu DNI es [[ES_DNI_1]] y tu correo es [[EMAIL_1]]."}
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 40,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 20,
+      "service_tier": "standard"
+    }
+  }
+}

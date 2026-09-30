@@ -1,0 +1,36 @@
+{
+  "provenance": "hand-written",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-contract-tool-0001",
+    "object": "chat.completion",
+    "created": 1759190400,
+    "model": "gpt-4o-mini-2024-07-18",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_contract_0001",
+              "type": "function",
+              "function": {
+                "name": "buscar_cliente",
+                "arguments": "{\"dni\": \"[[ES_DNI_1]]\", \"email\": \"[[EMAIL_1]]\", \"iban\": \"[[IBAN_1]]\"}"
+              }
+            }
+          ],
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {"prompt_tokens": 80, "completion_tokens": 30, "total_tokens": 110},
+    "service_tier": "default",
+    "system_fingerprint": "fp_contract01"
+  }
+}

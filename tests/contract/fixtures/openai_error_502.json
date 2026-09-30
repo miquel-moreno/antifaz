@@ -1,0 +1,5 @@
+{
+  "provenance": "hand-written",
+  "status": 502,
+  "body": {"error": {"message": "Bad gateway.", "type": "server_error", "param": null, "code": null}}
+}
