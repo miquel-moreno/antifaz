@@ -167,3 +167,51 @@ def test_too_deep_json_is_blocked() -> None:
     payload = "[" * 100_000 + "]" * 100_000
     with pytest.raises(EgressBlocked):
         check(payload, vault_with((EntityType.ES_DNI, DNI)))
+
+
+# --- Names found by the NER (issue 6, ADR-0016) -----------------------------------------------
+
+
+@pytest.mark.parametrize("payload", ["la semana que viene", "Banana", "Anabel", "mañana"])
+def test_a_short_name_needs_word_boundaries(payload: str) -> None:
+    check(payload, vault_with((EntityType.PERSON, "Ana")))
+
+
+@pytest.mark.parametrize(
+    "payload", ["Soy Ana.", "ANA", "ana,", '{"n": "' + chr(92) + 'u0041na"}', "Ána"]
+)
+def test_a_short_name_between_boundaries_blocks(payload: str) -> None:
+    with pytest.raises(EgressBlocked):
+        check(payload, vault_with((EntityType.PERSON, "Ana")))
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "Carmen Prueba López",
+        "carmen prueba lopez",
+        "CARMEN-PRUEBA-LÓPEZ",
+        "CarmenPruebaLópez",
+        "xcarmenpruebalopezx",
+    ],
+)
+def test_a_long_name_is_found_in_any_spelling_and_glued(payload: str) -> None:
+    with pytest.raises(EgressBlocked):
+        check(payload, vault_with((EntityType.PERSON, "Carmen Prueba López")))
+
+
+def test_a_long_name_inside_another_word_blocks_an_accepted_false_positive() -> None:
+    # Documented in ADR-0016: 6+ letters are compared without word boundaries, so "Marina"
+    # blocks "submarina". The masker masks it too (propagation), so this rarely blocks.
+    with pytest.raises(EgressBlocked):
+        check("un submarina amarillo", vault_with((EntityType.PERSON, "Marina")))
+
+
+def test_a_name_written_with_look_alike_letters_blocks() -> None:
+    """Review of 6a: the guard folds the same Cyrillic and Greek look-alikes as the detector."""
+    cyrillic_a, greek_o = chr(0x430), chr(0x3BF)
+    vault = vault_with((EntityType.PERSON, "Carmen Prueba López"))
+    with pytest.raises(EgressBlocked):
+        check(f"C{cyrillic_a}rmen Prueba L{greek_o}pez", vault)
+    with pytest.raises(EgressBlocked):
+        check(f"Hola {cyrillic_a.upper()}na", vault_with((EntityType.PERSON, "Ana")))

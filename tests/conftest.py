@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 from collections.abc import Iterator
 from typing import Any
@@ -13,6 +14,16 @@ from antifaz.config import Settings
 # An invented but valid DNI (checksum letter correct), used as a "sentinel": it must never
 # appear in logs, error bodies or metrics.
 SENTINEL_DNI = "12345678Z"
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Tests marked `ner_model` need the real model (issue 6b): skipped unless it is there."""
+    if os.environ.get("ANTIFAZ_NER_MODEL_DIR"):
+        return
+    skip = pytest.mark.skip(reason="needs the real NER model: set ANTIFAZ_NER_MODEL_DIR")
+    for item in items:
+        if "ner_model" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture

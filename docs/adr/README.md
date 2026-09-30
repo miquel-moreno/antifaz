@@ -20,3 +20,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0013](0013-proxy.md) | El proxy: qué se enmascara, qué se envía y qué se restaura | Aceptada |
 | [0014](0014-normalizacion-previa-del-detector.md) | Normalización previa del detector | Aceptada |
 | [0015](0015-puerta-cerrada-por-defecto.md) | La puerta cerrada por defecto | Aceptada |
+| [0016](0016-ner-en-procesos-aparte.md) | El NER en procesos aparte, con caché y manifiesto | Aceptada |

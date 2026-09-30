@@ -325,8 +325,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     synthetic = run_synthetic(from_jsonl(SYNTHETIC.read_text(encoding="utf-8")))
-    synthetic_name = _save(synthetic, "-synthetic")
-
     archive = meddocan.download()
     report = evaluate(
         meddocan.load_test(archive),
@@ -334,6 +332,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
     )
     report.environment["dataset_md5"] = meddocan.MD5
+    # Save only after both evaluations: writing a tracked results file earlier would make
+    # the second report see a modified tree and mark its commit as "-dirty".
+    synthetic_name = _save(synthetic, "-synthetic")
     name = _save(report, "")
     table = render_markdown(report)
     if not args.no_doc:

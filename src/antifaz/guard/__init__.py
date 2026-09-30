@@ -3,7 +3,8 @@
 Looks for any value the policy said to hide. If the payload is JSON, it checks every
 decoded string, key and number (so `\\u` escapes are covered); otherwise the raw text.
 Both the value and the text are normalised the same way: NFKC, format characters (Cf)
-removed, accents removed, casefold and whitespace runs collapsed. Values with 6 or more
+removed, accents removed, Cyrillic and Greek look-alikes folded to Latin (the detector's table,
+`fold_homoglyphs`), casefold and whitespace runs collapsed. Values with 6 or more
 letters and digits are then compared with every other character removed and WITHOUT word
 boundaries, so a value glued to other letters is still caught. Shorter values need
 alphanumeric boundaries, so "Ana" does not match inside "semana". Any match blocks the
@@ -18,6 +19,7 @@ import json
 import unicodedata
 from collections.abc import Iterator
 
+from antifaz.detect.normalize import fold_homoglyphs
 from antifaz.errors import EgressBlocked
 from antifaz.vault import Vault
 
@@ -38,7 +40,7 @@ def _normal(text: str) -> str:
         for char in unicodedata.normalize("NFD", text)
         if unicodedata.category(char) not in ("Cf", "Mn")
     )
-    text = unicodedata.normalize("NFC", text.casefold())
+    text = unicodedata.normalize("NFC", fold_homoglyphs(text).casefold())
     return " ".join(text.split())
 
 

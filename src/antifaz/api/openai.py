@@ -9,8 +9,10 @@ Forbidden: logging bodies, headers or keys. Forwarding the client's key or heade
 destination from the client.
 """
 
+from functools import partial
 from typing import Any
 
+import anyio.to_thread
 from fastapi import APIRouter, Request, Response
 
 from antifaz.api.errors import InvalidStreamOptionsError, NotConfiguredError
@@ -55,7 +57,11 @@ async def chat_completions(request: Request) -> Response:
     stream = stream_requested(body)
     _check_stream_options(body)
 
-    masked, vault = mask_request(body, policy=state.policy, detector=state.detector)
+    # In a worker thread: detection (patterns and the NER pool) never blocks the event loop.
+    masked, vault = await anyio.to_thread.run_sync(
+        partial(mask_request, body, policy=state.policy, detector=state.detector),
+        limiter=state.mask_limiter,
+    )
     url = settings.openai_base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"}
     keys = configured_keys(settings)

@@ -3,7 +3,7 @@
 import pytest
 
 from antifaz import mask, restore
-from antifaz.detect.normalize import HOMOGLYPHS, normalize
+from antifaz.detect.normalize import HOMOGLYPHS, fold_homoglyphs, normalize
 from antifaz.detect.scan import scan
 from antifaz.detect.types import EntityType as T
 
@@ -92,3 +92,10 @@ def test_new_separators_and_glued_values(text: str, value: str, entity_type: T) 
 )
 def test_strict_counts_keep_false_positives_out(text: str) -> None:
     assert scan(text) == []
+
+
+def test_fold_homoglyphs_uses_the_view_table() -> None:
+    look_alikes = "".join(HOMOGLYPHS)
+    assert fold_homoglyphs(look_alikes) == "".join(HOMOGLYPHS.values())
+    assert fold_homoglyphs(look_alikes) == normalize(look_alikes).text
+    assert fold_homoglyphs("Carmen ñ") == "Carmen ñ"

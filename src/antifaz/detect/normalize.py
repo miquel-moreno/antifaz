@@ -80,6 +80,16 @@ def _build() -> tuple[dict[int, str | None], str]:
 
 _TABLE, _DROPPED = _build()
 _DROPPED_SET = frozenset(_DROPPED)
+_HOMOGLYPH_TABLE = str.maketrans(HOMOGLYPHS)
+
+
+def fold_homoglyphs(text: str) -> str:
+    """`text` with the Cyrillic and Greek look-alikes (HOMOGLYPHS) as Latin letters.
+
+    The one helper for this table: the egress guard and the NER propagation fold exactly the
+    letters the detector's view folds, so a value written with look-alikes is seen by all.
+    """
+    return text.translate(_HOMOGLYPH_TABLE)
 
 
 class Normalized:
