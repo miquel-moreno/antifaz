@@ -5,8 +5,9 @@ message and miss it in another. Then the egress guard would block the whole requ
 the hidden value would still be in the payload. So every value the NER found (and the policy
 hides) is searched in all the texts of the request with the SAME rule as the guard:
 
-- both sides normalised: NFKC, no format characters (Cf) or accents (Mn), casefold, runs of
-  whitespace as one space;
+- both sides normalised: NFKC, no format characters (Cf) or accents (Mn), the detector's
+  Cyrillic and Greek look-alikes as Latin (`fold_homoglyphs`), casefold, runs of whitespace as
+  one space;
 - values with 6 or more letters and digits: compared with every other character removed and
   WITHOUT word boundaries ("Marina" is found inside "submarina": an accepted false positive);
 - shorter values: compared with alphanumeric boundaries ("Ana" is not found in "semana").
@@ -20,6 +21,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 
+from antifaz.detect.normalize import fold_homoglyphs
 from antifaz.detect.overlaps import resolve
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
 
@@ -37,7 +39,7 @@ def _fold(char: str) -> str:
         return " "
     decomposed = unicodedata.normalize("NFD", unicodedata.normalize("NFKC", char))
     kept = "".join(c for c in decomposed if unicodedata.category(c) not in ("Cf", "Mn"))
-    return unicodedata.normalize("NFC", kept.casefold())
+    return unicodedata.normalize("NFC", fold_homoglyphs(kept).casefold())
 
 
 class _Index:

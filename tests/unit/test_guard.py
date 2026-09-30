@@ -205,3 +205,13 @@ def test_a_long_name_inside_another_word_blocks_an_accepted_false_positive() -> 
     # blocks "submarina". The masker masks it too (propagation), so this rarely blocks.
     with pytest.raises(EgressBlocked):
         check("un submarina amarillo", vault_with((EntityType.PERSON, "Marina")))
+
+
+def test_a_name_written_with_look_alike_letters_blocks() -> None:
+    """Review of 6a: the guard folds the same Cyrillic and Greek look-alikes as the detector."""
+    cyrillic_a, greek_o = chr(0x430), chr(0x3BF)
+    vault = vault_with((EntityType.PERSON, "Carmen Prueba López"))
+    with pytest.raises(EgressBlocked):
+        check(f"C{cyrillic_a}rmen Prueba L{greek_o}pez", vault)
+    with pytest.raises(EgressBlocked):
+        check(f"Hola {cyrillic_a.upper()}na", vault_with((EntityType.PERSON, "Ana")))

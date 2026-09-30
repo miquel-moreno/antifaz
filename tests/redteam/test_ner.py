@@ -169,7 +169,6 @@ def test_a_short_name_is_propagated_with_boundaries(variant: str) -> None:
     assert all("ana" not in _fold(t).replace("person", "") for t in texts)
 
 
-@pytest.mark.xfail(strict=True, reason="FUGA media: propagate/guard no pliegan homoglifos")
 def test_a_homoglyph_spelling_the_ner_missed_is_propagated() -> None:
     """El NER ve 'Carmen…' en latino en un mensaje y falla el otro, escrito con una 'a' cirílica."""
     variant = "C\u0430rmen Prueba López"  # Cyrillic a

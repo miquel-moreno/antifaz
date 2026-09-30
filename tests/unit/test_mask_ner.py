@@ -141,3 +141,11 @@ def test_a_dni_inside_a_ner_name_is_masked_even_if_the_policy_allows_names() -> 
     scanner = Scanner(fake_detector({f"Carmen {SENTINEL_DNI}": "person"})[0])
     result = mask(f"Soy Carmen {SENTINEL_DNI}.", policy, detector=scanner)
     assert result.text == "Soy Carmen [[ES_DNI_1]]."
+
+
+def test_a_look_alike_spelling_of_a_ner_value_is_propagated() -> None:
+    variant = f"C{chr(0x430)}rmen Prueba L{chr(0x3BF)}pez"  # Cyrillic a, Greek o
+    result = mask([f"Soy {CARMEN}", f"Firmado: {variant}"], detector=only_first(CARMEN))
+    assert result.texts == ("Soy [[PERSON_1]]", "Firmado: [[PERSON_2]]")
+    for text in result.texts:
+        guard.check(text, result.vault)
