@@ -6,7 +6,8 @@
 
 ```bash
 make install   # dependencias + hooks de pre-commit
-make check     # lint + tipos + tests + gitleaks + zizmor (seguridad de los workflows)
+make check     # lint + tipos + tests (también los de contrato) + gitleaks + zizmor
+make contract  # solo los tests de contrato: SDK oficiales contra Antifaz, sin red
 make audit     # vulnerabilidades conocidas en las dependencias (uv audit, experimental)
 make licenses  # licencias de lo que se distribuye
 make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
@@ -149,6 +150,7 @@ CLI (`uv run antifaz ...`):
 antifaz scan fichero.txt   # una línea por detección: TIPO inicio fin (nunca el valor)
 antifaz mask fichero.txt   # el texto con marcadores (nunca la tabla)
 antifaz mask -             # lee de stdin
+antifaz verify             # planta datos falsos con tu configuración (ver "antifaz verify")
 ```
 
 Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
@@ -248,6 +250,40 @@ En OpenAI el error es `data: {"error": {"message": ..., "type": "antifaz_error",
 
 Tests: `tests/unit/test_stream_restore.py`, `test_sse.py`, `test_stream_transformers.py`; propiedades en `tests/property/test_stream_restore_property.py`, `test_sse_property.py` y `test_stream_protocol_property.py`; ataques en `tests/redteam/test_streaming.py` (429 y 5xx, proveedor lento, cortes en mitad de un marcador, UTF-8 partido o inválido, marcadores de otra petición, razonamiento, eventos desconocidos, claves y desconexión del cliente).
 
+## Tests de contrato con los SDK oficiales (issue 5, PR 5d)
+
+Comprueban que un cliente real (los SDK oficiales `openai` y `anthropic` de Python) entiende todo lo que Antifaz devuelve y recibe los datos restaurados. Sin red y sin claves:
+
+```
+SDK oficial --(httpx2.ASGITransport, en el mismo proceso)--> Antifaz --(httpx.MockTransport)--> proveedor falso
+```
+
+- Los SDK reciben un `http_client` que llama a la app ASGI de Antifaz dentro del proceso (los SDK usan `httpx2`, un fork de httpx; Antifaz sigue con `httpx`). Detrás, el proveedor falso (`tests/contract/conftest.py`) sirve las respuestas de `tests/contract/fixtures/` cortadas en trozos de 37 bytes (los eventos y los marcadores llegan partidos) y guarda todo lo que recibe. Además, mientras corren, cualquier conexión que no sea a `localhost` falla, y se quitan del entorno las variables `OPENAI_*` y `ANTHROPIC_*`. Los SDK van con `max_retries=0`, para que un 429 o un 502 llegue al test.
+- Qué cubren: `chat.completions.create` (texto, herramientas, streaming de texto y de `tool_calls`, y el helper `chat.completions.stream`), `messages.create` (texto, `tool_use`, `thinking`), `messages.stream` (`text_delta`, `input_json_delta`, `thinking_delta` y `signature_delta`), `messages.count_tokens` y los errores: 401 → `AuthenticationError`, 400 → `BadRequestError`, 429 → `RateLimitError` y 502 → `InternalServerError`, con y sin streaming. También la clave de Antifaz equivocada (401) y un adjunto bloqueado (400).
+- Cada test comprueba dos cosas: que ningún valor sembrado (DNI, email, IBAN, en cualquier espaciado) ni la clave de Antifaz llegó al proveedor falso, y que el SDK recibe los valores restaurados (texto, argumentos de herramientas como JSON válido, `tool_use.input`). El razonamiento (`thinking` y su firma) sale igual que entró (invariante 9), y un marcador de un razonamiento anterior no se restaura con el dato nuevo.
+- **Respuestas escritas a mano** (de momento): copian la forma de las respuestas oficiales y solo llevan marcadores y datos inventados. Cada una dice de dónde sale (`provenance`: `hand-written` o `recorded AAAA-MM-DD model X`). Las grabaciones reales llegarán en la segunda fase de 5d, con OK de Miquel. Ver `tests/contract/fixtures/README.md`.
+- `test_fixtures_sanitised.py` revisa **todas** las respuestas guardadas: nada que parezca una clave (`sk-`, `sk-ant-`, `Bearer`, cadenas largas de alta entropía que no estén en la lista de valores falsos), ninguna cabecera `Authorization`, `x-api-key` o `Cookie`, ningún dato personal (con el detector de Antifaz y patrones de email y teléfono) fuera de la lista de ejemplos sintéticos, y un `provenance` válido. Hay tests de que ese revisor sí detecta cada caso.
+- Los SDK son dependencias **solo de desarrollo** (grupo `dev`, no se distribuyen); sus licencias están en [licencias.md](licencias.md).
+
+## `antifaz verify` (issue 5, PR 5d, primera versión)
+
+Para que quien instala Antifaz compruebe **con su configuración** que los datos no salen, sin gastar nada:
+
+```bash
+uv run antifaz verify
+```
+
+- Lee la configuración como el servidor (variables `ANTIFAZ_*` y `.env`) y comprueba primero que arrancaría (mismas reglas que `create_app`); si no, código 2 y el nombre de la variable, nunca su valor.
+- **Nunca llama al proveedor.** Levanta la pasarela dentro del proceso (`httpx.ASGITransport`) con un proveedor falso (`httpx.MockTransport`) que guarda los bytes que recibe y responde con los marcadores que ha visto. Para la prueba cambia las URL y las claves de los proveedores por unas falsas (así da igual que falten o que sean reales) y acepta un `Host` más (`antifaz-verify.invalid`).
+- Siembra seis tipos de dato sintéticos (DNI, NIE, IBAN, email, teléfono y tarjeta) en 16 peticiones (más 2 para las claves): en OpenAI, mensaje de sistema, de usuario, parte de contenido, argumentos de una herramienta y su resultado, con y sin streaming; en Anthropic, `system` (texto y bloques), mensaje de usuario, bloque de texto, `tool_use.input` y `tool_result`, con y sin streaming, y `count_tokens`.
+- Falla (código 1) si un valor sembrado llega al proveedor falso (tal cual o con otros espacios y mayúsculas), si la clave de Antifaz llega al proveedor, si una respuesta trae alguna clave configurada (hay una petición por ruta en la que el proveedor falso devuelve las cabeceras que recibió), si la pasarela bloquea o da error en una petición que debía pasar (el enmascarador dejó un valor y la guardia lo paró), o si un valor no vuelve en la respuesta.
+- El informe solo dice **tipos y sitios** (`LEAK ES_DNI, IBAN reached the provider -- openai chat: tool result`), nunca valores ni claves. Si todo va bien, un `PASS` de cinco líneas.
+- Usa la misma política que el servidor (hoy la de fábrica). Un tipo que la política deja pasar (`allow`) no se comprueba y aparece como nota.
+- No usa la comprobación de claves de la propia pasarela (`api/proxy.py`) para decidir: tiene la suya, para ver lo que la pasarela se deje.
+- Tests: `tests/unit/test_verify.py`, también con la pasarela saboteada (enmascarador ciego → `LEAK` y código 1; enmascarador que deja un valor → `BLOCKED`; comprobación de claves desactivada → `KEY`; clave de Antifaz reenviada → `LEAK`).
+
+Limitaciones de esta primera versión: los valores sembrados son fijos (los mismos que usan los tests), la política no se lee todavía de un fichero, y no revisa lo que se escribe en los logs (eso lo cubren los tests de las invariantes 8 y 13).
+
 ## La puerta cerrada por defecto (issue 20)
 
 Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
@@ -318,7 +354,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 
 ## Limitaciones
 
-- El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). La prueba con Claude Code de verdad está pendiente.
+- El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). La prueba con Claude Code de verdad y las respuestas grabadas de los proveedores reales (segunda fase de 5d) están pendientes: los tests de contrato usan respuestas escritas a mano.
 - En streaming, los argumentos de las herramientas llegan **de golpe al final de su bloque** (o de la `choice` en OpenAI), no poco a poco: así siempre son JSON válido.
 - En streaming, un marcador de esta petición con más de ~60 espacios o tabuladores dentro de `[[ ... ]]` sale sin restaurar (como marcador): es el tope de seguridad de lo retenido. Más de 4 MiB de argumentos de herramientas cortan el stream con `stream_limit_exceeded`; el texto ya restaurado de otras choices se envía antes del error.
 - Una llamada a herramienta sin `index` en OpenAI pasa sin tocar (sus argumentos no se pueden unir) y se cuenta como desconocida. En Anthropic, `input_json_delta` solo se restaura en bloques `tool_use`; en otros (herramientas del servidor…) pasa sin tocar y se cuenta.
