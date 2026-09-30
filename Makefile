@@ -1,8 +1,9 @@
 # Common tasks. Run `make help` to list them.
 PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
+ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test secrets check audit licenses bench
+.PHONY: help install dev lint format typecheck test secrets check audit licenses bench workflows
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -12,7 +13,8 @@ help:
 	@echo "typecheck  Check types (mypy strict)"
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "secrets    Scan the repository for secrets (gitleaks)"
-	@echo "check      lint + typecheck + test + secrets (run before every commit)"
+	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
+	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
 	@echo "licenses   Licenses of the runtime dependencies"
 	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
@@ -42,7 +44,10 @@ test:
 secrets:
 	gitleaks detect --source . --no-banner
 
-check: lint typecheck test secrets
+workflows:
+	$(ZIZMOR) .
+
+check: lint typecheck test secrets workflows
 
 audit:
 	$(UV_AUDIT)

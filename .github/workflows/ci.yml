@@ -5,20 +5,27 @@ on:
     branches: [main]
   pull_request:
 
-# Least privilege: every job only reads the code unless it says otherwise.
-permissions:
-  contents: read
+# Least privilege: nothing by default; each job asks only for what it needs.
+permissions: {}
+
+# One run per branch or PR: a new push cancels the previous run of a PR, never of main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Actions are pinned by full commit SHA (a tag can be moved; a SHA cannot).
 # Dependabot keeps them up to date.
 env:
   UV_VERSION: "0.12.20"
   PYTHON_VERSION: "3.12"
+  ZIZMOR_VERSION: "1.30.1"
 
 jobs:
   quality:
     name: Lint, types and tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +50,8 @@ jobs:
   supply-chain:
     name: Vulnerabilities and licenses
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,7 +71,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read # check out the code
       pull-requests: read # gitleaks-action lists the commits of the PR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,3 +81,22 @@ jobs:
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  workflows:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the code; the token also lets zizmor's online audits read public actions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      # Auditor persona: also the low-confidence checks. Any finding fails the job.
+      - name: zizmor
+        run: uvx "zizmor==${ZIZMOR_VERSION}" --persona auditor --format plain .
+        env:
+          GH_TOKEN: ${{ github.token }}

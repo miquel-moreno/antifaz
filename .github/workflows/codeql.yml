@@ -7,8 +7,13 @@ on:
   schedule:
     - cron: "17 5 * * 1" # every Monday
 
-permissions:
-  contents: read
+# Least privilege: nothing by default; the job asks only for what it needs.
+permissions: {}
+
+# One run per branch or PR: a new push cancels the previous run of a PR, never of main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
@@ -19,9 +24,9 @@ jobs:
     if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read # check out the code
       security-events: write # upload the results to the Security tab
-      actions: read
+      actions: read # CodeQL reads the workflow run it belongs to
     strategy:
       fail-fast: false
       matrix:

@@ -6,7 +6,7 @@
 
 ```bash
 make install   # dependencias + hooks de pre-commit
-make check     # lint + tipos + tests + gitleaks
+make check     # lint + tipos + tests + gitleaks + zizmor (seguridad de los workflows)
 make audit     # vulnerabilidades conocidas en las dependencias (uv audit, experimental)
 make licenses  # licencias de lo que se distribuye
 make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
@@ -269,6 +269,18 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 | `uv audit` también sobre las herramientas de desarrollo | A propósito: esas herramientas corren en la CI con acceso al código; una vulnerable también es un riesgo |
 | Errores 422 sin claves del cliente y con tamaño máximo | En la ubicación del error solo quedan la parte (`body`, `query`…) y los índices; las claves de un diccionario las elige el cliente y podrían ser un DNI |
 | `X-Request-ID` propio siempre (issue 20) | Se escribe en logs y cabeceras: el del cliente se ignora, porque hasta un valor corto y sin símbolos puede ser un DNI |
+
+## Decisiones técnicas del issue 21 (CI y cadena de suministro)
+
+| Decisión | Por qué |
+|---|---|
+| zizmor 1.30.1 en pre-commit (sin conexión), en `make check` y en la CI (con las comprobaciones en línea), perfil `auditor` | Busca fallos de seguridad en los workflows (inyecciones, permisos, acciones sin fijar). El perfil `auditor` también saca los avisos de baja confianza: cualquier aviso rompe la CI |
+| `permissions: {}` arriba en cada workflow y permisos por job, cada uno con su comentario | Un job nuevo empieza sin permisos; solo recibe lo que pide y queda explicado por qué |
+| `concurrency` por rama; en un PR, un push nuevo cancela la ejecución anterior (en `main` nunca) | No se acumulan ejecuciones viejas y en `main` siempre termina la de cada commit |
+| Dependabot con `cooldown` de 7 días en `uv` y `github-actions` | Una versión secuestrada suele detectarse y retirarse en pocos días; las actualizaciones de seguridad no esperan |
+| `CODEOWNERS` con líneas propias para `pyproject.toml`, `uv.lock`, `.github/` y `Dockerfile` | Son los archivos que cambian qué código se ejecuta en la CI o se distribuye |
+| Herramientas de la CI con versión exacta (uv 0.12.20, zizmor 1.30.1, acciones por SHA) | La misma entrada da siempre la misma herramienta; se actualizan a propósito |
+| Sin topes superiores (`<3`) en las dependencias de `pyproject.toml`; versiones exactas solo en `uv.lock` | Antifaz también es una librería: un tope impide a quien la instala recibir arreglos de seguridad y crea conflictos con otros paquetes. Lo reproducible es el `uv.lock`. Quitar `python-stdnum<3` no cambió ninguna versión bloqueada. `requires-python` mantiene `<3.13` porque la CI solo prueba 3.12 |
 
 ## Limitaciones
 
