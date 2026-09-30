@@ -158,3 +158,10 @@ tocan ningún dato anotado, son falsos positivos.
 | Fugas por cada 100 (tipos cubiertos) | 0.0 |
 | Latencia p50 / p95 por documento | 0.29 ms / 0.40 ms |
 <!-- bench-synthetic:end -->
+
+## Resultados con NER (MEDDOCAN)
+
+Generados por `make bench NER=1` (antes, `make ner-model`); el detalle está en `evals/results/<fecha>-<versión>-ner.json`.
+
+<!-- bench-ner:start -->
+<!-- bench-ner:end -->
