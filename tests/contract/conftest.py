@@ -10,7 +10,6 @@ anything but the loopback are refused while these tests run.
 
 import json
 import os
-import socket
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,7 @@ from pydantic import SecretStr
 
 from antifaz.api.app import create_app
 from antifaz.config import Settings
+from tests.conftest import forbid_network
 from tests.integration.fakes import GATEWAY_KEY, PROVIDER_KEY, sse_response
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -107,14 +107,7 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
         if name.startswith(("OPENAI_", "ANTHROPIC_")):
             monkeypatch.delenv(name)
-    real_getaddrinfo = socket.getaddrinfo
-
-    def local_only(host: Any, *args: Any, **kwargs: Any) -> Any:
-        if host not in ("localhost", "127.0.0.1", "::1", None):
-            raise RuntimeError("contract tests must not open network connections")
-        return real_getaddrinfo(host, *args, **kwargs)
-
-    monkeypatch.setattr(socket, "getaddrinfo", local_only)
+    forbid_network(monkeypatch)
 
 
 @pytest.fixture

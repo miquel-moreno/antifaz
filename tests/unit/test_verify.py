@@ -4,7 +4,6 @@ It must pass with a working gateway, fail (exit 1) when the masker is sabotaged,
 print a planted value or a key.
 """
 
-import socket
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +17,7 @@ from antifaz.cli.verify import PLANTED_TEXT, PLANTS, probes, verify
 from antifaz.config import Settings
 from antifaz.detect.scan import scan
 from antifaz.mask import mask as real_mask
+from tests.conftest import forbid_network
 
 GATEWAY_KEY = "verify-test-gateway-key-0123456789abcdef"
 PROVIDER_KEY = "verify-test-provider-key-not-real"
@@ -38,13 +38,7 @@ def _settings(**overrides: Any) -> Settings:
 def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """verify must never open a connection nor build the real upstream client."""
 
-    def refuse(host: Any, *args: Any, **kwargs: Any) -> Any:
-        if host not in ("localhost", "127.0.0.1", "::1", None):
-            raise RuntimeError("antifaz verify tried to reach the network")
-        return real_getaddrinfo(host, *args, **kwargs)
-
-    real_getaddrinfo = socket.getaddrinfo
-    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    forbid_network(monkeypatch)
 
     def no_real_client(*_: object) -> None:
         raise AssertionError("antifaz verify built the real provider client")
@@ -201,11 +195,13 @@ def test_key_echoed_by_the_provider_is_reported(
 
     captured = capsys.readouterr()
     assert "KEY" in captured.out
+    assert "expected 502" in captured.out  # the gateway returned the echo instead
     _output_is_clean(captured.out + captured.err)
 
 
+@pytest.mark.parametrize("route", ["openai", "anthropic"])
 def test_forwarded_antifaz_key_is_reported(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], route: str
 ) -> None:
     """A gateway that forwarded the client's key would hand it to the provider."""
     import antifaz.api.proxy as proxy
@@ -215,12 +211,14 @@ def test_forwarded_antifaz_key_is_reported(
     async def forwarding(client: Any, url: str, headers: Any, *args: Any, **kw: Any) -> Any:
         return await real_send(client, url, {**headers, "x-client-key": GATEWAY_KEY}, *args, **kw)
 
-    monkeypatch.setattr("antifaz.api.openai.send_masked", forwarding)
+    monkeypatch.setattr(f"antifaz.api.{route}.send_masked", forwarding)
 
     assert verify(_settings()) == 1
 
     captured = capsys.readouterr()
-    assert "the Antifaz key reached the provider" in captured.out
+    lines = [line for line in captured.out.splitlines() if "the Antifaz key reached" in line]
+    assert lines
+    assert all(route in line for line in lines)
     _output_is_clean(captured.out + captured.err)
 
 
@@ -237,3 +235,58 @@ def test_policy_that_allows_a_type_is_reported_as_a_note(
 
     out = capsys.readouterr().out
     assert "EMAIL" in out and "allowed by the policy" in out
+
+
+def test_answer_not_restored_is_reported(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A gateway that forgets to restore whole answers: the values do not come back."""
+    for route in ("openai", "anthropic"):
+        monkeypatch.setattr(f"antifaz.api.{route}.restore_response", lambda body, _: body)
+
+    assert verify(_settings()) == 1
+
+    captured = capsys.readouterr()
+    restore = [line for line in captured.out.splitlines() if "RESTORE" in line]
+    assert any("ES_DNI" in line and "openai chat: user message" in line for line in restore)
+    assert not any("streaming" in line for line in restore)  # streams still restore
+    assert "LEAK" not in captured.out
+    _output_is_clean(captured.out + captured.err)
+
+
+def test_probe_that_never_reaches_the_provider_is_reported(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A gateway that answers count_tokens itself: the check would prove nothing."""
+    import httpx
+
+    import antifaz.api.anthropic as route
+
+    real_send = route._send
+
+    async def local_count(request: Any, call: Any) -> Any:
+        if call.url.endswith("/count_tokens"):
+            return httpx.Response(200, json={"input_tokens": 1})
+        return await real_send(request, call)
+
+    monkeypatch.setattr(route, "_send", local_count)
+
+    assert verify(_settings()) == 1
+
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if "NO UPSTREAM" in line]
+    assert len(lines) == 1 and "count_tokens" in lines[0]
+    _output_is_clean(captured.out + captured.err)
+
+
+def test_small_body_limit_cannot_verify_and_is_not_a_privacy_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert verify(_settings(max_body_bytes=300)) == 2
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "could not verify" in output
+    assert "ANTIFAZ_MAX_BODY_BYTES" in output
+    assert "FAIL" not in output and "LEAK" not in output
+    _output_is_clean(output)

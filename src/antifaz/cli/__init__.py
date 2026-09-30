@@ -14,7 +14,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
-from antifaz.cli.verify import verify_from_environment
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
@@ -55,6 +54,9 @@ def _read(name: str) -> str | None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "verify":
+        # Imported here: scan and mask do not need the web app and its dependencies.
+        from antifaz.cli.verify import verify_from_environment
+
         return verify_from_environment()
     text = _read(args.file)
     if text is None:

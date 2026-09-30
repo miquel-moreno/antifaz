@@ -67,6 +67,8 @@ PATHS: dict[Route, str] = {
 MODEL = "antifaz-verify"
 ECHO_HEADERS_MODEL = "antifaz-verify-echo-headers"
 VERIFY_HOST = "antifaz-verify.invalid"
+# An answer that repeats a configured key is dropped with this status (ADR-0015).
+ECHO_STATUS = 502
 FAKE_UPSTREAM = "https://upstream.antifaz-verify.invalid"
 _PLACEHOLDER = re.compile(r"\[\[[A-Z][A-Z0-9_]*_\d+\]\]")
 _PIECE = 7  # streamed answers arrive in pieces this long, so placeholders are cut
@@ -315,7 +317,16 @@ class FakeProvider:
 
 @dataclass(frozen=True)
 class Problem:
-    kind: Literal["leak", "gateway_key", "key_in_answer", "blocked", "error", "not_restored"]
+    kind: Literal[
+        "leak",
+        "gateway_key",
+        "key_in_answer",
+        "no_upstream",
+        "blocked",
+        "error",
+        "echo_status",
+        "not_restored",
+    ]
     location: str
     entity: EntityType | None = None
     status: int | None = None
@@ -336,7 +347,9 @@ def _lines(problems: Sequence[Problem]) -> list[str]:
             "gateway_key": "LEAK the Antifaz key reached the provider",
             "key_in_answer": "KEY a configured key came back in the answer",
             "blocked": "BLOCKED the gateway refused the request (a planted value was not masked)",
+            "no_upstream": "NO UPSTREAM the request did not reach the provider exactly once",
             "error": f"ERROR the gateway answered HTTP {status}",
+            "echo_status": f"ERROR the gateway answered HTTP {status}, expected {ECHO_STATUS}",
             "not_restored": f"RESTORE {types} did not come back in the answer",
         }[kind]
         lines.append(f"{what} -- {location}")
@@ -412,7 +425,11 @@ def _check(
     answer_texts = _texts(answer.content) + [f"{k}: {v}" for k, v in answer.headers.items()]
     if any(key in text for text in answer_texts for key in keys):
         found.append(Problem("key_in_answer", probe.location))
+    if len(sent) != 1:  # every probe is meant for the provider: otherwise nothing was proved
+        found.append(Problem("no_upstream", probe.location))
     if not probe.planted:
+        if answer.status_code != ECHO_STATUS:
+            found.append(Problem("echo_status", probe.location, status=answer.status_code))
         return found
     if answer.status_code != 200:
         blocked = "antifaz_blocked" in answer.text
@@ -439,6 +456,7 @@ class Report:
     requests: int
     problems: list[Problem]
     allowed: list[EntityType]  # planted types the policy lets through on purpose
+    too_large: int = 0  # probes refused with 413 because of ANTIFAZ_MAX_BODY_BYTES
 
 
 async def run_checks(settings: Settings, policy: Policy) -> Report:
@@ -460,6 +478,7 @@ async def run_checks(settings: Settings, policy: Policy) -> Report:
     allowed = [plant.type for plant in PLANTS if plant not in hidden]
     provider = FakeProvider()
     problems: list[Problem] = []
+    too_large = 0
     battery = probes()
     async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as upstream:
         app = create_app(run_settings, http_client=upstream, policy=policy)
@@ -475,9 +494,12 @@ async def run_checks(settings: Settings, policy: Policy) -> Report:
                 answer = await client.post(
                     PATHS[probe.route], json=probe.body, headers=_headers(probe.route, gateway_key)
                 )
+                if answer.status_code == 413 and len(provider.requests) == before:
+                    too_large += 1  # the user's body limit, not a privacy problem
+                    continue
                 sent = provider.requests[before:]
                 problems += _check(probe, answer, sent, gateway_key, keys, hidden)
-    return Report(len(battery), problems, allowed)
+    return Report(len(battery), problems, allowed, too_large)
 
 
 def _print_report(report: Report) -> None:
@@ -503,6 +525,16 @@ def _print_report(report: Report) -> None:
     print("\n".join(lines))
 
 
+def _print_too_large(report: Report) -> None:
+    print(
+        f"antifaz verify: could not verify: {report.too_large} of {report.requests} test "
+        "requests are larger than ANTIFAZ_MAX_BODY_BYTES (HTTP 413); raise it and run again\n"
+        "  this is not a privacy failure: those requests were refused before reaching the "
+        "provider",
+        file=sys.stderr,
+    )
+
+
 def verify(settings: Settings) -> int:
     """Check `settings` and print the report. Never prints values or keys."""
     try:
@@ -519,8 +551,16 @@ def verify(settings: Settings) -> int:
     if failed:
         print("antifaz verify: the checks could not run", file=sys.stderr)
         return 2
+    if report.problems:
+        _print_report(report)
+        if report.too_large:
+            _print_too_large(report)
+        return 1
+    if report.too_large:
+        _print_too_large(report)
+        return 2
     _print_report(report)
-    return 1 if report.problems else 0
+    return 0
 
 
 def verify_from_environment() -> int:
