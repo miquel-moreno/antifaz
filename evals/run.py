@@ -22,6 +22,7 @@ from pathlib import Path
 
 from antifaz import __version__
 from antifaz.config import Settings
+from antifaz.detect.ner.backend import Predictor
 from antifaz.detect.ner.cache import SpanCache
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.manifest import (
@@ -34,6 +35,7 @@ from antifaz.detect.ner.pool import NerPool
 from antifaz.detect.ner.setup import GLINER_FACTORY
 from antifaz.detect.scan import Scanner, scan
 from antifaz.detect.types import EntityType, Span
+from antifaz.errors import DetectorFailed
 from evals.datasets import meddocan
 from evals.datasets.meddocan import Document
 from evals.generate import from_jsonl
@@ -351,60 +353,185 @@ def run_synthetic(documents: Sequence[Document]) -> Report:
 class NerBench:
     report: Report  # test split, chosen threshold, cache cold
     threshold: float
-    selection: list[dict[str, float]]  # one row per candidate threshold, dev split
+    selection: list[dict[str, object]]  # one row per candidate threshold, dev split
     warm_latency_ms: dict[str, float]  # the same test documents again: every text cached
 
 
-def _metric(report: Report, entity: str, name: str) -> float:
-    return float(report.by_type.get(entity, {}).get(name, 0.0))
+class NoThresholdError(ValueError):
+    """No candidate threshold keeps the pre-registered precision floor on dev."""
 
 
-def selection_row(threshold: float, report: Report) -> dict[str, float]:
-    return {
+def _well_formed(entity: object) -> bool:
+    return isinstance(entity, list | tuple) and len(entity) == 4 and type(entity[3]) in (int, float)
+
+
+class ScoreCache:
+    """A predictor in front of another: every window is scored ONCE, at the lowest threshold,
+    and the answer is filtered by score for each higher threshold.
+
+    Exact, not an approximation: GLiNER's greedy decoding keeps, above any threshold, the same
+    spans it keeps at a lower one filtered by score (higher scores are chosen first), and the
+    backend never joins spans (gliner.py; the engine joins them after its own filter). A test
+    checks it gives the same spans as running every threshold. Only for the bench: it keeps
+    the window texts in memory."""
+
+    def __init__(self, inner: Predictor, threshold: float) -> None:
+        self._inner = inner
+        self._threshold = threshold
+        self._scores: dict[tuple[str, tuple[str, ...]], list[object]] = {}
+
+    @property
+    def timeout(self) -> float | None:
+        timeout = getattr(self._inner, "timeout", None)
+        return float(timeout) if timeout is not None else None
+
+    def start(self) -> None:
+        self._inner.start()
+
+    def close(self) -> None:
+        self._inner.close()
+
+    def predict(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None = None,
+    ) -> list[list[object]]:
+        if threshold < self._threshold:
+            raise ValueError("a threshold below the one the windows were scored with")
+        names = tuple(labels)
+        missing = [text for text in dict.fromkeys(texts) if (text, names) not in self._scores]
+        if missing:
+            if deadline is not None and self.timeout is not None:
+                raw = self._inner.predict(missing, names, self._threshold, deadline=deadline)
+            else:
+                raw = self._inner.predict(missing, names, self._threshold)
+            if not isinstance(raw, list | tuple) or len(raw) != len(missing):
+                raise DetectorFailed()
+            for text, answer in zip(missing, raw, strict=True):
+                self._scores[(text, names)] = list(answer) if isinstance(answer, list) else answer
+        out = []
+        for text in texts:
+            answer = self._scores[(text, names)]
+            if not isinstance(answer, list):
+                out.append(answer)  # malformed: the engine refuses it
+                continue
+            # GLiNER keeps scores strictly above its threshold (probs > threshold): so does this.
+            # Malformed entities are kept so the engine refuses them, as without the cache.
+            out.append([e for e in answer if not _well_formed(e) or float(e[3]) > threshold])
+        return out
+
+
+def selection_row(
+    threshold: float, report: Report, floor: float = PRECISION_FLOOR
+) -> dict[str, object]:
+    """One row of the dev table: numbers only (no text, no value)."""
+    row: dict[str, object] = {
         "threshold": threshold,
+        "documents": report.documents,
         "leaks_per_100": float(report.overall["leaks_per_100"]),
         "covered_leaks_per_100": float(report.overall["covered_leaks_per_100"]),
-        "person_precision": _metric(report, "PERSON", "precision"),
-        "person_recall": _metric(report, "PERSON", "recall"),
-        "address_precision": _metric(report, "ADDRESS", "precision"),
-        "address_recall": _metric(report, "ADDRESS", "recall"),
     }
+    for entity in ("PERSON", "ADDRESS"):
+        metrics = report.by_type.get(entity, {})
+        tp, fp, fn = (int(metrics.get(name, 0)) for name in ("tp", "fp", "fn"))
+        precision = float(metrics.get("precision", 0.0))
+        row |= {
+            f"{entity}_precision": precision,
+            f"{entity}_recall": float(metrics.get("recall", 0.0)),
+            f"{entity}_strict_precision": float(metrics.get("strict_precision", 0.0)),
+            f"{entity}_strict_recall": float(metrics.get("strict_recall", 0.0)),
+            f"{entity}_tp": tp,
+            f"{entity}_fp": fp,
+            f"{entity}_fn": fn,
+            f"{entity}_gold": tp + fn,
+            f"{entity}_meets_floor": precision >= floor,
+        }
+    return row
+
+
+FLOOR_TYPES = ("PERSON", "ADDRESS")
+
+
+def _number(row: Mapping[str, object], key: str) -> float:
+    value = row[key]
+    if not isinstance(value, int | float):
+        raise TypeError(f"{key} is not a number")
+    return float(value)
 
 
 def choose_threshold(rows: Sequence[Mapping[str, object]], floor: float = PRECISION_FLOOR) -> float:
     """Fewest covered leaks per 100 among the thresholds whose PERSON and ADDRESS precision
-    reach `floor`; a tie goes to the higher threshold (fewer false positives)."""
+    (overlap) both reach `floor`; a tie goes to the higher threshold (fewer false positives).
+    NoThresholdError says, for each threshold, which type falls short."""
     good = [
-        row
-        for row in rows
-        if float(row["person_precision"]) >= floor and float(row["address_precision"]) >= floor  # type: ignore[arg-type]
+        row for row in rows if all(_number(row, f"{e}_precision") >= floor for e in FLOOR_TYPES)
     ]
     if not good:
-        raise ValueError(f"no threshold keeps the precision floor of {floor}")
-    best = min(good, key=lambda r: (float(r["covered_leaks_per_100"]), -float(r["threshold"])))  # type: ignore[arg-type]
-    return float(best["threshold"])  # type: ignore[arg-type]
+        failing = "; ".join(
+            f"{row['threshold']}: "
+            + ", ".join(
+                f"{entity} {100 * _number(row, f'{entity}_precision'):.1f} %"
+                for entity in FLOOR_TYPES
+                if _number(row, f"{entity}_precision") < floor
+            )
+            for row in rows
+        )
+        raise NoThresholdError(
+            f"no threshold keeps the precision floor of {100 * floor:.0f} % ({failing})"
+        )
+    best = min(good, key=lambda r: (_number(r, "covered_leaks_per_100"), -_number(r, "threshold")))
+    return _number(best, "threshold")
+
+
+def dev_selection(
+    dev: Sequence[Document],
+    predictor: Predictor,
+    thresholds: Sequence[float] = THRESHOLDS,
+    *,
+    model_id: str = "unknown",
+    floor: float = PRECISION_FLOOR,
+) -> list[dict[str, object]]:
+    """The dev table: every threshold, the model run once per window (ScoreCache)."""
+    mapping = meddocan.MEDDOCAN_TO_ANTIFAZ_NER
+    scored = ScoreCache(predictor, min(thresholds))
+    rows = []
+    for threshold in thresholds:
+        detect = Scanner(NerDetector(scored, threshold=threshold, model_id=model_id))
+        rows.append(selection_row(threshold, evaluate(dev, mapping, detect), floor))
+    return rows
+
+
+def measure_test(
+    test: Sequence[Document], predictor: Predictor, threshold: float, model_id: str = "unknown"
+) -> tuple[Report, dict[str, float]]:
+    """The test split once with `threshold` (cache cold), then again (every text cached)."""
+    mapping = meddocan.MEDDOCAN_TO_ANTIFAZ_NER
+    detector = NerDetector(
+        predictor, threshold=threshold, cache=SpanCache(10_000), model_id=model_id
+    )
+    scanner = Scanner(detector)
+    report = evaluate(
+        test, mapping, scanner, dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)"
+    )
+    warm = evaluate(test, mapping, scanner)
+    return report, warm.latency_ms
 
 
 def run_ner_bench(
     dev: Sequence[Document],
     test: Sequence[Document],
-    make_detector: Callable[[float], NerDetector],
+    predictor: Predictor,
     thresholds: Sequence[float] = THRESHOLDS,
     floor: float = PRECISION_FLOOR,
+    model_id: str = "unknown",
 ) -> NerBench:
     """Choose the threshold on `dev`, then measure `test` once with it (cold, then warm)."""
-    mapping = meddocan.MEDDOCAN_TO_ANTIFAZ_NER
-    selection = []
-    for threshold in thresholds:
-        detect = Scanner(make_detector(threshold))
-        selection.append(selection_row(threshold, evaluate(dev, mapping, detect)))
-    chosen = choose_threshold(selection, floor)
-    scanner = Scanner(make_detector(chosen))
-    report = evaluate(
-        test, mapping, scanner, dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)"
-    )
-    warm = evaluate(test, mapping, scanner)  # every text is in the cache now
-    return NerBench(report, chosen, selection, warm.latency_ms)
+    rows = dev_selection(dev, predictor, thresholds, model_id=model_id, floor=floor)
+    chosen = choose_threshold(rows, floor)
+    report, warm = measure_test(test, predictor, chosen, model_id)
+    return NerBench(report, chosen, rows, warm)
 
 
 def rss_mb(pid: int) -> float | None:
@@ -441,6 +568,25 @@ def _leaks(report: Report, labels: Sequence[str]) -> str:
     return f"{leaks_per_100(leaked, total):.1f}"
 
 
+def render_selection(rows: Sequence[Mapping[str, object]]) -> str:
+    """The dev table as Markdown (also printed before choosing)."""
+    lines = [
+        "| Umbral | Fugas por cada 100 (todos) | Fugas (cubiertos) | Precisión PERSON "
+        "| Recall PERSON | Precisión ADDRESS | Recall ADDRESS | Suelo PERSON / ADDRESS |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for row in rows:
+        floor = " / ".join("sí" if row[f"{e}_meets_floor"] else "no" for e in FLOOR_TYPES)
+        lines.append(
+            f"| {row['threshold']} | {_number(row, 'leaks_per_100'):.1f} | "
+            f"{_number(row, 'covered_leaks_per_100'):.1f} | "
+            f"{_pct_value(row['PERSON_precision'])} | {_pct_value(row['PERSON_recall'])} | "
+            f"{_pct_value(row['ADDRESS_precision'])} | {_pct_value(row['ADDRESS_recall'])} | "
+            f"{floor} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def render_ner_markdown(report: Report, base: Report) -> str:
     """The NER section: how the threshold was chosen (dev), before/after on test, and the
     usual tables with the NER on. Numbers only."""
@@ -456,17 +602,8 @@ def render_ner_markdown(report: Report, base: Report) -> str:
         f"(tipos cubiertos) con precisión de PERSON y ADDRESS de al menos "
         f"{100 * PRECISION_FLOOR:.0f} %; en empate, el más alto.",
         "",
-        "| Umbral | Fugas por cada 100 (todos) | Fugas (cubiertos) | Precisión PERSON "
-        "| Recall PERSON | Precisión ADDRESS | Recall ADDRESS |",
-        "|---|---|---|---|---|---|---|",
+        render_selection(selection).rstrip("\n"),
     ]
-    for row in selection:
-        lines.append(
-            f"| {row['threshold']} | {row['leaks_per_100']:.1f} | "
-            f"{row['covered_leaks_per_100']:.1f} | {_pct_value(row['person_precision'])} | "
-            f"{_pct_value(row['person_recall'])} | {_pct_value(row['address_precision'])} | "
-            f"{_pct_value(row['address_recall'])} |"
-        )
     names = ("NOMBRE_SUJETO_ASISTENCIA", "NOMBRE_PERSONAL_SANITARIO")
     rss = ner.get("worker_rss_mb")
     lines += [
@@ -519,65 +656,109 @@ def _open_ner(model_dir: Path, threads: int) -> tuple[NerPool, Manifest]:  # pra
     return pool, manifest
 
 
-def _ner_report(archive: Path, threads: int) -> Report:  # pragma: no cover - needs the model
-    model_dir = Settings().ner_model_dir
-    if model_dir is None:
-        raise SystemExit("set ANTIFAZ_NER_MODEL_DIR (make ner-model downloads the model)")
-    pool, manifest = _open_ner(model_dir, threads)
-    try:
-
-        def make(threshold: float) -> NerDetector:
-            return NerDetector(
-                pool, threshold=threshold, cache=SpanCache(10_000), model_id=manifest.digest
-            )
-
-        bench = run_ner_bench(meddocan.load_dev(archive), meddocan.load_test(archive), make)
-        rss = [rss_mb(pid) for pid in pool.worker_pids() if pid is not None]
-    finally:
-        pool.close()
-    bench.report.environment["dataset_md5"] = meddocan.MD5
-    bench.report.ner = {
-        "threshold": bench.threshold,
-        "precision_floor": PRECISION_FLOOR,
-        "selection": bench.selection,
-        "selection_split": "MEDDOCAN dev",
-        "latency_warm_ms": bench.warm_latency_ms,
+def _model_info(manifest: Manifest, threads: int) -> dict[str, object]:
+    return {
         "model": manifest.model,
         "revision": manifest.revision,
         "manifest_sha256": manifest.digest,
-        "worker_rss_mb": rss[0] if rss else None,
         "torch_threads": threads or f"torch default ({os.cpu_count()} logical CPUs)",
         "workers": 1,
     }
-    return bench.report
+
+
+def save_dev_selection(document: Mapping[str, object]) -> str:
+    """evals/results/<date>-<version>-ner-dev.json; its name."""
+    environment = document["environment"]
+    if not isinstance(environment, dict):
+        raise TypeError("the dev document needs its environment")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{environment['date']}-{environment['antifaz']}-ner-dev.json"
+    text = json.dumps(document, ensure_ascii=False, indent=1) + "\n"
+    (RESULTS_DIR / name).write_text(text, encoding="utf-8", newline="\n")
+    return name
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Command line entry point: download MEDDOCAN if needed, evaluate both sets (and, with
-    --ner, the NER) and write the results."""
+    --ner, the NER) and write the results. Every file is written at the END of the run (a
+    tracked file written earlier would mark the next report's commit as "-dirty")."""
     parser = argparse.ArgumentParser(description="Run Antifaz-Bench (MEDDOCAN + synthetic).")
     parser.add_argument("--no-doc", action="store_true", help="do not update docs/benchmark.md")
     parser.add_argument("--ner", action="store_true", help="also measure the NER model")
+    parser.add_argument(
+        "--dev-only", action="store_true", help="with the NER: only the dev threshold table"
+    )
     parser.add_argument("--threads", type=int, default=0, help="torch threads with --ner")
     args = parser.parse_args(argv)
+    ner_on = args.ner or args.dev_only
 
-    synthetic = run_synthetic(from_jsonl(SYNTHETIC.read_text(encoding="utf-8")))
     archive = meddocan.download()
-    report = evaluate(
-        meddocan.load_test(archive),
-        meddocan.MEDDOCAN_TO_ANTIFAZ,
-        dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
-    )
-    report.environment["dataset_md5"] = meddocan.MD5
-    ner_report = _ner_report(archive, args.threads) if args.ner else None
-    # Save only after every evaluation: writing a tracked results file earlier would make
-    # a later report see a modified tree and mark its commit as "-dirty".
+    synthetic = report = None
+    if not args.dev_only:
+        synthetic = run_synthetic(from_jsonl(SYNTHETIC.read_text(encoding="utf-8")))
+        report = evaluate(
+            meddocan.load_test(archive),
+            meddocan.MEDDOCAN_TO_ANTIFAZ,
+            dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
+        )
+        report.environment["dataset_md5"] = meddocan.MD5
+    ner_report = None
+    dev_document: dict[str, object] | None = None
+    if ner_on:  # pragma: no cover - needs the model (make ner-model)
+        model_dir = Settings().ner_model_dir
+        if model_dir is None:
+            print(
+                "Set ANTIFAZ_NER_MODEL_DIR (make ner-model downloads the model).", file=sys.stderr
+            )
+            return 2
+        pool, manifest = _open_ner(model_dir, args.threads)
+        try:
+            rows = dev_selection(meddocan.load_dev(archive), pool, model_id=manifest.digest)
+            dev_document = {
+                "dataset": "MEDDOCAN dev (Zenodo 10.5281/zenodo.4279323)",
+                "environment": {**_environment(), "dataset_md5": meddocan.MD5},
+                "precision_floor": PRECISION_FLOOR,
+                "floor_types": list(FLOOR_TYPES),
+                "thresholds": list(THRESHOLDS),
+                **_model_info(manifest, args.threads),
+                "rows": rows,
+            }
+            print(render_selection(rows))
+            try:
+                chosen = choose_threshold(rows)
+            except NoThresholdError as error:
+                name = save_dev_selection(dev_document)
+                print(f"{error}\nDev table: evals/results/{name}", file=sys.stderr)
+                return 3
+            if args.dev_only:
+                print(f"Chosen threshold on dev: {chosen}")
+                print(f"Dev table: evals/results/{save_dev_selection(dev_document)}")
+                return 0
+            ner_report, warm = measure_test(
+                meddocan.load_test(archive), pool, chosen, manifest.digest
+            )
+            rss = [rss_mb(pid) for pid in pool.worker_pids() if pid is not None]
+        finally:
+            pool.close()
+        ner_report.environment["dataset_md5"] = meddocan.MD5
+        ner_report.ner = {
+            "threshold": chosen,
+            "precision_floor": PRECISION_FLOOR,
+            "selection": rows,
+            "selection_split": "MEDDOCAN dev",
+            "latency_warm_ms": warm,
+            "worker_rss_mb": rss[0] if rss else None,
+            **_model_info(manifest, args.threads),
+        }
+    if report is None or synthetic is None:  # only --dev-only gets here without them
+        return 0
     synthetic_name = _save(synthetic, "-synthetic")
     name = _save(report, "")
     table = render_markdown(report)
     names = [f"evals/results/{name}", f"evals/results/{synthetic_name}"]
-    if ner_report is not None:
+    if ner_report is not None and dev_document is not None:
         names.append(f"evals/results/{_save(ner_report, '-ner')}")
+        names.append(f"evals/results/{save_dev_selection(dev_document)}")
     if not args.no_doc:
         update_benchmark_doc(BENCHMARK_DOC, table)
         update_benchmark_doc(

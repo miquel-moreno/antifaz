@@ -228,3 +228,27 @@ def test_end_to_end_names_never_reach_the_provider(monkeypatch: pytest.MonkeyPat
     for value in ("Jordi", "Inventat", "Puig", "Ficticia", SENTINEL_DNI):
         assert value not in sent
     assert re.search(r"\[\[PERSON_1\]\]", sent) and "[[ADDRESS_1]]" in sent
+
+
+def test_scoring_once_matches_running_each_threshold_with_the_real_model(
+    model: GlinerBackend,
+) -> None:
+    """The bench's ScoreCache (evals/run.py) is exact with GLiNER, not only with the fake."""
+    from evals.run import ScoreCache
+
+    from antifaz.detect.ner.engine import NerDetector
+    from antifaz.detect.scan import Scanner
+    from tests.nerfakes import InProcess
+
+    texts = [
+        "La doctora Carmen Prueba López y el enfermero Jordi Inventat Puig atendieron a "
+        "Lucía Ejemplo Martín, que vive en la Calle Ficticia 12, 3º B, de Pallejà.",
+        "Remitente: Marc Inventat Soler. Plaza Imaginaria 3, 2º 1ª, 08001 Barcelona. "
+        "Su madre, Ana, y su hermano Pau llamaron al Hospital Inventado.",
+    ]
+    scored = ScoreCache(InProcess(model), 0.3)  # type: ignore[arg-type]
+    for threshold in (0.3, 0.4, 0.5, 0.6):
+        once = Scanner(NerDetector(scored, threshold=threshold))
+        every = Scanner(NerDetector(InProcess(model), threshold=threshold))  # type: ignore[arg-type]
+        for text in texts:
+            assert once(text) == every(text), threshold

@@ -20,6 +20,7 @@ help:
 	@echo "licenses   Licenses of the runtime dependencies"
 	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
 	@echo "           make bench NER=1: also with the NER model (needs make ner-model)"
+	@echo "           make bench DEV=1: only the NER threshold table on MEDDOCAN dev"
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
 
 install:
@@ -63,8 +64,10 @@ audit:
 licenses:
 	uv run python -m scripts.check_licenses
 
+# NER=1: also the NER (threshold chosen on MEDDOCAN dev, then test once). DEV=1: only the dev
+# threshold table (evals/results/<date>-<version>-ner-dev.json).
 bench:
-	uv run python -m evals.run $(if $(NER),--ner,)
+	uv run $(if $(NER)$(DEV),--extra ner,) python -m evals.run $(if $(NER),--ner,) $(if $(DEV),--dev-only,)
 
 # The optional NER: its extra (CPU-only torch) and the model pinned in detect/ner/manifest.json,
 # checked by size and SHA-256. Note: a plain `uv sync` (make install) removes the extra again.

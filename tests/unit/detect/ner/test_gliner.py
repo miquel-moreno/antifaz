@@ -188,3 +188,25 @@ def test_a_tokenizer_that_skips_words_is_an_error() -> None:
 
     with pytest.raises(ValueError, match="every word"):
         GlinerBackend(split_words, short, Recorder({})).predict(["dos palabras"], ["person"], 0.5)
+
+
+def test_overlapping_entities_of_two_pieces_are_left_for_the_engine_to_join() -> None:
+    """The backend only drops exact repeats (keeping the best score) and never joins
+    overlapping spans: so its answer at a threshold is its answer at a lower one filtered by
+    score, which lets the bench run the model once for every threshold."""
+
+    def infer(texts: list[str], labels: list[str], threshold: float) -> list[list[dict[str, Any]]]:
+        return [
+            [
+                {"start": 0, "end": 5, "label": "person", "score": 0.4},
+                {"start": 0, "end": 5, "label": "person", "score": 0.9},
+                {"start": 3, "end": 9, "label": "person", "score": 0.6},
+            ]
+            for _ in texts
+        ]
+
+    (entities,) = GlinerBackend(split_words, count_tokens, infer).predict(
+        ["Ana Bel Prueba"], ["person"], 0.3
+    )
+
+    assert entities == [[0, 5, "person", 0.9], [3, 9, "person", 0.6]]

@@ -12,7 +12,11 @@ from evals.metrics import Annotation
 from evals.run import (
     NER_END,
     NER_START,
+    NoThresholdError,
+    ScoreCache,
     choose_threshold,
+    dev_selection,
+    evaluate,
     render_ner_markdown,
     rss_mb,
     run_ner_bench,
@@ -22,6 +26,7 @@ from evals.run import (
 
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.fake import FakeBackend
+from antifaz.detect.scan import Scanner
 from tests.nerfakes import InProcess
 
 A = Annotation
@@ -41,7 +46,7 @@ DOCS = [
 ]
 
 
-def _detector_with_score(threshold: float) -> NerDetector:
+def _predictor() -> InProcess:
     """Finds the patient (score 0.9) always; the doctor only below 0.5 (a weaker "model")."""
 
     class Backend(FakeBackend):
@@ -58,15 +63,15 @@ def _detector_with_score(threshold: float) -> NerDetector:
                 out.append(found)
             return out
 
-    return NerDetector(InProcess(Backend({})), threshold=threshold)  # type: ignore[arg-type]
+    return InProcess(Backend({}))
 
 
 def _row(threshold: float, covered: float, person: float, address: float) -> dict[str, object]:
     return {
         "threshold": threshold,
         "covered_leaks_per_100": covered,
-        "person_precision": person,
-        "address_precision": address,
+        "PERSON_precision": person,
+        "ADDRESS_precision": address,
     }
 
 
@@ -84,49 +89,99 @@ def test_a_tie_goes_to_the_higher_threshold() -> None:
     assert choose_threshold(rows, floor=0.85) == 0.5
 
 
-def test_no_threshold_above_the_floor_is_an_error() -> None:
-    with pytest.raises(ValueError, match="floor"):
-        choose_threshold([_row(0.3, 1.0, 0.5, 0.5)], floor=0.85)
+def test_no_threshold_above_the_floor_is_an_error_that_names_the_failing_type() -> None:
+    rows = [_row(0.3, 1.0, 0.5, 0.9), _row(0.6, 2.0, 0.8, 0.9)]
+    with pytest.raises(NoThresholdError, match="floor") as error:
+        choose_threshold(rows, floor=0.85)
+    assert "PERSON" in str(error.value) and "ADDRESS" not in str(error.value)
 
 
 def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
-    made: list[float] = []
+    predictor = _predictor()
 
-    def make(threshold: float) -> NerDetector:
-        made.append(threshold)
-        return _detector_with_score(threshold)
-
-    result = run_ner_bench(DOCS, DOCS, make, thresholds=(0.3, 0.4, 0.5), floor=0.5)
+    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4, 0.5), floor=0.5)  # type: ignore[arg-type]
 
     assert [row["threshold"] for row in result.selection] == [0.3, 0.4, 0.5]
     # 0.3 also calls "Inventada" a person (a false positive); 0.4 finds both names.
     assert result.threshold == 0.4
-    assert made == [0.3, 0.4, 0.5, 0.4]  # test measured once, with the chosen threshold
+    # dev scored once for every threshold; test measured once (the warm pass hits the cache)
+    assert predictor.calls == 2
     person = result.report.by_type["PERSON"]
     assert (person["tp"], person["fp"], person["fn"]) == (2, 0, 0)
     assert result.report.by_source_label["NOMBRE_PERSONAL_SANITARIO"]["leaks"] == 0
     assert set(result.warm_latency_ms) == {"p50", "p95"}
 
 
-def test_selection_rows_carry_only_numbers() -> None:
-    row = selection_row(0.5, run_ner_bench(DOCS, DOCS, _detector_with_score, (0.5,), 0.0).report)
-    assert set(row) == {
-        "threshold",
-        "leaks_per_100",
-        "covered_leaks_per_100",
-        "person_precision",
-        "person_recall",
-        "address_precision",
-        "address_recall",
-    }
-    assert all(isinstance(value, float) for value in row.values())
+def test_selection_rows_give_both_types_with_overlap_and_strict_metrics() -> None:
+    row = selection_row(0.5, evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER))
+    for entity in ("PERSON", "ADDRESS"):
+        for metric in ("precision", "recall", "strict_precision", "strict_recall"):
+            assert isinstance(row[f"{entity}_{metric}"], float)
+        assert isinstance(row[f"{entity}_gold"], int)
+        assert isinstance(row[f"{entity}_meets_floor"], bool)
+    assert row["documents"] == 1
+    assert {"threshold", "leaks_per_100", "covered_leaks_per_100"} <= set(row)
+
+
+def _scored_backend() -> FakeBackend:
+    """Overlapping entities with scores around every candidate threshold."""
+
+    class Backend(FakeBackend):
+        def predict(
+            self, texts: list[str], labels: list[str], threshold: float
+        ) -> list[list[list[object]]]:
+            self.calls = getattr(self, "calls", 0) + 1
+            out = []
+            for text in texts:
+                found: list[list[object]] = []
+                for value, label, score in (
+                    (NAME, "person", 0.92),
+                    ("Lucía", "person", 0.31),
+                    (DOCTOR, "person", 0.45),
+                    ("doctor Marc", "person", 0.55),
+                    ("Calle Inventada", "address", 0.62),
+                    ("Inventada 5", "address", 0.38),
+                ):
+                    start = text.find(value)
+                    if start != -1 and score >= threshold and label in labels:
+                        found.append([start, start + len(value), label, score])
+                out.append(sorted(found, key=lambda e: (e[0], e[1])))
+            return out
+
+    return Backend({})
+
+
+def test_scoring_once_gives_the_same_spans_as_running_every_threshold() -> None:
+    thresholds = (0.3, 0.4, 0.5, 0.6)
+    backend = _scored_backend()
+    cache = ScoreCache(InProcess(backend), min(thresholds))  # type: ignore[arg-type]
+    for threshold in thresholds:
+        once = Scanner(NerDetector(cache, threshold=threshold))
+        every = Scanner(NerDetector(InProcess(_scored_backend()), threshold=threshold))  # type: ignore[arg-type]
+        for document in DOCS:
+            assert once(document.text) == every(document.text), threshold
+    assert backend.calls == 1  # every window scored once
+
+
+def test_the_score_cache_refuses_a_threshold_below_its_own() -> None:
+    cache = ScoreCache(InProcess(_scored_backend()), 0.3)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="threshold"):
+        cache.predict(["x"], ["person"], 0.2)
+
+
+def test_dev_selection_scores_each_window_once_and_keeps_every_row() -> None:
+    backend = _scored_backend()
+    predictor = InProcess(backend)
+    rows = dev_selection(DOCS, predictor, (0.3, 0.4, 0.5, 0.6), model_id="m")  # type: ignore[arg-type]
+    assert [row["threshold"] for row in rows] == [0.3, 0.4, 0.5, 0.6]
+    assert predictor.calls == 1
 
 
 def test_the_ner_section_compares_with_and_without_ner_without_any_value() -> None:
     from evals.run import evaluate
 
     base = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER)
-    result = run_ner_bench(DOCS, DOCS, _detector_with_score, (0.4, 0.5), 0.5)
+    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 0.5)  # type: ignore[arg-type]
     result.report.ner = {
         "threshold": result.threshold,
         "selection": result.selection,

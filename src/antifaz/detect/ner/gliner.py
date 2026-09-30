@@ -15,6 +15,11 @@ numbers, 2,330 pieces, is not seen). So every window is cut again here, with the
 tokenizer, into pieces of at most MAX_MODEL_TOKENS model tokens (labels prompt and special
 tokens included) that overlap by OVERLAP_WORDS words. A single word longer than that cannot be
 read at all and raises (the request is blocked: fail closed).
+
+The entities of the pieces come back in window offsets. An exact repeat keeps its best score,
+but overlapping spans are NOT joined here: the engine joins them after filtering by its
+threshold. So the answer at one threshold is the answer at a lower one filtered by score,
+which lets the bench score each window once for every candidate threshold (evals/run.py).
 """
 
 import json
@@ -23,7 +28,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from antifaz.detect.ner.chunker import Chunk, Entity, merge
+from antifaz.detect.ner.chunker import Chunk, Entity
 from antifaz.detect.ner.worker import OFFLINE_ENV
 
 CONFIG_FILE = "gliner_config.json"
@@ -118,8 +123,12 @@ class GlinerBackend:
         raw = iter(self._infer(flat, labels, threshold) if flat else [])
         out: list[list[list[object]]] = []
         for chunks in windows:
-            found = [[_entity(item) for item in next(raw)] for _ in chunks]
-            out.append([list(entity) for entity in merge(chunks, found)])
+            best: dict[tuple[int, int, str], float] = {}
+            for piece in chunks:
+                for start, end, label, score in map(_entity, next(raw)):
+                    key = (piece.start + start, piece.start + end, label)
+                    best[key] = max(score, best.get(key, 0.0))
+            out.append([[*key, score] for key, score in sorted(best.items())])
         return out
 
 
