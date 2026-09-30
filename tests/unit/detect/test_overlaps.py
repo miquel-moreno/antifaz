@@ -1,11 +1,12 @@
-"""Overlap resolution: validator beats pattern, then longer, then earlier, then type order."""
+"""Overlap resolution: validator beats pattern beats NER, then longer, then earlier, then type
+order. A partial-overlap loser is trimmed to the parts nobody else covers (ADR-0016)."""
 
 from itertools import permutations
 
 from antifaz.detect.overlaps import resolve
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
 
-V, P = Layer.VALIDATOR, Layer.PATTERN
+V, P, N = Layer.VALIDATOR, Layer.PATTERN, Layer.NER
 
 
 def span(start: int, end: int, type_: EntityType, layer: Layer = V) -> Span:
@@ -17,10 +18,10 @@ def test_no_spans_gives_no_spans() -> None:
     assert resolve([]) == []
 
 
-def test_validator_beats_a_longer_partly_overlapping_pattern() -> None:
+def test_validator_beats_a_longer_partly_overlapping_pattern_which_is_trimmed() -> None:
     validated = span(5, 14, EntityType.ES_DNI, V)
     pattern = span(10, 30, EntityType.CREDIT_CARD, P)
-    assert resolve([pattern, validated]) == [validated]
+    assert resolve([pattern, validated]) == [validated, span(14, 30, EntityType.CREDIT_CARD, P)]
 
 
 def test_a_span_that_contains_another_wins_whatever_its_layer() -> None:
@@ -30,16 +31,28 @@ def test_a_span_that_contains_another_wins_whatever_its_layer() -> None:
     assert resolve([dni, email]) == [email]
 
 
+def test_a_ner_span_containing_a_validator_span_wins() -> None:
+    person = span(0, 30, EntityType.PERSON, N)
+    dni = span(10, 19, EntityType.ES_DNI, V)
+    assert resolve([dni, person]) == [person]
+
+
+def test_ner_has_the_lowest_priority_in_a_partial_overlap() -> None:
+    phone = span(10, 21, EntityType.PHONE, P)
+    person = span(0, 14, EntityType.PERSON, N)
+    assert resolve([person, phone]) == [span(0, 10, EntityType.PERSON, N), phone]
+
+
 def test_longer_span_wins_between_two_validators() -> None:
     iban = span(0, 29, EntityType.IBAN)
     ccc = span(5, 29, EntityType.ES_CCC)
     assert resolve([ccc, iban]) == [iban]
 
 
-def test_earlier_start_wins_between_equal_length_spans_of_the_same_layer() -> None:
+def test_earlier_start_wins_between_equal_length_spans_and_the_other_is_trimmed() -> None:
     first = span(0, 10, EntityType.ES_NSS)
     second = span(5, 15, EntityType.ES_NSS)
-    assert resolve([second, first]) == [first]
+    assert resolve([second, first]) == [first, span(10, 15, EntityType.ES_NSS)]
 
 
 def test_exact_tie_is_decided_by_entity_type_definition_order() -> None:
@@ -56,11 +69,37 @@ def test_touching_spans_do_not_overlap_and_are_both_kept() -> None:
     assert resolve([right, left]) == [left, right]
 
 
-def test_a_discarded_span_does_not_block_later_spans() -> None:
+def test_a_trimmed_span_keeps_competing_with_later_spans() -> None:
     kept = span(0, 10, EntityType.ES_DNI, V)
-    dropped = span(8, 30, EntityType.CREDIT_CARD, P)  # partial overlap: the validator wins
-    also_kept = span(25, 35, EntityType.CREDIT_CARD, P)
-    assert resolve([dropped, also_kept, kept]) == [kept, also_kept]
+    trimmed = span(8, 30, EntityType.CREDIT_CARD, P)  # partial overlap: the validator wins
+    later = span(25, 35, EntityType.CREDIT_CARD, P)  # shorter: loses to the trimmed card
+    assert resolve([trimmed, later, kept]) == [
+        kept,
+        span(10, 30, EntityType.CREDIT_CARD, P),
+        span(30, 35, EntityType.CREDIT_CARD, P),
+    ]
+
+
+def test_a_loser_covered_on_both_sides_keeps_the_gap_in_the_middle() -> None:
+    left = span(0, 10, EntityType.ES_DNI)
+    right = span(20, 30, EntityType.ES_NIE)
+    middle = span(5, 25, EntityType.PERSON, N)
+    assert resolve([middle, left, right]) == [left, span(10, 20, EntityType.PERSON, N), right]
+
+
+def test_a_loser_fully_covered_by_winners_is_dropped() -> None:
+    left = span(0, 10, EntityType.ES_DNI)
+    right = span(10, 20, EntityType.ES_NIE)
+    covered = span(5, 15, EntityType.PERSON, N)
+    assert resolve([covered, left, right]) == [left, right]
+
+
+def test_trimmed_pieces_without_letters_or_digits_are_dropped_when_the_text_is_given() -> None:
+    text = "12345678Z - resto"
+    dni = span(0, 9, EntityType.ES_DNI)
+    noisy = span(5, 12, EntityType.PERSON, N)  # "5678Z -": its free part " -" is noise
+    assert resolve([dni, noisy], text) == [dni]
+    assert resolve([dni, noisy]) == [dni, span(9, 12, EntityType.PERSON, N)]
 
 
 def test_output_is_sorted_by_start() -> None:
@@ -70,7 +109,7 @@ def test_output_is_sorted_by_start() -> None:
         span(20, 44, EntityType.IBAN),  # overlaps the DNI and is longer: wins
     ]
     result = resolve(spans)
-    assert result == [spans[1], spans[2]]
+    assert result == [spans[1], spans[2], span(44, 49, EntityType.ES_DNI)]
     assert [s.start for s in result] == sorted(s.start for s in result)
 
 
@@ -81,6 +120,7 @@ def test_result_does_not_depend_on_input_order() -> None:
         span(4, 20, EntityType.CREDIT_CARD, P),
         span(9, 18, EntityType.ES_CIF, V),
         span(15, 30, EntityType.IBAN, P),
+        span(2, 26, EntityType.PERSON, N),
     ]
     results = {tuple(resolve(p)) for p in permutations(spans)}
     assert len(results) == 1
@@ -91,10 +131,10 @@ def test_resolve_accepts_any_iterable() -> None:
     assert resolve(s for s in spans) == spans
 
 
-def test_if_a_container_loses_the_span_inside_it_competes_again() -> None:
-    # Found by Hypothesis: A contains B, C (validator) beats A on a partial overlap. B must
-    # not stay discarded, or its text would be left uncovered.
+def test_if_a_container_loses_part_of_it_the_rest_stays_masked() -> None:
+    # Found by Hypothesis (ADR-0010): A contains B, C (validator) beats A on a partial
+    # overlap. Since ADR-0016 A is trimmed instead of dropped, so B stays covered inside it.
     container = span(0, 20, EntityType.EMAIL, P)
     inside = span(2, 8, EntityType.ES_NIE, V)
     winner = span(15, 30, EntityType.IBAN, V)
-    assert resolve([container, inside, winner]) == [inside, winner]
+    assert resolve([container, inside, winner]) == [span(0, 15, EntityType.EMAIL, P), winner]

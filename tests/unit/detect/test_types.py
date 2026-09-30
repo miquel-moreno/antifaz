@@ -56,6 +56,7 @@ def test_entity_types_cover_the_identifiers_of_this_stage() -> None:
         "PT_NIF",
         "FR_NIR",
         "DE_IDNR",
+        "PERSON",
     ]
-    assert {layer.value for layer in Layer} == {"VALIDATOR", "PATTERN"}
+    assert {layer.value for layer in Layer} == {"VALIDATOR", "PATTERN", "NER"}
     assert {c.value for c in Confidence} == {"HIGH", "MEDIUM"}

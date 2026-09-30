@@ -17,7 +17,7 @@ def scan(text: str) -> list[Span]:
     back, so they cover the original characters, invisible ones inside the value included.
     """
     view = normalize(text)
-    spans = resolve([*find_identifiers(view.text), *find_patterns(view.text)])
+    spans = resolve([*find_identifiers(view.text), *find_patterns(view.text)], view.text)
     if view.text is text:
         return spans
     return [

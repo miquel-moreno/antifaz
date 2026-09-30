@@ -30,6 +30,7 @@ class EntityType(StrEnum):
     PT_NIF = "PT_NIF"
     FR_NIR = "FR_NIR"
     DE_IDNR = "DE_IDNR"
+    PERSON = "PERSON"  # found by the NER (ADR-0016)
 
 
 class Layer(StrEnum):
@@ -37,6 +38,7 @@ class Layer(StrEnum):
 
     VALIDATOR = "VALIDATOR"
     PATTERN = "PATTERN"
+    NER = "NER"  # named-entity recognition: lowest priority in overlaps (ADR-0016)
 
 
 class Confidence(StrEnum):
