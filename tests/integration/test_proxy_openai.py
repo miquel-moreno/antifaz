@@ -489,8 +489,10 @@ def test_sentinel_never_in_logs_or_error_bodies(
 def test_httpx_loggers_are_quiet_by_default() -> None:
     create_app(_settings())
 
-    assert logging.getLogger("httpx").level == logging.WARNING
-    assert logging.getLogger("httpcore").level == logging.WARNING
+    # httpx2/httpcore2 too: Starlette's TestClient (and the official SDKs) use them when
+    # installed, and at INFO they write every URL, keys pasted in a path included.
+    for name in ("httpx", "httpcore", "httpx2", "httpcore2"):
+        assert logging.getLogger(name).level == logging.WARNING, name
 
 
 # --- Invariant 2 end to end: guard OFF, the upstream still gets no hidden value -----------
