@@ -1,0 +1,47 @@
+: provenance: recorded 2026-09-30 model gpt-4.1-nano-2025-04-14
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"Mi"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" DNI"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" es"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" [["},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"ES"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"_D"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"NI"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"_"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"1"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"]]"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" y"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" mi"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" correo"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" es"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":" [["},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"EMAIL"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"_"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"1"},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{"content":"]]."},"logprobs":null,"finish_reason":null}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"usage":null,"obfuscation":"recorded"}
+
+data: {"id":"chatcmpl-recorded-0002","object":"chat.completion.chunk","created":1790788351,"model":"gpt-4.1-nano-2025-04-14","service_tier":"default","system_fingerprint":"fp_3910564f3b","choices":[],"usage":{"prompt_tokens":36,"completion_tokens":19,"total_tokens":55,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"completion_tokens_details":{"reasoning_tokens":0,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}},"obfuscation":"recorded"}
+
+data: [DONE]
