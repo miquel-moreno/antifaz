@@ -9,6 +9,7 @@ Forbidden: Never send a string that did not go through mask(). Never restore unk
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -34,6 +35,52 @@ ATTACHMENT_KEYS = frozenset(
         "audio",
     }
 )
+# Keys the gateway reads by name in a request (ADR-0015). Two keys of one object that only
+# differ in case or width (NFKC + casefold) are refused when they fold to one of these: one
+# reader could check "content" and another send "Content". Other keys (a schema property
+# "Name" next to "name") may differ only in case. "name" is not here: it is never read by name.
+READ_KEYS = ATTACHMENT_KEYS | frozenset(
+    {
+        "arguments",
+        "cache_control",
+        "content",
+        "function",
+        "function_call",
+        "functions",
+        "input",
+        "input_schema",
+        "messages",
+        "model",
+        "refusal",
+        "response_format",
+        "role",
+        "signature",
+        "stream",
+        "system",
+        "text",
+        "thinking",
+        "tool_calls",
+        "tool_choice",
+        "tools",
+        "type",
+    }
+)
+
+
+def fold_key(name: str) -> str:
+    """`name` without case or width differences: "CONTENT" (or full-width) folds to "content"."""
+    return unicodedata.normalize("NFKC", name).casefold()
+
+
+def is_attachment_key(name: str) -> bool:
+    """True for "source", "Source", "DATA"...: providers may read keys without case."""
+    return fold_key(name) in ATTACHMENT_KEYS
+
+
+def has_attachment_key(node: dict[str, Any]) -> bool:
+    return any(is_attachment_key(name) for name in node)
+
+
 # Base64 inside a text (a data: URL) is a binary in disguise: the detector cannot read it.
 _DATA_URL = re.compile(r"data:[^,\s]{0,100};base64,", re.IGNORECASE)
 _NO_KEYS: frozenset[str] = frozenset()
@@ -87,7 +134,7 @@ def check_attachments(node: Any, allowed_types: frozenset[str] | None) -> None:
         if isinstance(current, dict):
             kind = current.get("type")
             typed = allowed_types is not None and kind is not None and kind not in allowed_types
-            if ATTACHMENT_KEYS.intersection(current) or typed:
+            if has_attachment_key(current) or typed:
                 raise AttachmentBlocked()
             stack.extend(current.values())
         elif isinstance(current, list):
@@ -201,8 +248,12 @@ def restore_strings(node: Any, vault: Vault) -> Any:
 __all__ = [
     "ATTACHMENT_KEYS",
     "MAX_DEPTH",
+    "READ_KEYS",
     "check_attachments",
     "check_depth",
+    "fold_key",
+    "has_attachment_key",
+    "is_attachment_key",
     "mask_body",
     "parse_container",
     "restore_strings",

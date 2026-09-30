@@ -1,6 +1,7 @@
 """Denial of service: huge bodies, long histories, regex backtracking and deep JSON."""
 
 import time
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -18,6 +19,8 @@ from tests.redteam.conftest import (
     OPENAI_AUTH,
     anthropic_body,
     assert_not_sent,
+    gateway_client,
+    gateway_settings,
     openai_body,
 )
 
@@ -153,3 +156,25 @@ def test_respuesta_del_proveedor_muy_profunda(depth: int) -> None:
         )
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "bad_upstream_response"
+
+
+def test_cuerpo_sin_content_length_por_encima_del_limite_es_413(
+    upstream_any: FakeUpstream,
+) -> None:
+    """El atacante manda el cuerpo por trozos (sin Content-Length) para saltarse el tope."""
+    settings = gateway_settings(max_body_bytes=1024)
+
+    def chunks() -> Iterator[bytes]:
+        yield b'{"model": "m", "messages": [], "x": "'
+        for _ in range(10):
+            yield b"a" * 512
+        yield b'"}'
+
+    for client in gateway_client(upstream_any, settings):
+        response = client.post(
+            "/v1/chat/completions",
+            content=chunks(),
+            headers={**OPENAI_AUTH, "Content-Type": "application/json"},
+        )
+        assert response.status_code == 413
+    assert upstream_any.requests == []

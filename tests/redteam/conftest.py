@@ -6,13 +6,19 @@ import unicodedata
 from collections.abc import Iterator
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
+from antifaz.api.app import create_app
+from antifaz.config import Settings
 from antifaz.detect.normalize import normalize
+from antifaz.detect.scan import scan
+from antifaz.mask import Detector
 from tests.integration import test_proxy_anthropic as anth
 from tests.integration import test_proxy_openai as oai
-from tests.integration.fakes import GATEWAY_KEY, FakeUpstream, compact
+from tests.integration.fakes import GATEWAY_KEY, PROVIDER_KEY, FakeUpstream, compact
 
 # Synthetic, checksum-valid values (never real people).
 DNI = "12345678Z"
@@ -98,3 +104,54 @@ def openai_proxy(upstream_openai: FakeUpstream) -> Iterator[TestClient]:
 @pytest.fixture
 def anthropic_proxy(upstream_anthropic: FakeUpstream) -> Iterator[TestClient]:
     yield from anth._client(upstream_anthropic)
+
+
+# --- The whole gateway: both providers at once (issue 20) ----------------------------------
+
+GATEWAY_BODY: dict[str, Any] = {
+    "model": "m",
+    "max_tokens": 8,
+    "messages": [{"role": "user", "content": "hola"}],
+}
+
+
+def both_echo(request: httpx.Request) -> httpx.Response:
+    """Answers like the OpenAI or the Anthropic fake, depending on the destination."""
+    if request.url.host == httpx.URL(oai.UPSTREAM).host:
+        return oai.echo(request)
+    return anth.echo(request)
+
+
+def gateway_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "antifaz_api_key": SecretStr(GATEWAY_KEY),
+        "openai_api_key": SecretStr(PROVIDER_KEY),
+        "anthropic_api_key": SecretStr(PROVIDER_KEY),
+        "openai_base_url": oai.UPSTREAM,
+        "anthropic_base_url": anth.UPSTREAM,
+        "allowed_hosts": ["testserver"],
+        "_env_file": None,
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+
+
+def gateway_client(
+    upstream: FakeUpstream,
+    settings: Settings | None = None,
+    detector: Detector = scan,
+) -> Iterator[TestClient]:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app = create_app(settings or gateway_settings(), http_client=http, detector=detector)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client
+
+
+@pytest.fixture
+def upstream_any() -> FakeUpstream:
+    return FakeUpstream(both_echo)
+
+
+@pytest.fixture
+def gateway(upstream_any: FakeUpstream) -> Iterator[TestClient]:
+    yield from gateway_client(upstream_any)

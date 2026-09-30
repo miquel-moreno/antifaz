@@ -22,7 +22,7 @@ install:
 	uv run pre-commit install
 
 dev:
-	uv run uvicorn $(PKG).api.app:app --reload --no-access-log
+	uv run uvicorn --factory $(PKG).api.app:create_app --reload --no-access-log
 
 lint:
 	uv run ruff check .

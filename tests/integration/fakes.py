@@ -8,8 +8,8 @@ from antifaz import Span
 from antifaz.detect.scan import scan
 from tests.conftest import SENTINEL_DNI
 
-# Obviously fake keys, only for tests.
-GATEWAY_KEY = "test-gateway-key-not-real"
+# Obviously fake keys, only for tests. The gateway key must be 32+ characters to start.
+GATEWAY_KEY = "test-gateway-key-not-real-0123456789abcdef"
 PROVIDER_KEY = "test-provider-key-not-real"
 
 Handler = Callable[[httpx.Request], httpx.Response]

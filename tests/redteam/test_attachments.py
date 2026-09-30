@@ -106,3 +106,39 @@ def test_anthropic_adjuntos_se_bloquean(
     response = anthropic_proxy.post(path, json=body, headers=ANTHROPIC_AUTH)
     assert response.status_code == 400
     assert upstream_anthropic.requests == []
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/messages",
+            anthropic_body(
+                [{"type": "text", "text": "x", "SOURCE": {"type": "base64", "DATA": PNG}}]
+            ),
+        ),
+        ("/v1/messages", anthropic_body("x", SOURCE={"type": "base64", "DATA": PNG})),
+        ("/v1/messages", anthropic_body("x", tools=[{"name": "t", "Source": {"x": 1}}])),
+        ("/v1/chat/completions", openai_body("x", x_extra={"IMAGE": PNG})),
+        ("/v1/chat/completions", openai_body([{"type": "text", "text": "x", "Data": PNG}])),
+        ("/v1/chat/completions", openai_body("x", File_Id="file-abc")),
+    ],
+)
+def test_claves_de_adjunto_en_mayusculas_se_bloquean(
+    openai_proxy: TestClient,
+    anthropic_proxy: TestClient,
+    upstream_openai: FakeUpstream,
+    upstream_anthropic: FakeUpstream,
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    """El atacante escribe `SOURCE` o `Data` para que la lista de adjuntos no lo vea."""
+    proxy, auth = (
+        (anthropic_proxy, ANTHROPIC_AUTH) if path == "/v1/messages" else (openai_proxy, OPENAI_AUTH)
+    )
+    response = proxy.post(path, json=body, headers=auth)
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "antifaz_blocked"
+    assert upstream_openai.requests == []
+    assert upstream_anthropic.requests == []

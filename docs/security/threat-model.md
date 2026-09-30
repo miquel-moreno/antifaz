@@ -27,12 +27,16 @@ externo. Si algo falla al revisar la petición, se bloquea.
 |---|---|---|---|
 | Tabla de marcadores | Fuga por logs, errores o volcados | Vive solo durante la petición. Logs con lista de campos permitidos y filtro de PII. Errores genéricos. | Errores que no repiten el cuerpo: **hecho** (issue 1). Resto: issues 4–5 |
 | Datos entre usuarios | Una inyección de prompt pide "imprime [[ES_DNI_1]]" | Sin estado compartido (ADR-0004). Solo se restauran marcadores emitidos en la propia petición. | Issues 4–5 |
-| Claves de proveedores | Exposición | Solo en el servidor (secretos de Docker o `.env`). Nunca en respuestas ni logs. | Issue 5 |
+| Claves de proveedores | Exposición | Solo en el servidor (secretos de Docker o `.env`). Nunca en respuestas ni logs; una respuesta del proveedor que repite una clave se descarta (502). | Issue 5; test de claves canario (invariante 13): **hecho** (issue 20) |
 | Claves de Antifaz | Uso indebido | v0.1: una clave desde `.env`. v0.2: claves virtuales guardadas como HMAC con pepper, con alcance y límites. | Issues 5 y 8 |
 | Destino | SSRF | Destinos fijos en la configuración; nunca una URL del cliente. | Issue 5 |
 | Disponibilidad | DoS, ReDoS, historiales enormes | Tamaño máximo de petición, pool de procesos con tiempo máximo para el NER, `re2`, caché de spans, límites por clave. | Issues 2, 5, 6 y 8 |
 | Fallo del enmascarador | Un dato sale al proveedor | Guardia de salida sobre los bytes finales + cierre por defecto. | Issue 4 |
 | Evidencias | Manipulación | Cadena de hashes, sin UPDATE/DELETE, puntos de control firmados. | Issue 9 |
+| Pasarela desde un navegador | Una web ajena usa la pasarela desde el navegador de un empleado | `Origin` rechazado (403) salvo origen exacto configurado, `Content-Type: application/json` obligatorio (415), sin CORS (ADR-0015). | **Hecho** (issue 20) |
+| JSON ambiguo | Clave duplicada (`content` dos veces, o `content` y `Content`): se revisa una copia y se envía otra | Claves repetidas, también si solo cambian en mayúsculas o anchura → 400. El cuerpo enviado se reconstruye desde lo revisado. | **Hecho** (issue 20) |
+| Rutas | `Host` manipulado (DNS rebinding) o ruta nueva sin protección | `TrustedHostMiddleware`; clave exigida por un único middleware para toda ruta salvo `/healthz` exacto; sin `/docs` ni redirecciones de barra; test que recorre las rutas registradas (invariante 12). | **Hecho** (issue 20) |
+| Arranque | Pasarela desplegada sin clave, con una clave corta o con la de `.env.example` | Se niega a arrancar y dice qué variable falla, sin mostrar su valor. | **Hecho** (issue 20) |
 | Panel | Acceso indebido | Token de admin, cookies `HttpOnly` y `SameSite=Strict`, CSRF, CSP. | Issue 11 |
 | Cadena de suministro | Dependencia o acción de CI comprometida; licencia incompatible | Acciones fijadas por SHA con permisos mínimos, `uv audit`, CodeQL, gitleaks, comprobación de licencias, Dependabot. | **Hecho** (issue 1) |
 | Sesiones de desarrollo con IA | El asistente lee secretos o se salta controles | Hooks de `.claude/` que bloquean leer `.env`, imprimir variables secretas, `--no-verify` y force push, con tests. **Defensa en profundidad, no barrera:** quien puede ejecutar código arbitrario puede saltárselos (una lista de patrones nunca es completa). La barrera real son gitleaks en CI y que las claves no están en el repo. | Hecho como defensa en profundidad (issue 1): los 7 caminos de la revisión de privacidad están bloqueados y probados, y el hook vigila también PowerShell |

@@ -33,7 +33,12 @@ def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
-    root.handlers = [handler]
+    # Replace only our own handler (building the app twice must not log twice). Other handlers
+    # stay: pytest's caplog, which the invariant 8 and 13 tests read, is one of them.
+    ours = [h for h in root.handlers if isinstance(h.formatter, JsonFormatter)]
+    for old in ours:
+        root.removeHandler(old)
+    root.addHandler(handler)
     root.setLevel(level.upper())
     for name in QUIET_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)

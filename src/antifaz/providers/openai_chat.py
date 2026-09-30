@@ -21,6 +21,7 @@ from antifaz.providers.json_walk import (
     ATTACHMENT_KEYS,
     check_attachments,
     check_depth,
+    has_attachment_key,
     mask_body,
     parse_container,
     restore_strings,
@@ -45,7 +46,7 @@ def mask_request(
 ) -> tuple[dict[str, Any], Vault]:
     """Masked copy of a Chat Completions body and the table of this request."""
     check_depth(body)  # before any recursive walk
-    if ATTACHMENT_KEYS.intersection(body):
+    if has_attachment_key(body):
         raise AttachmentBlocked()
     for name, value in body.items():
         if name not in SCHEMA_FIELDS:

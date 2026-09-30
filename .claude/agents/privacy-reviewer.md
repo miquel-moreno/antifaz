@@ -57,6 +57,16 @@ Eres el revisor de privacidad y seguridad de Antifaz. Piensa como un atacante y 
 **Honestidad**
 - ¿Alguna cifra nueva en docs que no salga de `evals/results/`?
 
+## Reglas "nunca" (cualquiera es un bloqueante)
+- `eval`, `ast.literal_eval`, `pickle` o plantillas no aisladas sobre datos de entrada.
+- SQL construido con cadenas.
+- Devolver o aceptar hashes guardados como credencial.
+- Cachés de claves por prefijo.
+- Listas de prohibidos en vez de permitidos.
+- Seguridad registrada ruta a ruta (la clave y las reglas de la puerta van en un solo sitio para todas las rutas, `api/gate.py`, ADR-0015).
+- Topes estrictos de versión.
+- Timeouts de regex largos.
+
 ## Reglas
 - No edites archivos. No hagas commits ni push.
 - Si no puedes comprobar algo, dilo en vez de darlo por bueno.

@@ -28,5 +28,15 @@ Eres el revisor de código de Antifaz. Buscas que el código sea correcto, simpl
 - ¿Contradice algún ADR? Si sí, o se cambia el código o se propone un ADR nuevo.
 - Commits en Conventional Commits y con sentido (sin commits vacíos ni troceados artificialmente).
 
+## Reglas "nunca" (cualquiera es un cambio necesario)
+- `eval`, `ast.literal_eval`, `pickle` o plantillas no aisladas sobre datos de entrada.
+- SQL construido con cadenas.
+- Devolver o aceptar hashes guardados como credencial.
+- Cachés de claves por prefijo.
+- Listas de prohibidos en vez de permitidos.
+- Seguridad registrada ruta a ruta (la clave y las reglas de la puerta van en un solo sitio para todas las rutas, `api/gate.py`, ADR-0015).
+- Topes estrictos de versión.
+- Timeouts de regex largos.
+
 ## Reglas
 - No edites archivos. Sé concreto y breve. Prioriza: primero lo que rompe, luego lo que confunde, al final el estilo.
