@@ -10,14 +10,26 @@ Never returns clear text when the detector fails.
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from antifaz.detect.scan import scan
 from antifaz.detect.types import EntityType, Span
 from antifaz.errors import DetectorFailed
+from antifaz.mask.propagate import propagate
 from antifaz.policy import DEFAULT_POLICY, Action, Policy
 from antifaz.vault import Vault
 
 Detector = Callable[[str], Sequence[Span]]
+
+
+@runtime_checkable
+class BatchDetector(Protocol):
+    """A detector that can also scan all the texts of a request in one go (the NER Scanner)."""
+
+    def __call__(self, text: str) -> Sequence[Span]: ...
+
+    def scan_many(self, texts: Sequence[str]) -> Sequence[Sequence[Span]]: ...
+
 
 _BRACKET_RUN = re.compile(r"\[\[+")
 
@@ -42,17 +54,25 @@ class MaskResult:
         return self.texts[0]
 
 
-def _detect(text: str, detector: Detector) -> list[Span]:
+def _detect(texts: Sequence[str], detector: Detector) -> list[list[Span]]:
+    """The spans of every text: in one call for a BatchDetector, else text by text."""
     failed = False
-    spans: list[Span] = []
+    found: list[list[Span]] = []
     try:
-        spans = list(detector(text))
+        if isinstance(detector, BatchDetector):
+            found = [list(spans) for spans in detector.scan_many(texts)]
+        else:
+            found = [list(detector(text)) for text in texts]
     except Exception:  # any detector error blocks; the error itself may hold the text
         failed = True
     # Raised outside the except block so the original error is not even the __context__.
-    if failed or not _well_formed(spans, len(text)):
+    if (
+        failed
+        or len(found) != len(texts)
+        or not all(_well_formed(spans, len(text)) for spans, text in zip(found, texts, strict=True))
+    ):
         raise DetectorFailed() from None
-    return spans
+    return found
 
 
 def _well_formed(spans: list[Span], length: int) -> bool:
@@ -79,16 +99,20 @@ def mask(
 ) -> MaskResult:
     """Replace the personal data the policy hides by placeholders, numbered across all texts.
 
+    Every value the NER found is also masked wherever else it appears in `texts` (ADR-0016).
     `reserved` tokens (e.g. "ES_DNI_1") are skipped by the numbering and never restored.
     """
     items = (texts,) if isinstance(texts, str) else tuple(texts)
+    found = propagate(
+        items, _detect(items, detector), lambda entity: policy.action_for(entity) is Action.MASK
+    )
     vault = Vault(reserved)
     hidden: dict[EntityType, None] = {}
     masked = []
-    for text in items:
+    for text, spans in zip(items, found, strict=True):
         out: list[str] = []
         clear_start = 0  # start of the pending run of text kept in clear
-        for span in _detect(text, detector):
+        for span in spans:
             if policy.action_for(span.type) is Action.ALLOW:
                 continue
             out.append(escape(text[clear_start : span.start]))
@@ -101,4 +125,4 @@ def mask(
     return MaskResult(texts=tuple(masked), vault=vault, hidden=tuple(hidden))
 
 
-__all__ = ["Detector", "MaskResult", "escape", "mask"]
+__all__ = ["BatchDetector", "Detector", "MaskResult", "escape", "mask"]
