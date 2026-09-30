@@ -559,3 +559,57 @@ def test_invariant_2_without_guard(upstream: FakeUpstream, monkeypatch: pytest.M
         for value in VALUES:
             assert value not in raw
             assert compact(value) not in compact(decoded)
+
+
+# --- Review fixes -----------------------------------------------------------------------
+
+
+def test_upstream_2xx_status_is_kept(upstream: FakeUpstream) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        201, json={"content": [{"type": "text", "text": "x"}]}
+    )
+    for client in _client(upstream):
+        assert client.post("/v1/messages", json=_msg("hola"), headers=KEY).status_code == 201
+
+
+@pytest.mark.parametrize("path", ["/v1/messages", "/v1/messages/count_tokens"])
+def test_lone_surrogate_is_a_400(proxy: TestClient, upstream: FakeUpstream, path: str) -> None:
+    raw = b'{"model": "m", "messages": [{"role": "user", "content": "a\ud800b"}]}'
+    response = proxy.post(path, content=raw, headers={**KEY, "Content-Type": "application/json"})
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert upstream.requests == []
+
+
+@pytest.mark.parametrize(
+    ("value", "code"), [("yes", "invalid_request"), (True, "streaming_not_supported")]
+)
+def test_count_tokens_checks_stream(
+    proxy: TestClient, upstream: FakeUpstream, value: object, code: str
+) -> None:
+    response = proxy.post(
+        "/v1/messages/count_tokens", json={**_msg("hola"), "stream": value}, headers=KEY
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == code
+    assert upstream.requests == []
+
+
+def test_placeholder_in_thinking_is_not_reused_end_to_end(upstream: FakeUpstream) -> None:
+    thinking = {**THINKING, "thinking": "antes vi [[ES_DNI_1]]"}
+    body = {
+        "model": "m",
+        "messages": [
+            {"role": "assistant", "content": [thinking, {"type": "text", "text": "vale"}]},
+            {"role": "user", "content": f"mi DNI {SENTINEL_DNI}"},
+        ],
+    }
+    upstream.handler = lambda request: httpx.Response(
+        200, json={"content": [{"type": "text", "text": "[[ES_DNI_1]] / [[ES_DNI_2]]"}]}
+    )
+    for client in _client(upstream):
+        response = client.post("/v1/messages", json=body, headers=KEY)
+
+        assert response.json()["content"][0]["text"] == f"[[ES_DNI_1]] / {SENTINEL_DNI}"

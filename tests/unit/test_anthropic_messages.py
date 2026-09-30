@@ -67,7 +67,7 @@ def test_text_blocks_tool_use_and_tool_result_are_masked() -> None:
                         "type": "tool_use",
                         "id": "toolu_1",
                         "name": "buscar",
-                        "input": {"dni": DNI, "extra": {"type": "x", "data": [OTHER]}},
+                        "input": {"dni": DNI, "extra": {"type": "x", "lista": [OTHER]}},
                     }
                 ],
             },
@@ -92,10 +92,10 @@ def test_text_blocks_tool_use_and_tool_result_are_masked() -> None:
     assert DNI not in text
     assert OTHER not in text
     tool_use = masked["messages"][1]["content"][0]
-    # Tool input is data for the tool: its own "type"/"data" keys are not attachments.
+    # Tool input is data for the tool: its own "type" keys are not content block types.
     assert tool_use["input"] == {
         "dni": "[[ES_DNI_1]]",
-        "extra": {"type": "x", "data": ["[[ES_DNI_2]]"]},
+        "extra": {"type": "x", "lista": ["[[ES_DNI_2]]"]},
     }
     results = masked["messages"][2]["content"]
     assert results[0]["content"] == "ok [[ES_DNI_2]]"
@@ -191,7 +191,7 @@ def test_thinking_blocks_are_copied_untouched() -> None:
     assert content[0] == thinking  # "[[" not escaped, signature identical
     assert content[1] == REDACTED  # "data" key allowed only here
     assert content[2] == {"type": "text", "text": "[[!ES_DNI_1]]"}  # user text is escaped
-    assert masked["messages"][0]["content"] == "DNI [[ES_DNI_1]]"
+    assert masked["messages"][0]["content"] == "DNI [[ES_DNI_2]]"  # ES_DNI_1 is in thinking
 
 
 def test_thinking_with_personal_data_blocks() -> None:
@@ -284,3 +284,99 @@ def test_restored_text_equals_restore() -> None:
     restored = restore_response({"content": [{"type": "text", "text": text}]}, vault)
 
     assert restored["content"][0]["text"] == restore(text, vault)
+
+
+# --- Review fixes -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {**_thinking(), "extra": "x"},
+        {**_thinking(), "cache_control": {"type": "ephemeral"}},
+        {"type": "thinking", "thinking": ["no"], "signature": SIGNATURE},
+        {"type": "thinking", "thinking": "x", "signature": 1},
+        {**REDACTED, "thinking": "x"},
+        {"type": "redacted_thinking", "data": {"x": 1}},
+    ],
+)
+def test_thinking_blocks_only_accept_their_own_string_keys(block: dict[str, object]) -> None:
+    with pytest.raises(AttachmentBlocked):
+        mask_request({"messages": [{"role": "assistant", "content": [block]}]})
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"source": {"type": "base64", "data": "AAAA"}},
+        {"x": {"file_id": "file_1"}},
+        {"img": "data:image/png;base64,AAAA"},
+    ],
+)
+def test_tool_use_input_is_checked_for_attachments(tool_input: dict[str, object]) -> None:
+    block = {"type": "tool_use", "id": "t", "name": "f", "input": tool_input}
+    with pytest.raises(AttachmentBlocked):
+        mask_request({"messages": [{"role": "assistant", "content": [block]}]})
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"thinking": {"type": "enabled", "budget_tokens": 10, "source": "x"}},
+        {"thinking": {"type": "enabled", "nota": "x"}},
+        {"tool_choice": {"type": "tool", "name": "f", "otro": "x"}},
+        {"tools": [{"name": "f", "input_schema": {"type": "object"}, "file_id": "f1"}]},
+        {"tools": [{"name": "f", "input_schema": {"type": "object"}, "x": {"data": "AAAA"}}]},
+        {"tools": [{"name": "f", "description": "data:image/png;base64,AAAA"}]},
+        {
+            "tools": [
+                {
+                    "name": "f",
+                    "input_schema": {"default": {"type": "base64", "media_type": "a/b"}},
+                }
+            ]
+        },
+    ],
+)
+def test_config_fields_are_restricted(extra: dict[str, object]) -> None:
+    with pytest.raises(AttachmentBlocked):
+        mask_request({**_user("hola"), **extra})
+
+
+def test_config_fields_accept_their_keys() -> None:
+    body = {
+        **_user("hola"),
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+        "tool_choice": {"type": "tool", "name": "f", "disable_parallel_tool_use": True},
+        "tools": [
+            {
+                "name": "f",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"data": {"type": "string"}, "file": {"type": "string"}},
+                },
+            }
+        ],
+    }
+
+    masked, _ = mask_request(body)
+
+    assert masked["tools"] == body["tools"]
+
+
+def test_placeholders_in_thinking_are_reserved() -> None:
+    # Previous turn: the model saw [[ES_DNI_1]] and kept it in its thinking. A new DNI in this
+    # request must not get the same token, or it would be restored with the wrong value.
+    body = {
+        "messages": [
+            {"role": "user", "content": "[[ES_DNI_1]]"},
+            {"role": "assistant", "content": [_thinking("recuerdo [[ es_dni_1 ]] y [[EMAIL_2]]")]},
+            {"role": "user", "content": f"nuevo {DNI}"},
+        ]
+    }
+
+    masked, vault = mask_request(body)
+
+    assert masked["messages"][2]["content"] == "nuevo [[ES_DNI_2]]"
+    assert restore("[[ES_DNI_1]] [[ES_DNI_2]]", vault) == f"[[ES_DNI_1]] {DNI}"
+    assert len(vault) == 1

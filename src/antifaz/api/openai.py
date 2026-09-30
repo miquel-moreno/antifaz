@@ -42,4 +42,6 @@ async def chat_completions(request: Request) -> Response:
     upstream = await send_masked(state.http_client, url, headers, masked, vault)
     if upstream.status_code >= 400:
         return passthrough(upstream)
-    return JSONResponse(restore_response(answer_json(upstream), vault))
+    return JSONResponse(
+        restore_response(answer_json(upstream), vault), status_code=upstream.status_code
+    )

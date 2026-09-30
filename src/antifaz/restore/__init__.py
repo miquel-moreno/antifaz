@@ -19,6 +19,15 @@ _ESCAPE_OR_PLACEHOLDER = re.compile(
 )
 
 
+def placeholder_tokens(text: str) -> frozenset[str]:
+    """Upper-case tokens of the placeholders written in `text` (same pattern as restore)."""
+    return frozenset(
+        match.group("token").upper()
+        for match in _ESCAPE_OR_PLACEHOLDER.finditer(text)
+        if match.group("token") is not None
+    )
+
+
 def restore(text: str, vault: Vault) -> str:
     """Undo the escapes and put back the values of this request's placeholders."""
 
@@ -33,4 +42,4 @@ def restore(text: str, vault: Vault) -> str:
     return _ESCAPE_OR_PLACEHOLDER.sub(replace, text)
 
 
-__all__ = ["restore"]
+__all__ = ["placeholder_tokens", "restore"]

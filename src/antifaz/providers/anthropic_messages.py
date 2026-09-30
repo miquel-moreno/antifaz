@@ -31,7 +31,7 @@ from antifaz.providers.json_walk import (
     restore_strings,
     walk,
 )
-from antifaz.restore import restore
+from antifaz.restore import placeholder_tokens, restore
 from antifaz.vault import Vault
 
 THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
@@ -39,10 +39,16 @@ THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
 CONTENT_TYPES = frozenset({"text", "tool_use", "tool_result"}) | THINKING_TYPES
 # Inside `system` and `tool_result.content` only text blocks are allowed.
 TEXT_ONLY = frozenset({"text"})
-# Tool definitions and request settings are written by the developer: their "type" values
-# ("object", "enabled", "auto", "web_search_20250305"...) are not content. Their strings are
-# still masked.
-CONFIG_FIELDS = frozenset({"tools", "tool_choice", "thinking"})
+# Exact keys of the reasoning blocks: nothing else can travel unmasked inside them.
+THINKING_KEYS = {
+    "thinking": frozenset({"type", "thinking", "signature"}),
+    "redacted_thinking": frozenset({"type", "data"}),
+}
+# Request settings: only these keys (their "type" values are settings, not content).
+CONFIG_KEYS = {
+    "thinking": frozenset({"type", "budget_tokens"}),
+    "tool_choice": frozenset({"type", "name", "disable_parallel_tool_use"}),
+}
 _NOTHING: frozenset[str] = frozenset()
 
 
@@ -54,12 +60,21 @@ def _check_block(block: Any, allowed: frozenset[str]) -> None:
     if kind not in allowed:
         raise AttachmentBlocked()
     if kind in THINKING_TYPES:
-        return  # copied untouched; scanned in _check_thinking
+        # Copied untouched; its text is scanned in _check_thinking. `signature` and `data`
+        # are opaque and cannot be inspected (accepted risk, ADR-0013).
+        if not set(block) <= THINKING_KEYS[kind] or not all(
+            isinstance(value, str) for value in block.values()
+        ):
+            raise AttachmentBlocked()
+        return
     if ATTACHMENT_KEYS.intersection(block):
         raise AttachmentBlocked()
     for name, value in block.items():
-        if name == "cache_control" or (kind == "tool_use" and name == "input"):
-            continue  # a cache setting, and data for the tool: masked, not attachments
+        if name == "cache_control":
+            continue  # a cache setting: masked, not an attachment
+        if kind == "tool_use" and name == "input":
+            check_attachments(value, None)  # data for the tool: any "type", no attachments
+            continue
         if kind == "tool_result" and name == "content" and isinstance(value, list):
             for item in value:
                 _check_block(item, TEXT_ONLY)
@@ -75,13 +90,46 @@ def _check_content(content: Any, allowed: frozenset[str]) -> None:
         check_attachments(content, _NOTHING)
 
 
+def _check_schema(node: Any) -> None:
+    """JSON schema of a tool: property names like "data" are fine; base64 objects are not."""
+    if isinstance(node, dict):
+        if node.get("type") == "base64":  # not a JSON Schema type: an embedded binary
+            raise AttachmentBlocked()
+        for value in node.values():
+            _check_schema(value)
+    elif isinstance(node, list):
+        for item in node:
+            _check_schema(item)
+
+
+def _check_tools(tools: Any) -> None:
+    if not isinstance(tools, list):
+        check_attachments(tools, None)
+        return
+    for tool in tools:
+        if not isinstance(tool, dict):
+            check_attachments(tool, None)
+            continue
+        for name, value in tool.items():
+            if name in ATTACHMENT_KEYS:
+                raise AttachmentBlocked()
+            if name == "input_schema":
+                _check_schema(value)
+            else:
+                check_attachments(value, None)
+
+
 def _check(body: dict[str, Any]) -> None:
     if ATTACHMENT_KEYS.intersection(body):
         raise AttachmentBlocked()
     for name, value in body.items():
-        if name in CONFIG_FIELDS:
-            continue
-        if name == "system":
+        if name in CONFIG_KEYS:
+            if isinstance(value, dict) and not set(value) <= CONFIG_KEYS[name]:
+                raise AttachmentBlocked()
+            check_attachments(value, None)
+        elif name == "tools":
+            _check_tools(value)
+        elif name == "system":
             _check_content(value, TEXT_ONLY)
         elif name == "messages" and isinstance(value, list):
             for message in value:
@@ -145,7 +193,12 @@ def mask_request(
     _check(body)
     without_thinking, kept = _split_thinking(body)
     _check_thinking(list(kept.values()), policy, detector)
-    masked, vault = mask_body(without_thinking, policy=policy, detector=detector)
+    # Placeholders kept in reasoning blocks come from an earlier turn: a new value must not
+    # get the same token, or restore would put the wrong value (ADR-0013).
+    reserved = frozenset().union(
+        *(placeholder_tokens(block.get("thinking", "")) for block in kept.values())
+    )
+    masked, vault = mask_body(without_thinking, policy=policy, detector=detector, reserved=reserved)
     for (i, j), block in kept.items():
         masked["messages"][i]["content"][j] = block  # the original object, untouched
     return masked, vault

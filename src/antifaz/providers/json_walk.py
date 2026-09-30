@@ -48,11 +48,15 @@ def parse_container(text: str) -> Any | None:
     return parsed if isinstance(parsed, dict | list) else None
 
 
-def check_attachments(node: Any, allowed_types: frozenset[str]) -> None:
-    """Block attachment keys and any object whose "type" is not in `allowed_types`."""
+def check_attachments(node: Any, allowed_types: frozenset[str] | None) -> None:
+    """Block attachment keys and any object whose "type" is not in `allowed_types`.
+
+    With `allowed_types=None` only the attachment keys are checked (data for a tool).
+    """
     if isinstance(node, dict):
         kind = node.get("type")
-        if ATTACHMENT_KEYS.intersection(node) or (kind is not None and kind not in allowed_types):
+        typed = allowed_types is not None and kind is not None and kind not in allowed_types
+        if ATTACHMENT_KEYS.intersection(node) or typed:
             raise AttachmentBlocked()
         for value in node.values():
             check_attachments(value, allowed_types)
@@ -118,6 +122,7 @@ def mask_body(
     policy: Policy = DEFAULT_POLICY,
     detector: Detector = scan,
     json_string_keys: frozenset[str] = _NO_KEYS,
+    reserved: frozenset[str] = frozenset(),
 ) -> tuple[Any, Vault]:
     """Masked copy of `body` (strings masked, keys and numbers checked) and its table.
 
@@ -136,7 +141,7 @@ def mask_body(
         return value
 
     walk(body, collect, collect, number=collect_number, json_string_keys=json_string_keys)
-    result = mask(collected, policy, detector=detector)
+    result = mask(collected, policy, detector=detector, reserved=reserved)
     pairs: Iterator[tuple[str, str]] = zip(collected, result.texts, strict=True)
 
     def put_text(_: str) -> str:

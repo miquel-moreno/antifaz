@@ -19,6 +19,8 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 - Los números (no los booleanos) pasan por el detector como texto (`str(n)`): no pueden llevar un marcador, así que si esconden un dato (un teléfono como `612345678`) la petición se **bloquea**.
 - `NaN` e `Infinity` no son JSON válido: 400. `stream` solo puede ser `true`, `false` o no estar.
 - Los bloques de razonamiento (`thinking`, `redacted_thinking` y su `signature`, en Anthropic) se copian **sin tocar**: la firma dejaría de valer (invariante 9).
+  - *Enmienda del 2026-09-30 (parte 5b):* solo se aceptan sus claves exactas (`thinking`: `type`, `thinking`, `signature`; `redacted_thinking`: `type`, `data`), todas de texto; otra clave se bloquea. El texto de `thinking` pasa por el detector y bloquea si lleva un dato. `signature` y `data` son **opacos** (firma y razonamiento cifrado por el proveedor) y no se pueden revisar: **riesgo aceptado**. Los marcadores que ya contiene el razonamiento se **reservan** en la numeración de esta petición y no entran en la tabla, para que un dato nuevo no reciba el mismo marcador de otro turno.
+  - *Enmienda del 2026-09-30:* la configuración se lee solo de variables `ANTIFAZ_*`, para no mezclarse con las de Claude Code o los SDK (`ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`…) en la misma terminal.
 - El cuerpo enmascarado se serializa **una sola vez**, y `guard.check()` revisa **esos mismos bytes** justo antes de enviarlos. No hay una segunda serialización que la guardia no haya visto.
 - `stream: true` se rechaza con un 400 fijo hasta la parte 5c.
 

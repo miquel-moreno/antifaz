@@ -66,8 +66,7 @@ async def _masked_call(request: Request, path: str) -> tuple[httpx.Response, Vau
     )
     headers = _headers(request, settings)
     body: dict[str, Any] = await read_json(request, settings.max_body_bytes)
-    if path == "/v1/messages":
-        refuse_streaming(body)
+    refuse_streaming(body)  # count_tokens too: one rule for both routes
     masked, vault = mask_request(body, policy=state.policy, detector=state.detector)
     url = settings.anthropic_base_url.rstrip("/") + path
     return await send_masked(state.http_client, url, headers, masked, vault), vault
@@ -78,7 +77,9 @@ async def messages(request: Request) -> Response:
     upstream, vault = await _masked_call(request, "/v1/messages")
     if upstream.status_code >= 400:
         return passthrough(upstream)
-    return JSONResponse(restore_response(answer_json(upstream), vault))
+    return JSONResponse(
+        restore_response(answer_json(upstream), vault), status_code=upstream.status_code
+    )
 
 
 @router.post("/v1/messages/count_tokens")

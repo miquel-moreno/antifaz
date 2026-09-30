@@ -14,9 +14,12 @@ from antifaz.detect.types import EntityType
 
 
 class Vault:
-    __slots__ = ("_by_token", "_by_value", "_counters")
+    __slots__ = ("_by_token", "_by_value", "_counters", "_reserved")
 
-    def __init__(self) -> None:
+    def __init__(self, reserved: frozenset[str] = frozenset()) -> None:
+        # Tokens already used by text this request cannot change (reasoning blocks): they are
+        # never emitted again, so restore() leaves them as they are.
+        self._reserved = reserved
         self._by_token: dict[str, str] = {}
         self._by_value: dict[tuple[EntityType, str], str] = {}
         self._counters: dict[EntityType, int] = {}
@@ -27,8 +30,11 @@ class Vault:
         token = self._by_value.get(key)
         if token is None:
             number = self._counters.get(entity, 0) + 1
-            self._counters[entity] = number
             token = f"{entity.value.upper()}_{number}"
+            while token in self._reserved:
+                number += 1
+                token = f"{entity.value.upper()}_{number}"
+            self._counters[entity] = number
             self._by_value[key] = token
             self._by_token[token] = value
         return token

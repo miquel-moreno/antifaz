@@ -527,3 +527,23 @@ def test_own_http_client_is_closed() -> None:
         client = app.state.http_client
 
     assert client.is_closed
+
+
+def test_upstream_2xx_status_is_kept(upstream: FakeUpstream) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        201, json={"choices": [{"message": {"content": "x"}}]}
+    )
+    for client in _client(upstream):
+        assert (
+            client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH).status_code == 201
+        )
+
+
+def test_lone_surrogate_is_a_400(proxy: TestClient, upstream: FakeUpstream) -> None:
+    raw = b'{"model": "m", "messages": [{"role": "user", "content": "a\ud800b"}]}'
+    response = proxy.post(
+        "/v1/chat/completions", content=raw, headers={**AUTH, "Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 400
+    assert upstream.requests == []

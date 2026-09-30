@@ -54,12 +54,22 @@ def _reject_constant(_: str) -> object:
     raise ValueError("NaN and Infinity are not valid JSON")
 
 
+def _encodable(node: object) -> bool:
+    try:
+        json.dumps(node, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _parse(raw: bytes) -> dict[str, Any]:
     parsed: object = None
     try:
         parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError, RecursionError):
         parsed = None
+    if isinstance(parsed, dict) and not _encodable(parsed):
+        parsed = None  # a lone surrogate ("D800") cannot be sent as UTF-8
     # Raised outside the except block: the decode error (which may quote the body) is dropped.
     if not isinstance(parsed, dict):
         raise InvalidRequestError() from None
