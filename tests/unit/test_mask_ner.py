@@ -5,7 +5,7 @@ request, with the guard's rule: long values (6+ letters and digits) without word
 short ones with boundaries. All names are invented.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import MappingProxyType
 
 import pytest
@@ -13,6 +13,7 @@ import pytest
 from antifaz import DetectorFailed, guard, mask, restore
 from antifaz.detect.scan import Scanner
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
+from antifaz.mask.propagate import MAX_PROPAGATED_VALUES
 from antifaz.policy import Action, Policy
 from tests.conftest import SENTINEL_DNI
 from tests.nerfakes import ANA, CARMEN, MARINA, fake_detector
@@ -149,3 +150,52 @@ def test_a_look_alike_spelling_of_a_ner_value_is_propagated() -> None:
     assert result.texts == ("Soy [[PERSON_1]]", "Firmado: [[PERSON_2]]")
     for text in result.texts:
         guard.check(text, result.vault)
+
+
+# --- Limits of the propagation (review of 6a) ----------------------------------------------------
+
+
+def fixed(*found: tuple[int, int, str]) -> Callable[[str], Sequence[Span]]:
+    """A detector that returns the given NER spans in the first text only."""
+    calls: list[str] = []
+
+    def detector(text: str) -> Sequence[Span]:
+        calls.append(text)
+        if len(calls) > 1:
+            return []
+        types = {"P": EntityType.PERSON, "D": EntityType.ES_DNI}
+        layers = {"P": Layer.NER, "D": Layer.VALIDATOR}
+        return [
+            Span(start, end, types[kind], layers[kind], Confidence.MEDIUM)
+            for start, end, kind in found
+        ]
+
+    return detector
+
+
+def test_a_trimmed_fragment_of_a_ner_span_is_not_propagated() -> None:
+    # "Carmen 12345678Z" seen as one name, trimmed to "Carmen " around the DNI: the fragment
+    # does not end at a word boundary, so it is not searched in the other texts.
+    texts = [f"Soy Carmen {SENTINEL_DNI}", "Carmen vino"]
+    result = mask(texts, detector=fixed((4, 11, "P"), (11, 20, "D")))
+    assert result.texts == ("Soy [[PERSON_1]][[ES_DNI_1]]", "Carmen vino")
+
+
+def test_values_with_fewer_than_three_letters_or_digits_are_not_propagated() -> None:
+    result = mask(["Soy Al", "Al vino"], detector=only_first("Al"))
+    assert result.texts == ("Soy [[PERSON_1]]", "Al vino")  # the guard blocks this request
+
+
+def test_too_many_ner_values_in_one_request_block() -> None:
+    names = [f"Nombre{i:03d}" for i in range(MAX_PROPAGATED_VALUES + 1)]
+    text = " ".join(names)
+    spans = []
+    start = 0
+    for name in names:
+        spans.append(
+            Span(start, start + len(name), EntityType.PERSON, Layer.NER, Confidence.MEDIUM)
+        )
+        start += len(name) + 1
+    with pytest.raises(DetectorFailed):
+        mask([text], detector=lambda _: spans)
+    assert mask([text], detector=lambda _: spans[:-1]).texts[0].count("[[PERSON_") == len(spans) - 1

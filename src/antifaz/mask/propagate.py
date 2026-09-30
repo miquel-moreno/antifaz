@@ -13,7 +13,19 @@ hides) is searched in all the texts of the request with the SAME rule as the gua
 - shorter values: compared with alphanumeric boundaries ("Ana" is not found in "semana").
 
 The normalisation is done character by character, so every normalised character keeps the
-offset of the original one it came from and a match maps back to an exact original range.
+offset of the original one it came from and a match maps back to an exact original range. The
+guard normalises whole strings; the two agree on letters, digits, accents, look-alikes and
+spaces (property test), but may differ on rare sequences whose NFKC form depends on the
+neighbour characters (for example some Hangul jamo). There the guard sees a value the
+propagation missed and BLOCKS the request: the mismatch fails closed, never open.
+
+Only whole values are propagated: a NER span that does not start and end at a word boundary
+(a fragment left by trimming around a DNI, or a model that cut a word) is not searched
+elsewhere, and neither is a value with fewer than MIN_LETTERS letters and digits ("Al"). In
+both cases the guard still blocks the request if the value appears again in clear. More than
+MAX_PROPAGATED_VALUES different NER values in one request block it (DetectorFailed): the
+search costs one pass over every text per value.
+
 Plain `str.find` loops, no regular expressions (ADR-0008).
 """
 
@@ -24,10 +36,13 @@ from functools import lru_cache
 from antifaz.detect.normalize import fold_homoglyphs
 from antifaz.detect.overlaps import resolve
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
+from antifaz.errors import DetectorFailed
 
 MIN_COMPACT = 6  # the guard's threshold: from this length on, no word boundaries
 # Rounds of the short-value search; the guard still blocks anything left after them.
 _MAX_ROUNDS = 8
+MIN_LETTERS = 3  # shorter values are not propagated
+MAX_PROPAGATED_VALUES = 200  # different NER values per request; more blocks the request
 
 
 @lru_cache(maxsize=4096)
@@ -93,11 +108,18 @@ def _needle(value: str) -> tuple[str, bool] | None:
     """(what to search, whether it is the compact form), or None for a value without text."""
     normal = _Index(value).normal.strip()
     compact = "".join(char for char in normal if char.isalnum())
-    if not compact:
+    if len(compact) < MIN_LETTERS:
         return None
     if len(compact) >= MIN_COMPACT:
         return compact, True
     return normal, False
+
+
+def _whole(text: str, span: Span) -> bool:
+    """The span starts and ends at a word boundary (not a fragment of a longer word)."""
+    before = span.start == 0 or not text[span.start - 1].isalnum()
+    after = span.end == len(text) or not text[span.end].isalnum()
+    return before and after
 
 
 def propagate(
@@ -110,8 +132,10 @@ def propagate(
         (span.type, text[span.start : span.end])
         for text, found in zip(texts, spans, strict=True)
         for span in found
-        if span.layer is Layer.NER and hidden(span.type)
+        if span.layer is Layer.NER and hidden(span.type) and _whole(text, span)
     }
+    if len(values) > MAX_PROPAGATED_VALUES:
+        raise DetectorFailed()
     needles = [(entity, needle) for entity, value in values if (needle := _needle(value))]
     if not needles:
         return [list(found) for found in spans]
