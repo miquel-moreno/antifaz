@@ -1,6 +1,6 @@
 # ADR-0015 · La puerta cerrada por defecto
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-30)
 - **Fecha:** 2026-09-30
 - **Concreta:** el modelo de amenazas (pasarela desde un navegador, JSON ambiguo, rutas, arranque) y las invariantes 12 y 13
 
