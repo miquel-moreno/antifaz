@@ -184,7 +184,8 @@ Errores:
 | `Host` que no está en `ANTIFAZ_ALLOWED_HOSTS` | 400 `Invalid host header` (texto) |
 | La respuesta del proveedor repite una clave configurada (también escapada en JSON) | 502 `bad_upstream_response` |
 | Dato en un sitio que no se puede enmascarar, adjunto, detector roto o guardia | 400 `antifaz_blocked`, mensaje fijo |
-| `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
+| `stream: true` | La respuesta llega en streaming, restaurada al vuelo (ver [Streaming](#streaming-issue-5-pr-5c)) |
+| `stream_options` con algo que no sea `include_usage` o `include_obfuscation` a `true`/`false` | 400 `invalid_request` |
 | El proveedor tarda más de `ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
 | No se puede conectar | 502 `upstream_unavailable` |
 | El proveedor responde con una redirección (3xx) | 502 `upstream_redirect` (no se sigue) |
@@ -200,7 +201,7 @@ Configura `ANTIFAZ_API_KEY` y `ANTIFAZ_ANTHROPIC_API_KEY` en `.env` (y `ANTIFAZ_
 curl http://localhost:8000/v1/messages   -H "x-api-key: $ANTIFAZ_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json"   -d '{"model": "claude-sonnet-4-5", "max_tokens": 200, "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
 ```
 
-Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y `ANTHROPIC_API_KEY=<ANTIFAZ_API_KEY>` (o `ANTHROPIC_AUTH_TOKEN`, que llega como `Bearer`). Aviso: Claude Code usa streaming, que llega en la parte 5c; hasta entonces sus peticiones reciben 400 `streaming_not_supported`. Antifaz no lee esas variables (solo las que empiezan por `ANTIFAZ_`), así que se puede arrancar en la misma terminal.
+Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y `ANTHROPIC_API_KEY=<ANTIFAZ_API_KEY>` (o `ANTHROPIC_AUTH_TOKEN`, que llega como `Bearer`). Claude Code usa streaming, soportado desde la parte 5c (probado con el proveedor falso; la prueba documentada con Claude Code de verdad sigue pendiente). Antifaz no lee esas variables (solo las que empiezan por `ANTIFAZ_`), así que se puede arrancar en la misma terminal.
 
 Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los mismos que en OpenAI (clave, tope de tamaño, un solo `mask()`, una sola serialización revisada por la guardia, errores); el código de esos pasos es compartido (`api/proxy.py` y `providers/json_walk.py`). Lo propio de Anthropic:
 
@@ -210,9 +211,42 @@ Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los
 4. **Razonamiento (invariante 9)**: los bloques `thinking` y `redacted_thinking` de los mensajes se copian **sin tocar**, con su `signature` o `data`: no se enmascaran ni se escapan (sus `[[` siguen igual). Vienen del modelo, que solo vio texto enmascarado, así que llevan marcadores, no datos. Aun así se pasan por el detector: si uno lleva un dato que hay que ocultar (alguien lo editó), la petición se bloquea, porque no se puede enmascarar sin romper la firma. La guardia sigue revisando todos los bytes. Solo se aceptan sus claves exactas (`thinking`: `type`, `thinking`, `signature`; `redacted_thinking`: `type`, `data`), todas de texto; otra clave → bloqueo. `signature` y `data` son opacos (firma y razonamiento cifrado) y no se pueden revisar: riesgo aceptado en el ADR-0013. Los marcadores que ya lleva el razonamiento (de un turno anterior) se **reservan**: un dato nuevo de esta petición no recibe ese número (si `[[ES_DNI_1]]` está en el razonamiento, el DNI nuevo es `[[ES_DNI_2]]`), y como los reservados no están en la tabla, la respuesta los deja tal cual en vez de poner un valor equivocado. Un bloque con forma de `thinking` dentro de la `input` de una herramienta no cuenta: se enmascara como cualquier dato.
 5. **Respuesta**: se restauran los bloques `text` y los textos de `tool_use.input` (los valores, no las claves). `thinking`, `redacted_thinking`, las firmas y los bloques desconocidos pasan sin tocar.
 6. **`count_tokens`**: se enmascara igual que `/v1/messages` y la respuesta del proveedor (solo números) se devuelve tal cual. `stream` se comprueba igual: no booleano → 400; `true` → 400 `streaming_not_supported`, por coherencia (`count_tokens` no tiene streaming).
-7. `stream: true` → 400 `streaming_not_supported` (parte 5c). El código de estado 2xx del proveedor se devuelve igual (en las dos rutas). Un texto con un sustituto suelto de UTF-16 (`"\ud800"`), que no se puede enviar en UTF-8, → 400 `invalid_request`.
+7. `stream: true` → la respuesta llega en streaming (ver [Streaming](#streaming-issue-5-pr-5c)). El código de estado 2xx del proveedor se devuelve igual (en las dos rutas). Un texto con un sustituto suelto de UTF-16 (`"\ud800"`), que no se puede enviar en UTF-8, → 400 `invalid_request`.
 
 "Sin tocar" quiere decir que las cadenas son idénticas: el proxy trabaja con el JSON parseado, así que el formato (espacios, escapes `é`) puede cambiar al volver a serializar, pero no el contenido ni la firma. Los tests comparan el bloque serializado dentro de los bytes enviados y de la respuesta.
+
+## Streaming (issue 5, PR 5c)
+
+Con `"stream": true` en `/v1/chat/completions` o en `/v1/messages`, la respuesta llega como eventos SSE (`text/event-stream`) y Antifaz pone los datos en su sitio **al vuelo**. La petición se trata igual que sin streaming: un solo `mask()`, y la guardia revisa los bytes exactos justo antes de enviarlos. Si el proveedor responde con error (429, 5xx…), se devuelve su cuerpo tal cual, como en 5a y 5b (después de comprobar que no repite una clave). `count_tokens` no tiene streaming: `stream: true` ahí → 400 `streaming_not_supported`.
+
+Cómo se restaura ([ADR-0013](adr/0013-proxy.md)):
+
+- **Texto**: cada trozo sale en cuanto llega, salvo el final que **podría** ser el principio de un marcador o de un escape (`[`, `[[`, `[[ES_D`, `[[ es_dni_1 `…), con el mismo patrón que `restore()`. Se retienen como mucho 64 caracteres (`MAX_HOLDBACK`: el marcador más largo con 16 espacios a cada lado). De un tramo de `[` seguidos solo se retienen los dos últimos. Da igual cómo lleguen cortados los trozos: el texto final es el mismo que con `restore()` (invariante 3; tests de propiedades con cortes al azar, también en mitad de un carácter UTF-8, que se decodifica poco a poco).
+- **OpenAI**: `delta.content` y `delta.refusal` de cada `choice`. Los `arguments` de `tool_calls` (y del antiguo `function_call`) se acumulan por (choice, índice de la herramienta) y se envían restaurados **en un solo delta**, en el chunk que cierra la choice (`finish_reason`). El primer delta de cada llamada sigue llevando `id`, `type` y `name`, con los `arguments` vacíos. `[DONE]` vacía lo que quede. `stream_options` solo admite `include_usage` e `include_obfuscation`, con `true` o `false`; otra cosa → 400 `invalid_request`.
+- **Anthropic**: `text_delta` por índice de bloque. `input_json_delta` se acumula por bloque y sale restaurado como **un** `input_json_delta` justo antes de `content_block_stop` (siempre JSON válido, invariante 4). `thinking_delta` y `signature_delta` pasan **byte a byte** (invariante 9), igual que los bloques `thinking` y `redacted_thinking`. `ping`, `error`, `message_start` y `message_delta` pasan sin tocar; `message_stop` vacía lo que quede.
+- **Eventos o campos desconocidos**: pasan sin tocar (ni se restauran ni se bloquean) y se cuentan en memoria (`app.state.stream_counters`, solo el número).
+- Si el proveedor ignora `stream` y responde con JSON, se restaura como una respuesta normal.
+
+El formato SSE lo lee un módulo propio y pequeño (`providers/sse.py`, sin dependencias): finales de línea CRLF, LF o CR (también partidos entre dos trozos), `data:` en varias líneas, comentarios y campos desconocidos. Un evento que no se cambia sale **tal cual llegó**, byte a byte.
+
+**Fallos a mitad del stream** (el 200 ya se envió): sale el texto que ya es seguro (restaurado; un marcador a medias sale tal cual, porque es un marcador y no un dato), después **un** evento de error con el formato del proveedor y un mensaje fijo, y se cierra. Unos argumentos de herramienta a medias no se envían.
+
+| Caso | `code` en OpenAI |
+|---|---|
+| Se agota el tiempo de lectura | `upstream_timeout` |
+| Se corta la conexión | `upstream_unavailable` |
+| SSE mal formado, UTF-8 inválido, una línea de más de 1 MiB o un evento de más de 4 MiB | `bad_upstream_response` |
+| Más de 64 caracteres retenidos o más de 4 MiB de argumentos acumulados | `stream_limit_exceeded` |
+| Un evento repite una clave configurada | `bad_upstream_response` |
+| El stream acaba sin `[DONE]` o sin `message_stop` | `upstream_stream_cut` |
+
+En OpenAI el error es `data: {"error": {"message": ..., "type": "antifaz_error", "code": ...}}`; en Anthropic, `event: error` con `{"type": "error", "error": {"type": "api_error", "message": ...}}`. Ningún mensaje repite lo recibido; el log solo guarda el `code`.
+
+**Claves (invariante 13).** Cada evento se revisa tal cual y con sus cadenas JSON decodificadas (con los escapes deshechos). Los campos de texto se revisan además pegados al final de los anteriores, para detectar una clave partida entre dos deltas. Si la cabecera `Content-Type` del proveedor ya lleva una clave → 502 antes de empezar.
+
+**Cierre.** Si el cliente se va a mitad, la respuesta cierra la conexión con el proveedor aunque esté esperando datos (`RelayResponse`; hay un test con una desconexión ASGI de verdad).
+
+Tests: `tests/unit/test_stream_restore.py`, `test_sse.py`, `test_stream_transformers.py`; propiedades en `tests/property/test_stream_restore_property.py`, `test_sse_property.py` y `test_stream_protocol_property.py`; ataques en `tests/redteam/test_streaming.py` (429 y 5xx, proveedor lento, cortes en mitad de un marcador, UTF-8 partido o inválido, marcadores de otra petición, razonamiento, eventos desconocidos, claves y desconexión del cliente).
 
 ## La puerta cerrada por defecto (issue 20)
 
@@ -284,7 +318,11 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 
 ## Limitaciones
 
-- El proxy habla OpenAI Chat y Anthropic Messages, sin streaming (llega en la parte 5c). Claude Code necesita streaming.
+- El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). La prueba con Claude Code de verdad está pendiente.
+- En streaming, los argumentos de las herramientas llegan **de golpe al final de su bloque** (o de la `choice` en OpenAI), no poco a poco: así siempre son JSON válido.
+- En streaming, un posible marcador de más de 64 caracteres (`[[` seguido de muchos espacios o letras) corta el stream con un error `stream_limit_exceeded`, igual que más de 4 MiB de argumentos de herramientas.
+- Si un proveedor manda una clave partida en varios eventos, el stream se corta al completarse, pero el trozo ya enviado llega al cliente (no es la clave entera).
+- El tamaño total de un stream no tiene tope (sí cada línea, cada evento, lo retenido y lo acumulado).
 - En Anthropic se bloquean las `citations`, los documentos y las herramientas del servidor (búsqueda web…): fallar cerrado es a propósito.
 - Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.
 - El detector no decodifica base64, hexadecimal ni otras codificaciones dentro del texto (solo bloquea las URL `data:...;base64,`).

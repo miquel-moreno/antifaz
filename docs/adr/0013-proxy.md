@@ -23,6 +23,7 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
   - *Enmienda del 2026-09-30:* la configuración se lee solo de variables `ANTIFAZ_*`, para no mezclarse con las de Claude Code o los SDK (`ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`…) en la misma terminal.
 - El cuerpo enmascarado se serializa **una sola vez**, y `guard.check()` revisa **esos mismos bytes** justo antes de enviarlos. No hay una segunda serialización que la guardia no haya visto.
 - `stream: true` se rechaza con un 400 fijo hasta la parte 5c.
+  - *Enmienda del 2026-09-30 (parte 5c):* `stream: true` se acepta en `/v1/chat/completions` y `/v1/messages`; `count_tokens` lo sigue rechazando. `stream_options` (OpenAI) tiene lista de permitidos: `include_usage` e `include_obfuscation`, solo booleanos.
 
 **Destino y claves.**
 
@@ -34,6 +35,7 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 - Se restauran solo los campos conocidos con texto (en OpenAI Chat: `message.content`, `message.refusal` y `tool_calls[].function.arguments`). Lo demás pasa sin tocar.
 - Argumentos de herramientas: se parsean, se restaura cada valor de texto y se vuelven a serializar, así el resultado es JSON válido aunque el dato tenga comillas o barras (invariante 4). Si el proveedor devuelve algo que no es JSON, se restaura como texto.
 - Streaming (5c): se restaura el texto al vuelo reteniendo solo el final del trozo que **podría** ser el principio de un marcador o de un escape, con el mismo patrón que `restore()` y un tope de tamaño (invariante 3). Los argumentos de herramientas se acumulan por índice y se emiten restaurados al cerrar el bloque: siempre son JSON válido, a cambio de perder el streaming parcial de esos argumentos.
+  - *Enmienda del 2026-09-30 (parte 5c), concreta cómo se hace:* el tope de lo retenido es de 64 caracteres; pasarlo (igual que pasar 4 MiB de argumentos acumulados, una línea SSE de 1 MiB o un evento de 4 MiB) **corta el stream con un error**, en vez de soltar el texto sin restaurar. En OpenAI "cerrar el bloque" es el chunk con `finish_reason` de esa choice (o `[DONE]`). Si el stream falla a mitad (tiempo, conexión, SSE mal formado, un tope, una clave en la respuesta o un final que no llega), se envía el texto ya seguro (un marcador a medias sale tal cual), **un** evento de error con el formato del proveedor y mensaje fijo, y se cierra; los argumentos a medias no se envían. Cada evento se revisa en busca de claves (invariante 13). Los eventos que no se tocan salen byte a byte. Si el proveedor responde JSON a una petición con `stream`, se restaura como respuesta normal.
 
 **Errores.**
 
