@@ -49,6 +49,7 @@ Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic cont
 | tokenizers | 0.23.2 | Apache-2.0 | transformers |
 | safetensors | 0.8.0 | Apache-2.0 | gliner, transformers |
 | sentencepiece | 0.2.2 | Apache-2.0 | gliner (tokenizador de mDeBERTa) |
+| protobuf | 7.36.2 | BSD-3-Clause | directa (extra `ner`): transformers la necesita para leer `spm.model` |
 | numpy | 2.5.3 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | gliner, transformers |
 | regex | 2026.9.29 | Apache-2.0 AND CNRI-Python | transformers |
 | tqdm | 4.70.1 | MPL-2.0 AND MIT | gliner, transformers (ver copyleft débil) |

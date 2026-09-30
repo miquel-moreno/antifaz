@@ -44,6 +44,7 @@ RECORDED_EXTRA: dict[str, str] = {
     "networkx": "BSD-3-Clause",
     "numpy": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
     "packaging": "Apache-2.0 OR BSD-2-Clause",
+    "protobuf": "3-Clause BSD License",
     "pygments": "BSD-2-Clause",
     "regex": "Apache-2.0 AND CNRI-Python",
     "rich": "MIT",
@@ -118,16 +119,16 @@ def metadata_texts(meta: metadata.PackageMetadata) -> list[str]:
     return texts + [c for c in meta.get_all("Classifier") or [] if c.startswith("License ::")]
 
 
-def runtime_dependencies() -> list[tuple[str, bool]]:
-    """(name, only on some platforms) of the locked runtime dependencies (every extra
-    included), from uv."""
-    exported = subprocess.run(
+def runtime_dependencies(extras: bool = True) -> list[tuple[str, bool]]:
+    """(name, only on some platforms) of the locked runtime dependencies (with every extra
+    unless `extras` is False), from uv."""
+    exported = subprocess.run(  # noqa: S603 - fixed arguments, no user input
         [  # noqa: S607 - uv from PATH, fixed args
             "uv",
             "export",
             "--frozen",
             "--no-dev",
-            "--all-extras",
+            *(["--all-extras"] if extras else []),
             "--no-emit-project",
             "--no-hashes",
         ],
