@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -141,3 +142,81 @@ def test_workers_write_nothing_the_text_holds(
         assert value not in captured.out
         assert value not in captured.err
         assert value not in caplog.text
+
+
+# --- Loading, circuit breaker and shutdown (review of 6a) --------------------------------------
+
+
+def test_a_request_waits_at_most_its_time_limit_for_a_reloading_worker(tmp_path: Path) -> None:
+    delay = tmp_path / "load_seconds"  # read by the fake backend when a worker loads
+    options = {**OPTIONS, "load_delay_file": str(delay)}
+    slow_reload = NerPool(FAKE_FACTORY, options, workers=1, timeout=0.5)
+    slow_reload.start()
+    try:
+        delay.write_text("3", encoding="utf-8")
+        with pytest.raises(DetectorFailed):
+            slow_reload.predict(["FAKE_CRASH"], ["person"], 0.5)  # the new worker loads for 3 s
+        began = time.monotonic()
+        with pytest.raises(DetectorFailed):
+            slow_reload.predict([CARMEN], ["person"], 0.5)
+        assert time.monotonic() - began < 1.5  # never the 3 s of the load
+        assert slow_reload.status() == "starting"
+        time.sleep(3.5)
+        assert slow_reload.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+        assert slow_reload.status() == "ok"
+    finally:
+        slow_reload.close()
+
+
+def test_repeated_failures_open_the_circuit_and_it_closes_after_the_backoff(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    breaker = NerPool(
+        FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT, failure_threshold=2, backoff_seconds=1.5
+    )
+    breaker.start()
+    try:
+        for _ in range(2):
+            with pytest.raises(DetectorFailed):
+                breaker.predict([f"FAKE_CRASH {SENTINEL_DNI}"], ["person"], 0.5)
+        assert breaker.status() == "circuit_open"
+        began = time.monotonic()
+        with pytest.raises(DetectorFailed):
+            breaker.predict([CARMEN], ["person"], 0.5)  # blocked at once: circuit open
+        assert time.monotonic() - began < 0.2
+        time.sleep(1.6)
+        assert breaker.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+        assert breaker.status() == "ok"
+    finally:
+        breaker.close()
+    assert "circuit open" in caplog.text
+    assert SENTINEL_DNI not in caplog.text
+
+
+def test_closing_during_a_call_blocks_that_call_without_errors() -> None:
+    busy = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=30.0)
+    busy.start()
+    errors: list[BaseException] = []
+
+    def hang() -> None:
+        try:
+            busy.predict(["FAKE_SLEEP"], ["person"], 0.5)
+        except BaseException as error:  # the test inspects what was raised
+            errors.append(error)
+
+    thread = threading.Thread(target=hang)
+    thread.start()
+    time.sleep(0.5)
+    began = time.monotonic()
+    busy.close()
+    thread.join(10)
+    assert not thread.is_alive()
+    assert time.monotonic() - began < 10
+    assert len(errors) == 1 and isinstance(errors[0], DetectorFailed)
+    assert busy.worker_pids() == ()
+    assert busy.status() == "closed"
+
+
+def test_the_pool_exposes_its_time_limit() -> None:
+    assert NerPool(FAKE_FACTORY, OPTIONS, timeout=3.0).timeout == 3.0

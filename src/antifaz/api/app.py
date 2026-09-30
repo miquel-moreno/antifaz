@@ -81,6 +81,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.detector = detector or (Scanner(ner) if ner is not None else scan)
+    app.state.ner = ner
     app.state.policy = policy
     app.state.stream_counters = StreamCounters()
     register_error_handlers(app)

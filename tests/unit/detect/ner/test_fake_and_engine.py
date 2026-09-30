@@ -1,5 +1,6 @@
 """The fake NER backend and the engine in front of any predictor (chunks, checks, cache)."""
 
+import time
 from collections.abc import Sequence
 
 import pytest
@@ -193,5 +194,58 @@ def test_start_and_close_go_to_the_predictor() -> None:
     [{"threshold": 0.0}, {"threshold": 1.1}, {"labels": {}}, {"batch_chunks": 0}],
 )
 def test_invalid_engine_settings_are_refused(options: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        fake_detector(**options)
+
+
+# --- Limits per request (review of 6a) -------------------------------------------------------
+
+
+class _Slow(InProcess):
+    """A predictor with a time limit per request that takes `seconds` per call."""
+
+    def __init__(self, seconds: float, timeout: float) -> None:
+        super().__init__(FakeBackend({CARMEN: "person"}))
+        self.seconds = seconds
+        self.timeout = timeout
+        self.deadlines: list[float] = []
+
+    def predict(  # type: ignore[override]
+        self, texts: Sequence[str], labels: Sequence[str], threshold: float, deadline: float
+    ) -> list[list[list[object]]]:
+        self.deadlines.append(deadline)
+        time.sleep(self.seconds)
+        return super().predict(texts, labels, threshold)
+
+
+def test_too_many_windows_in_one_request_block_before_calling_the_backend() -> None:
+    detector, predictor = fake_detector(window=2, overlap=0, max_chunks=3)
+    with pytest.raises(DetectorFailed):
+        detector.find_many(["uno dos tres cuatro", "cinco seis siete"])  # 4 windows
+    assert predictor.calls == 0
+    assert detector.find_many(["uno dos tres cuatro cinco seis"]) == [[]]  # 3 windows: fine
+
+
+def test_the_whole_request_shares_one_deadline() -> None:
+    slow = _Slow(seconds=0.2, timeout=0.5)
+    detector = NerDetector(slow, window=2, overlap=0, batch_chunks=1)  # type: ignore[arg-type]
+    began = time.monotonic()
+    with pytest.raises(DetectorFailed):
+        detector.find_many([" ".join(["palabra"] * 20)])  # 10 calls of 0.2 s
+    assert time.monotonic() - began < 1.0
+    assert len(set(slow.deadlines)) == 1  # the same deadline for every call
+    assert slow.deadlines[0] - began <= 0.5 + 0.05
+
+
+def test_an_explicit_request_timeout_wins_over_the_predictor() -> None:
+    slow = _Slow(seconds=0.0, timeout=100.0)
+    detector = NerDetector(slow, timeout=1.0)  # type: ignore[arg-type]
+    began = time.monotonic()
+    detector.find_many([CARMEN])
+    assert slow.deadlines[0] - began <= 1.05
+
+
+@pytest.mark.parametrize("options", [{"timeout": 0}, {"max_chunks": 0}])
+def test_invalid_request_limits_are_refused(options: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         fake_detector(**options)

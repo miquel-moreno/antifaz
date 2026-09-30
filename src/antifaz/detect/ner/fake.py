@@ -1,6 +1,7 @@
 """A dictionary "NER" for tests and demos: finds the configured names, with word boundaries.
 
-It is never chosen by the settings: tests build it through its factory path
+It can never be chosen by the settings: there is no variable for the backend, the gateway
+always uses `setup.GLINER_FACTORY`, and only code (the tests) can pass another factory path
 (`antifaz.detect.ner.fake:create`). With `triggers`, a few magic words make it misbehave so the
 pool can be tested: FAKE_SLEEP (hangs), FAKE_CRASH (the process dies), FAKE_RAISE (an exception
 holding the text), FAKE_MALFORMED (bad output) and FAKE_PRINT (writes the text to stdout, stderr
@@ -78,7 +79,12 @@ def create(
     score: float = 0.9,
     sleep_seconds: float = 30.0,
     model_dir: str | None = None,
+    load_delay_file: str | None = None,
 ) -> FakeBackend:
     """Factory used by the worker processes (and by tests in the same process). `model_dir`
-    is what the real backend gets from the settings; the fake does not need it."""
+    is what the real backend gets from the settings; the fake does not need it. If the file
+    `load_delay_file` exists, loading waits the seconds written in it (a slow model load)."""
+    if load_delay_file and os.path.exists(load_delay_file):
+        with open(load_delay_file, encoding="utf-8") as file:
+            time.sleep(float(file.read()))
     return FakeBackend(names, triggers=triggers, score=score, sleep_seconds=sleep_seconds)

@@ -173,3 +173,8 @@ def test_detection_runs_outside_the_event_loop(upstream: FakeUpstream) -> None:
     with TestClient(app) as client:
         client.post("/v1/chat/completions", json=_chat("hola"), headers=OPENAI_AUTH)
     assert loops and not any(loops)
+
+
+def test_healthz_says_the_state_of_the_ner_workers(upstream: FakeUpstream) -> None:
+    for client in _clients(upstream):
+        assert client.get("/healthz").json()["ner"] == "ok"

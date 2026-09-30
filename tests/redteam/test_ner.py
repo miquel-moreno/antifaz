@@ -389,7 +389,6 @@ def test_a_crash_in_a_late_window_blocks_the_whole_text() -> None:
         pool.close()
 
 
-@pytest.mark.xfail(strict=True, reason="DoS media: el tiempo máximo es por lote, no por petición")
 def test_a_huge_text_is_bounded_by_the_ner_time_limit() -> None:
     """Un texto con muchas ventanas lentas (cada lote justo por debajo del límite) no debería
     retener el NER mucho más que ANTIFAZ_NER_TIMEOUT_SECONDS."""

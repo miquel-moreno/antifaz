@@ -310,7 +310,9 @@ Decisión en [ADR-0016](adr/0016-ner-en-procesos-aparte.md) (propuesta). Esta pa
 5. **Solapamientos**: el NER es la capa con menos prioridad, y el perdedor de un solapamiento parcial se recorta en vez de descartarse (sus trozos sin letras ni cifras se tiran). Todo carácter alfanumérico que alguna capa detectó queda enmascarado.
 6. **Propagación** (`mask/propagate.py`): cada valor que encontró el NER se enmascara en todos los textos de la petición, con la regla de la guardia (normalizado; 6 o más letras y cifras sin límites de palabra; más corto, con límites, y un vecino que se va a enmascarar cuenta como límite). Así la guardia no bloquea una petición porque el modelo vio un nombre en un mensaje y no en otro.
 
-**Fallos.** Si una llamada pasa de `ANTIFAZ_NER_TIMEOUT_SECONDS`, el proceso se mata (`kill()`), se arranca otro y la petición se bloquea con 400. Lo mismo si el proceso muere o responde algo mal formado. Si el backend lanza una excepción, el proceso sigue vivo y la petición se bloquea. El log solo dice "worker replaced" y el motivo, nunca el texto. `ProcessPoolExecutor` no sirve: no mata un proceso colgado hasta Python 3.14.
+**Límites por petición.** `ANTIFAZ_NER_TIMEOUT_SECONDS` es el tiempo del NER para **toda la petición**, no por llamada: un único plazo (reloj monotónico) cubre esperar un proceso libre, esperar a uno que aún carga el modelo, todas las llamadas por lotes y recibir la respuesta **entera** (un vigilante mata el proceso al llegar el plazo, así que una respuesta que se queda a medias tampoco retiene la petición). Además, una petición de más de 1.024 ventanas (~1 MB de texto) se bloquea antes de llegar al modelo.
+
+**Fallos.** Si el plazo se agota, el proceso se mata (`kill()`), se arranca otro y la petición se bloquea con 400. Lo mismo si el proceso muere, no carga el modelo o responde algo mal formado. Si el backend lanza una excepción, el proceso sigue vivo y la petición se bloquea. Un proceso nuevo que todavía carga no se mata: la petición se bloquea y la siguiente lo usa. Tras 3 fallos seguidos se abre el **cortacircuitos**: toda petición se bloquea al momento durante 1 s, 2 s, 4 s… (máximo 60 s) y luego se vuelve a probar; se cierra con la primera respuesta buena. El log solo dice qué pasó ("replaced", "circuit open"), nunca el texto, y `/healthz` añade `"ner": "ok" | "starting" | "circuit_open" | "closed"` cuando el NER está encendido. Al parar, los procesos se matan sin cerrar la tubería que otro hilo está leyendo. `ProcessPoolExecutor` no sirve: no mata un proceso colgado hasta Python 3.14.
 
 **En la API**, `mask_request` corre en un hilo (`anyio.to_thread.run_sync`): ni los patrones ni la espera al NER bloquean el bucle de eventos. Los procesos arrancan con la app (si el modelo no carga, la app no arranca) y se paran con ella.
 
@@ -322,7 +324,7 @@ Decisión en [ADR-0016](adr/0016-ner-en-procesos-aparte.md) (propuesta). Esta pa
 |---|---|---|
 | `ANTIFAZ_NER_ENABLED` | `false` | Enciende el NER. Con `true`, si el modelo falta o no coincide con el manifiesto, o el backend no está instalado, Antifaz no arranca |
 | `ANTIFAZ_NER_MODEL_DIR` | vacía | Carpeta del modelo descargado (comando de descarga en 6b) |
-| `ANTIFAZ_NER_TIMEOUT_SECONDS` | `10` | Tiempo máximo de cada llamada al pool (hasta 16 ventanas por llamada) |
+| `ANTIFAZ_NER_TIMEOUT_SECONDS` | `10` | Tiempo máximo del NER para toda la petición (todas sus ventanas, en lotes de 16) |
 | `ANTIFAZ_NER_WORKERS` | `1` | Procesos del pool; cada uno ocupa la memoria de un modelo |
 | `ANTIFAZ_NER_THRESHOLD` | `0.5` | Puntuación mínima de una entidad (mayor que 0, como mucho 1) |
 | `ANTIFAZ_NER_CACHE_ENTRIES` | `10000` | Textos en la caché; `0` la apaga |
@@ -417,6 +419,6 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
 - Los nombres de persona no se detectan hasta el issue 6b (el modelo NER): hoy pasan en claro. La infraestructura (pool, caché, ventanas, manifiesto) ya está (6a), probada con un backend falso.
-- NER: una petición tan grande que no cabe en el tiempo máximo se bloquea (el fallo seguro). Un nombre detectado se enmascara en toda la petición, también donde es una palabra corriente ("Mar") o, si tiene 6 o más letras, dentro de otra palabra ("Marina" en "submarina"): falsos positivos aceptados (ADR-0016).
+- NER: una petición tan grande que no cabe en el tiempo máximo, o con más de 1.024 ventanas, se bloquea (el fallo seguro). Un nombre detectado se enmascara en toda la petición, también donde es una palabra corriente ("Mar") o, si tiene 6 o más letras, dentro de otra palabra ("Marina" en "submarina"): falsos positivos aceptados (ADR-0016).
 - NER: el troceado cuenta palabras, no subpalabras del modelo; en 6b se mide con el modelo real que ninguna ventana supere su límite.
 - Dos identificadores pegados sin separador (`12345678Z12345678Z`): el primero no se detecta (un DNI nunca toca cifras) y la guardia bloquea la petición.

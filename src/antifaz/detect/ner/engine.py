@@ -4,10 +4,13 @@ The texts it gets are the detector's normalised views (ADR-0014), so its spans u
 offsets as the patterns and go back to the original text with the same map. Everything the
 predictor answers is checked: one list per window, `[start, end, label, score]` with integer
 offsets inside the window, a label that was asked for and a score between 0 and 1. Anything else
-raises DetectorFailed: the request is blocked (invariant 7).
+raises DetectorFailed: the request is blocked (invariant 7). So does a request with more than
+`max_chunks` windows, or one whose windows do not all fit in ONE deadline (the pool's time limit
+by default): the time limit is per request, not per call.
 """
 
 import math
+import time
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
@@ -29,8 +32,11 @@ DEFAULT_LABELS: Mapping[str, EntityType] = MappingProxyType(
     {"person": EntityType.PERSON, "address": EntityType.ADDRESS}
 )
 DEFAULT_THRESHOLD = 0.5
-# Windows per call to the predictor: each call has its own time limit in the pool.
+# Windows per call to the predictor.
 DEFAULT_BATCH_CHUNKS = 16
+# Windows per request: a bigger request is blocked before the model sees it (about 1 MB of
+# text; a real model needs tens of milliseconds per window on a CPU).
+DEFAULT_MAX_CHUNKS = 1024
 
 
 def _entities(raw: object, length: int, labels: Mapping[str, EntityType]) -> list[Entity] | None:
@@ -66,13 +72,19 @@ class NerDetector:
         window: int = WINDOW_TOKENS,
         overlap: int = OVERLAP_TOKENS,
         batch_chunks: int = DEFAULT_BATCH_CHUNKS,
+        max_chunks: int = DEFAULT_MAX_CHUNKS,
+        timeout: float | None = None,
     ) -> None:
         if not labels:
             raise ValueError("the NER needs at least one label")
         if not 0 < threshold <= 1:
             raise ValueError("the NER threshold must be above 0 and at most 1")
-        if batch_chunks < 1:
-            raise ValueError("batch_chunks must be positive")
+        if batch_chunks < 1 or max_chunks < 1:
+            raise ValueError("batch_chunks and max_chunks must be positive")
+        # Time for the whole request: by default the predictor's (the pool's) time limit.
+        timeout = timeout if timeout is not None else getattr(predictor, "timeout", None)
+        if timeout is not None and timeout <= 0:
+            raise ValueError("the NER time limit must be positive")
         chunk("", window, overlap)  # checks the window settings
         self._predictor = predictor
         self._labels = dict(labels)
@@ -83,6 +95,8 @@ class NerDetector:
         self._window = window
         self._overlap = overlap
         self._batch = batch_chunks
+        self._max_chunks = max_chunks
+        self._timeout: float | None = timeout
         self._chunker = f"{CHUNKER_VERSION}:{window}:{overlap}"
 
     def start(self) -> None:
@@ -90,6 +104,11 @@ class NerDetector:
 
     def close(self) -> None:
         self._predictor.close()
+
+    def status(self) -> str:
+        """The predictor's state for /healthz ("ok" if it does not say)."""
+        status = getattr(self._predictor, "status", None)
+        return str(status()) if callable(status) else "ok"
 
     def _key(self, text: str) -> bytes:
         return cache_key(
@@ -101,12 +120,22 @@ class NerDetector:
         )
 
     def _predict(self, chunks: list[Chunk]) -> list[list[Entity]]:
+        """Every window through the predictor, all under ONE deadline for the request."""
+        if len(chunks) > self._max_chunks:
+            raise DetectorFailed()
+        deadline = None if self._timeout is None else time.monotonic() + self._timeout
         results: list[list[Entity]] = []
         for first in range(0, len(chunks), self._batch):
             batch = chunks[first : first + self._batch]
-            raw = self._predictor.predict(
-                [piece.text for piece in batch], self._label_names, self._threshold
-            )
+            texts = [piece.text for piece in batch]
+            if deadline is None:
+                raw = self._predictor.predict(texts, self._label_names, self._threshold)
+            elif time.monotonic() >= deadline:
+                raise DetectorFailed()
+            else:
+                raw = self._predictor.predict(
+                    texts, self._label_names, self._threshold, deadline=deadline
+                )
             if not isinstance(raw, list | tuple) or len(raw) != len(batch):
                 raise DetectorFailed()
             for piece, answer in zip(batch, raw, strict=True):

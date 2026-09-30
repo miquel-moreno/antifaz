@@ -30,7 +30,15 @@ class Predictor(Protocol):
 
     def close(self) -> None: ...
 
-    def predict(self, texts: Sequence[str], labels: Sequence[str], threshold: float) -> object: ...
+    def predict(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None = None,
+    ) -> object:
+        """`deadline` (time.monotonic()) is only passed to predictors with a `timeout`."""
+        ...
 
 
 def split_factory(path: str) -> tuple[str, str]:
@@ -52,4 +60,4 @@ def load_factory(path: str) -> Callable[..., NerBackend]:
     factory = getattr(module, name, None) if module is not None else None
     if not callable(factory):
         raise ValueError("the backend factory cannot be imported")
-    return factory  # type: ignore[no-any-return]
+    return factory  # type: ignore[no-any-return]  # getattr gives Any; checked callable above
