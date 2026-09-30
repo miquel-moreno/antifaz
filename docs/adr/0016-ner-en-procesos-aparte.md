@@ -1,6 +1,6 @@
 # ADR-0016 · El NER en procesos aparte, con caché y manifiesto
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-30)
 - **Fecha:** 2026-09-30
 - **Concreta:** el ADR-0003 (pool de procesos con tiempo máximo)
 - **Modifica:** la regla de solapamientos parciales del ADR-0010 (el perdedor se recorta, no se descarta)
