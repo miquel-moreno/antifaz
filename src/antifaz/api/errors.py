@@ -43,6 +43,15 @@ class InvalidRequestError(AppError):
         super().__init__("the body must be a JSON object in UTF-8")
 
 
+class InvalidHeaderError(AppError):
+    code = "invalid_header"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "anthropic-version and anthropic-beta only accept letters, digits, . _ - ,"
+        )
+
+
 class PayloadTooLargeError(AppError):
     status_code = 413
     code = "payload_too_large"

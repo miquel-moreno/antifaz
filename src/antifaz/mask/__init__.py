@@ -75,10 +75,14 @@ def mask(
     policy: Policy = DEFAULT_POLICY,
     *,
     detector: Detector = scan,
+    reserved: frozenset[str] = frozenset(),
 ) -> MaskResult:
-    """Replace the personal data the policy hides by placeholders, numbered across all texts."""
+    """Replace the personal data the policy hides by placeholders, numbered across all texts.
+
+    `reserved` tokens (e.g. "ES_DNI_1") are skipped by the numbering and never restored.
+    """
     items = (texts,) if isinstance(texts, str) else tuple(texts)
-    vault = Vault()
+    vault = Vault(reserved)
     hidden: dict[EntityType, None] = {}
     masked = []
     for text in items:

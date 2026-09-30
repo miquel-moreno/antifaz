@@ -14,26 +14,18 @@ from antifaz.api.app import create_app
 from antifaz.config import Settings
 from antifaz.detect.scan import scan
 from tests.conftest import SENTINEL_DNI
+from tests.integration.fakes import (
+    GATEWAY_KEY,
+    PROVIDER_KEY,
+    FakeUpstream,
+    Handler,
+    compact,
+    misses_repeats,
+    raiser,
+)
 
-# Obviously fake keys, only for tests.
-GATEWAY_KEY = "test-gateway-key-not-real"
-PROVIDER_KEY = "test-provider-key-not-real"
 UPSTREAM = "https://upstream.invalid/v1"
 AUTH = {"Authorization": f"Bearer {GATEWAY_KEY}"}
-
-Handler = Callable[[httpx.Request], httpx.Response]
-
-
-class FakeUpstream:
-    """Records every request and answers with the given handler."""
-
-    def __init__(self, handler: Handler | None = None) -> None:
-        self.requests: list[httpx.Request] = []
-        self.handler = handler or echo
-
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        return self.handler(request)
 
 
 def echo(request: httpx.Request) -> httpx.Response:
@@ -80,7 +72,7 @@ def _client(
 
 @pytest.fixture
 def upstream() -> FakeUpstream:
-    return FakeUpstream()
+    return FakeUpstream(echo)
 
 
 @pytest.fixture
@@ -259,14 +251,8 @@ def test_detector_failure_blocks(upstream: FakeUpstream) -> None:
         assert upstream.requests == []
 
 
-def _misses_repeats(text: str) -> Sequence[Span]:
-    """A detector that only reports the first appearance: the guard must catch the rest."""
-    spans = scan(text)
-    return spans[:1]
-
-
 def test_guard_blocks_what_the_masker_missed(upstream: FakeUpstream) -> None:
-    for client in _client(upstream, detector=_misses_repeats):
+    for client in _client(upstream, detector=misses_repeats):
         response = client.post(
             "/v1/chat/completions",
             json=_chat(f"{SENTINEL_DNI} y {SENTINEL_DNI}"),
@@ -339,13 +325,6 @@ def test_upstream_error_is_passed_through(upstream: FakeUpstream) -> None:
         assert "x-provider-secret-header" not in response.headers
 
 
-def _raiser(error: type[httpx.HTTPError]) -> Handler:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise error(f"boom {SENTINEL_DNI}", request=request)  # type: ignore[call-arg]
-
-    return handler
-
-
 @pytest.mark.parametrize(
     ("error", "status"),
     [(httpx.ReadTimeout, 504), (httpx.ConnectTimeout, 504), (httpx.ConnectError, 502)],
@@ -353,7 +332,7 @@ def _raiser(error: type[httpx.HTTPError]) -> Handler:
 def test_transport_errors_have_fixed_messages(
     upstream: FakeUpstream, error: type[httpx.HTTPError], status: int
 ) -> None:
-    upstream.handler = _raiser(error)
+    upstream.handler = raiser(error)
     for client in _client(upstream):
         response = client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH)
 
@@ -396,8 +375,8 @@ def test_sentinel_never_in_logs_or_error_bodies(
         (echo, scan),
         (answer_with_sentinel, scan),
         (error_echoing_request, scan),
-        (_raiser(httpx.ReadTimeout), scan),
-        (echo, _misses_repeats),  # guard block
+        (raiser(httpx.ReadTimeout), scan),
+        (echo, misses_repeats),  # guard block
     ]
     for handler, detector in scenarios:
         upstream.handler = handler
@@ -428,10 +407,6 @@ def test_httpx_loggers_are_quiet_by_default() -> None:
 # --- Invariant 2 end to end: guard OFF, the upstream still gets no hidden value -----------
 
 VALUES = ["12345678Z", "X1234567L", "ana@example.com", "ES9121000418450200051332"]
-
-
-def _compact(text: str) -> str:
-    return "".join(c for c in text.casefold() if c.isalnum())
 
 
 def test_invariant_2_without_guard(upstream: FakeUpstream, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -469,7 +444,7 @@ def test_invariant_2_without_guard(upstream: FakeUpstream, monkeypatch: pytest.M
     for value in VALUES:
         assert value not in raw
         assert value not in decoded
-        assert _compact(value) not in _compact(decoded)
+        assert compact(value) not in compact(decoded)
 
 
 def test_placeholders_from_another_request_are_not_restored(
@@ -552,3 +527,23 @@ def test_own_http_client_is_closed() -> None:
         client = app.state.http_client
 
     assert client.is_closed
+
+
+def test_upstream_2xx_status_is_kept(upstream: FakeUpstream) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        201, json={"choices": [{"message": {"content": "x"}}]}
+    )
+    for client in _client(upstream):
+        assert (
+            client.post("/v1/chat/completions", json=_chat("hola"), headers=AUTH).status_code == 201
+        )
+
+
+def test_lone_surrogate_is_a_400(proxy: TestClient, upstream: FakeUpstream) -> None:
+    raw = b'{"model": "m", "messages": [{"role": "user", "content": "a\ud800b"}]}'
+    response = proxy.post(
+        "/v1/chat/completions", content=raw, headers={**AUTH, "Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 400
+    assert upstream.requests == []

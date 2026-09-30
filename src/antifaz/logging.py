@@ -1,7 +1,7 @@
 """Structured JSON logging with a per-request id.
 
 Only a fixed set of fields is written. Request and response bodies, headers and keys are never
-logged. The httpx and httpcore loggers stay at WARNING whatever LOG_LEVEL says (ADR-0013).
+logged. The httpx and httpcore loggers stay at WARNING whatever ANTIFAZ_LOG_LEVEL says (ADR-0013).
 """
 
 import json

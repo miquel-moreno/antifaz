@@ -137,7 +137,7 @@ Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en
 
 ## Proxy compatible con OpenAI Chat (issue 5, PR 5a)
 
-Configura `.env` a partir de `.env.example`: `ANTIFAZ_API_KEY` (la clave que usan tus clientes), `OPENAI_API_KEY` y, si quieres otro servidor compatible, `OPENAI_BASE_URL`. Sin las dos claves, el proxy responde 503.
+Configura `.env` a partir de `.env.example`: `ANTIFAZ_API_KEY` (la clave que usan tus clientes), `ANTIFAZ_OPENAI_API_KEY` y, si quieres otro servidor compatible, `ANTIFAZ_OPENAI_BASE_URL`. Todas las variables de Antifaz empiezan por `ANTIFAZ_`: así no se mezclan con las que usan Claude Code o los SDK en la misma terminal (si no, Antifaz podría llamarse a sí mismo y enviar su propia clave). Sin las dos claves, el proxy responde 503.
 
 ```bash
 curl http://localhost:8000/v1/chat/completions   -H "Authorization: Bearer $ANTIFAZ_API_KEY" -H "Content-Type: application/json"   -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
@@ -145,14 +145,14 @@ curl http://localhost:8000/v1/chat/completions   -H "Authorization: Bearer $ANTI
 
 Con el SDK de OpenAI basta con `base_url="http://localhost:8000/v1"` y `api_key=<ANTIFAZ_API_KEY>`.
 
-Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), propuesta):
+Qué hace con cada petición ([ADR-0013](adr/0013-proxy.md), aceptada):
 
 1. Comprueba la clave de Antifaz con `hmac.compare_digest`. Esa clave **nunca** llega al proveedor; tampoco ninguna otra cabecera del cliente.
-2. Lee el cuerpo con un tope (`MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
+2. Lee el cuerpo con un tope (`ANTIFAZ_MAX_BODY_BYTES`, 4 MiB por defecto): más grande → 413; no es un objeto JSON en UTF-8 → 400.
 3. Reúne **todas** las cadenas del cuerpo (mensajes, partes de texto, `name`, resultados de herramientas y cualquier campo nuevo) y llama a `mask()` una sola vez. Los `arguments` de las llamadas a herramientas se parsean como JSON y se enmascaran sus valores. Las claves de los objetos no se cambian: si alguna contiene un dato, la petición se bloquea.
 4. Solo pasan partes de tipo `text`, `refusal` o `function`: imágenes, documentos, audio, ficheros, `file_id`, claves como `source` o `data`, o un texto con una URL `data:...;base64,` → 400 `antifaz_blocked`. Los números pasan por el detector: si uno es un dato (un teléfono escrito como número), se bloquea. `NaN`/`Infinity` o un `stream` que no sea booleano → 400.
 5. Serializa una vez y la guardia de salida revisa **esos mismos bytes** justo antes de enviarlos.
-6. Envía a `OPENAI_BASE_URL` con `OPENAI_API_KEY`. La URL nunca sale del cliente.
+6. Envía a `ANTIFAZ_OPENAI_BASE_URL` con `ANTIFAZ_OPENAI_API_KEY`. La URL nunca sale del cliente.
 7. Restaura `content`, `refusal` y los `arguments` de las herramientas (parseando el JSON, así siguen siendo JSON válido aunque el dato tenga comillas). El resto de campos pasa sin tocar.
 
 Errores:
@@ -162,12 +162,34 @@ Errores:
 | Sin clave o clave incorrecta | 401 `unauthorized` |
 | Dato en un sitio que no se puede enmascarar, adjunto, detector roto o guardia | 400 `antifaz_blocked`, mensaje fijo |
 | `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
-| El proveedor tarda más de `UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
+| El proveedor tarda más de `ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
 | No se puede conectar | 502 `upstream_unavailable` |
 | El proveedor responde con una redirección (3xx) | 502 `upstream_redirect` (no se sigue) |
 | El proveedor responde con error (4xx/5xx) | Su cuerpo **tal cual**: solo vio texto enmascarado, así que puede mostrar marcadores `[[TIPO_N]]` |
 
 Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en `WARNING`. Un test (invariante 8) pasa un DNI centinela por respuestas, errores del proveedor, tiempos agotados y bloqueos de la guardia, con todos los loggers en `DEBUG`, y comprueba que no aparece ni en los logs ni en los cuerpos de error. Otro (invariante 2) quita la guardia **solo en el test** y comprueba que el proveedor falso no recibe ningún valor oculto, tampoco en argumentos ni resultados de herramientas.
+
+## Proxy de Anthropic Messages (issue 5, PR 5b)
+
+Configura `ANTIFAZ_API_KEY` y `ANTIFAZ_ANTHROPIC_API_KEY` en `.env` (y `ANTIFAZ_ANTHROPIC_BASE_URL` solo si usas otro servidor; va **sin** `/v1`). Sin las dos claves, responde 503.
+
+```bash
+curl http://localhost:8000/v1/messages   -H "x-api-key: $ANTIFAZ_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json"   -d '{"model": "claude-sonnet-4-5", "max_tokens": 200, "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
+```
+
+Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y `ANTHROPIC_API_KEY=<ANTIFAZ_API_KEY>` (o `ANTHROPIC_AUTH_TOKEN`, que llega como `Bearer`). Aviso: Claude Code usa streaming, que llega en la parte 5c; hasta entonces sus peticiones reciben 400 `streaming_not_supported`. Antifaz no lee esas variables (solo las que empiezan por `ANTIFAZ_`), así que se puede arrancar en la misma terminal.
+
+Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los mismos que en OpenAI (clave, tope de tamaño, un solo `mask()`, una sola serialización revisada por la guardia, errores); el código de esos pasos es compartido (`api/proxy.py` y `providers/json_walk.py`). Lo propio de Anthropic:
+
+1. **Clave**: en `x-api-key` (lo que envían Claude Code y el SDK) o en `Authorization: Bearer`. Se comparan las dos con `hmac.compare_digest`. Al proveedor solo le llega `x-api-key` con `ANTIFAZ_ANTHROPIC_API_KEY`.
+2. **Cabeceras**: solo se reenvían `anthropic-version` y `anthropic-beta`, y solo si su valor son letras, dígitos, `.`, `_`, `-` y comas (hasta 200 caracteres); si no → 400 `invalid_header`. Si el cliente no manda `anthropic-version`, Antifaz no se la inventa (el proveedor devolverá su error).
+3. **Bloques permitidos** en `messages[].content`: `text`, `tool_use`, `tool_result`, `thinking` y `redacted_thinking`. En `system` y dentro de `tool_result.content`, solo `text`. Cualquier otro (`image`, `document`, `search_result`, `container_upload`, `server_tool_use`, resultados de herramientas del servidor, `citations` o uno nuevo) → 400 `antifaz_blocked`. `cache_control` no pasa por la lista. La `input` de `tool_use` puede tener cualquier `type` (son datos para la herramienta), pero las claves de adjunto (`source`, `data`, `file_id`…) y las URL `data:...;base64,` se bloquean también ahí. Ajustes con claves fijas: `thinking` solo `type` y `budget_tokens`; `tool_choice` solo `type`, `name` y `disable_parallel_tool_use`; otra clave → bloqueo. En `tools` no hay lista de tipos (hay herramientas del servidor como `web_search_20250305`), pero fuera de `input_schema` las claves de adjunto bloquean; dentro de `input_schema` no, porque una propiedad puede llamarse `data` o `file`, y solo se bloquea un objeto con `"type": "base64"`, que no es un tipo de JSON Schema (más las URL `data:` que se bloquean en todo el cuerpo). Todos sus textos se enmascaran. `metadata.user_id` y cualquier campo nuevo se enmascaran como texto.
+4. **Razonamiento (invariante 9)**: los bloques `thinking` y `redacted_thinking` de los mensajes se copian **sin tocar**, con su `signature` o `data`: no se enmascaran ni se escapan (sus `[[` siguen igual). Vienen del modelo, que solo vio texto enmascarado, así que llevan marcadores, no datos. Aun así se pasan por el detector: si uno lleva un dato que hay que ocultar (alguien lo editó), la petición se bloquea, porque no se puede enmascarar sin romper la firma. La guardia sigue revisando todos los bytes. Solo se aceptan sus claves exactas (`thinking`: `type`, `thinking`, `signature`; `redacted_thinking`: `type`, `data`), todas de texto; otra clave → bloqueo. `signature` y `data` son opacos (firma y razonamiento cifrado) y no se pueden revisar: riesgo aceptado en el ADR-0013. Los marcadores que ya lleva el razonamiento (de un turno anterior) se **reservan**: un dato nuevo de esta petición no recibe ese número (si `[[ES_DNI_1]]` está en el razonamiento, el DNI nuevo es `[[ES_DNI_2]]`), y como los reservados no están en la tabla, la respuesta los deja tal cual en vez de poner un valor equivocado. Un bloque con forma de `thinking` dentro de la `input` de una herramienta no cuenta: se enmascara como cualquier dato.
+5. **Respuesta**: se restauran los bloques `text` y los textos de `tool_use.input` (los valores, no las claves). `thinking`, `redacted_thinking`, las firmas y los bloques desconocidos pasan sin tocar.
+6. **`count_tokens`**: se enmascara igual que `/v1/messages` y la respuesta del proveedor (solo números) se devuelve tal cual. `stream` se comprueba igual: no booleano → 400; `true` → 400 `streaming_not_supported`, por coherencia (`count_tokens` no tiene streaming).
+7. `stream: true` → 400 `streaming_not_supported` (parte 5c). El código de estado 2xx del proveedor se devuelve igual (en las dos rutas). Un texto con un sustituto suelto de UTF-16 (`"\ud800"`), que no se puede enviar en UTF-8, → 400 `invalid_request`.
+
+"Sin tocar" quiere decir que las cadenas son idénticas: el proxy trabaja con el JSON parseado, así que el formato (espacios, escapes `é`) puede cambiar al volver a serializar, pero no el contenido ni la firma. Los tests comparan el bloque serializado dentro de los bytes enviados y de la respuesta.
 
 ## Decisiones técnicas del issue 1
 
@@ -187,7 +209,8 @@ Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en
 
 ## Limitaciones
 
-- El proxy solo habla OpenAI Chat y sin streaming; Anthropic Messages y el streaming llegan en el resto del issue 5.
+- El proxy habla OpenAI Chat y Anthropic Messages, sin streaming (llega en la parte 5c). Claude Code necesita streaming.
+- En Anthropic se bloquean las `citations`, los documentos y las herramientas del servidor (búsqueda web…): fallar cerrado es a propósito.
 - Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.
 - El detector no decodifica base64, hexadecimal ni otras codificaciones dentro del texto (solo bloquea las URL `data:...;base64,`).
 - Los errores del proveedor se devuelven con los marcadores `[[TIPO_N]]` sin restaurar.

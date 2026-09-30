@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI
 
 from antifaz import __version__
-from antifaz.api import health, openai
+from antifaz.api import anthropic, health, openai
 from antifaz.api.errors import register_error_handlers
 from antifaz.api.middleware import request_id_middleware
 from antifaz.config import Settings, get_settings
@@ -47,6 +47,7 @@ def create_app(
     register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(openai.router)
+    app.include_router(anthropic.router)
     return app
 
 

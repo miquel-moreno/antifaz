@@ -158,3 +158,10 @@ def test_mask_result_repr_does_not_contain_values() -> None:
     assert isinstance(result, MaskResult)
     for value in (SENTINEL_DNI, EMAIL, IBAN):
         assert value not in repr(result)
+
+
+def test_reserved_tokens_are_skipped_and_not_restored() -> None:
+    result = mask("12345678Z y 87654321X", reserved=frozenset({"ES_DNI_1", "ES_DNI_3"}))
+
+    assert result.texts == ("[[ES_DNI_2]] y [[ES_DNI_4]]",)
+    assert restore("[[ES_DNI_1]] [[ES_DNI_2]]", result.vault) == "[[ES_DNI_1]] 12345678Z"
