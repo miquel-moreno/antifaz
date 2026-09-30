@@ -78,10 +78,9 @@ def test_an_iban_is_reported_once_and_not_also_as_a_ccc() -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "ref A12345678ZB",  # DNI inside a longer alphanumeric run
         "ref 912345678Z",  # preceded by another digit
-        "ref 12345678ZZ",  # followed by another letter
-        "ref X2482300WA",
+        "ref 12345678Z9",  # followed by another digit
+        "ref 12345678 casas",  # a separator, then a word: its first letter is not the control
         "DNI 12345678A",  # wrong letter
         "NIE X2482300A",  # wrong letter
         "cuenta 0012 0345 03 0000067891",  # wrong CCC control
@@ -93,6 +92,23 @@ def test_an_iban_is_reported_once_and_not_also_as_a_ccc() -> None:
 )
 def test_embedded_or_invalid_identifiers_are_not_reported(text: str) -> None:
     assert scan(text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "value", "entity_type"),
+    [
+        # ADR-0014: identifiers with a control letter or mod 97 may touch letters.
+        ("ref A12345678ZB", "12345678Z", T.ES_DNI),
+        ("ref 12345678ZZ", "12345678Z", T.ES_DNI),
+        ("ref X2482300WA", "X2482300W", T.ES_NIE),
+        ("DNI12345678Z", "12345678Z", T.ES_DNI),
+        ("IBANES9121000418450200051332", "ES9121000418450200051332", T.IBAN),
+    ],
+)
+def test_checked_identifiers_glued_to_letters_are_reported(
+    text: str, value: str, entity_type: T
+) -> None:
+    assert [(text[s.start : s.end], s.type) for s in scan(text)] == [(value, entity_type)]
 
 
 def test_scanning_the_sentinel_dni_writes_nothing_to_the_logs(
@@ -217,5 +233,7 @@ def test_an_accented_word_before_a_value_does_not_start_another_value(
     assert [(text[s.start : s.end], s.type) for s in scan(text)] == [(value, entity_type)]
 
 
-def test_a_value_glued_to_an_accented_letter_is_not_reported() -> None:
-    assert scan("cafés12345678Z") == []
+def test_a_value_glued_to_an_accented_letter_is_reported_if_it_has_a_control_letter() -> None:
+    # ADR-0014: a DNI may touch letters, accented or not (the control letter decides).
+    text = "cafés12345678Z"
+    assert [(text[s.start : s.end], s.type) for s in scan(text)] == [("12345678Z", T.ES_DNI)]

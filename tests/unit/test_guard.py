@@ -97,7 +97,8 @@ def test_other_glued_values(entity: EntityType, value: str, payload: str) -> Non
 
 
 def test_mask_then_check_catches_a_glued_copy() -> None:
-    result = mask("Mi DNI es 12345678Z y DNI12345678Z")
+    # The detector does not take a DNI glued to digits; the guard still sees the copy.
+    result = mask("Mi DNI es 12345678Z y ref 012345678Z")
     with pytest.raises(EgressBlocked):
         check(json.dumps({"content": result.text}), result.vault)
 

@@ -10,8 +10,6 @@ from antifaz import mask
 from tests.integration.fakes import FakeUpstream
 from tests.redteam.conftest import DNI, IBAN, NIE, OPENAI_AUTH, PHONE, assert_not_sent, openai_body
 
-KNOWN_UNICODE = "known limitation (TECNICO.md): Unicode digits and odd separators not normalised"
-
 # (text sent by the user, value that must not leave)
 RESISTED = {
     "dni_minusculas": ("mi dni es 12345678z", DNI),
@@ -33,7 +31,7 @@ RESISTED = {
     "tel_parentesis": ("tel (+34) 612345678", PHONE),
 }
 
-# Not documented as known limits: real leaks (these tests fail on purpose).
+# Leaks found in round 1 and fixed by the detector normalisation (ADR-0014).
 LEAKS = {
     "dni_con_espacios": ("DNI 12 345 678 Z", DNI),
     "dni_partido_en_dos_lineas": ("DNI 1234\n5678Z", DNI),
@@ -48,7 +46,8 @@ LEAKS = {
     "iban_e_cirilica": ("ЕS9121000418450200051332", "9121000418450200051332"),
 }
 
-DOCUMENTED = {
+# Invisible characters, odd spaces and full-width digits: normalised since ADR-0014.
+UNICODE = {
     "dni_espacio_ancho_cero": ("DNI 1234​5678Z", DNI),
     "dni_espacio_duro": ("DNI 12 345 678 Z", DNI),
     "dni_tabuladores": ("DNI 12\t345\t678\tZ", DNI),
@@ -78,9 +77,8 @@ def test_formato_raro_fuga(
     _attack(openai_proxy, upstream_openai, text, value)
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_UNICODE)
-@pytest.mark.parametrize(("text", "value"), DOCUMENTED.values(), ids=DOCUMENTED.keys())
-def test_formato_unicode_limite_conocido(
+@pytest.mark.parametrize(("text", "value"), UNICODE.values(), ids=UNICODE.keys())
+def test_formato_unicode_resistido(
     openai_proxy: TestClient, upstream_openai: FakeUpstream, text: str, value: str
 ) -> None:
     """El atacante mete espacios invisibles, espacios duros o cifras de ancho completo."""

@@ -1,10 +1,10 @@
 """Helpers shared by the validators: normalise formatting and check ASCII digits."""
 
-_SEPARATORS = str.maketrans("", "", " .-/")
+_SEPARATORS = str.maketrans("", "", " .-/\r\n")
 
 
 def compact(value: str) -> str:
-    """Remove spaces, dots, hyphens and slashes, and uppercase."""
+    """Remove spaces, dots, hyphens, slashes and line breaks, and uppercase."""
     return value.translate(_SEPARATORS).upper()
 
 

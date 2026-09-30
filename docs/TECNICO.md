@@ -49,7 +49,7 @@ El docstring de cada paquete dice qué hace y qué tiene prohibido. Las decision
 
 **Invariante 10:** en `tests/property/`, cada validador español se compara con python-stdnum en 5.000 casos generados (una parte con el control correcto calculado por stdnum, para probar también el lado "válido"). El NSS, que stdnum no tiene, se prueba con vectores documentados y con la propiedad "cambiar cualquier cifra lo invalida".
 
-**En el texto:** cada patrón solo propone candidatos; un span se devuelve si su validador lo acepta. Los patrones siguen el ADR-0008 (repeticiones acotadas, cuantificadores posesivos, límites que impiden encontrar un DNI dentro de una palabra más larga) y hay pruebas con textos maliciosos de 50.000 caracteres. El IBAN se corta a la longitud de su país, sacada del registro IBAN, y se busca avanzando carácter a carácter tras un candidato falso, para que ningún candidato tape a otro IBAN. Se aceptan mayúsculas y minúsculas y los separadores habituales (espacio, punto, guion; barra en el NSS). La resolución de solapamientos es O(n log n): un texto con 20.000 DNI se resuelve en menos de 2 s.
+**En el texto:** cada patrón solo propone candidatos; un span se devuelve si su validador lo acepta. Los patrones siguen el ADR-0008 (repeticiones acotadas, cuantificadores posesivos, límites que impiden encontrar un DNI dentro de una tira más larga de cifras; ver ADR-0014 para los tipos que pueden tocar letras) y hay pruebas con textos maliciosos de 50.000 caracteres. El IBAN se corta a la longitud de su país, sacada del registro IBAN, y se busca avanzando carácter a carácter tras un candidato falso, para que ningún candidato tape a otro IBAN. Se aceptan mayúsculas y minúsculas y los separadores habituales (espacio, punto, guion; barra en el NSS). La resolución de solapamientos es O(n log n): un texto con 20.000 DNI se resuelve en menos de 2 s.
 
 ### Patrones con contexto (issue 2, PR 2b)
 
@@ -71,8 +71,26 @@ Los identificadores de la UE que son solo cifras necesitan contexto porque, sin 
 
 **Solapamientos (ADR-0010):** si una detección contiene por completo a otra, gana la que contiene; así un email con un DNI dentro se enmascara entero, no solo el DNI.
 
+### Normalización previa y formatos raros (ADR-0014, red team ronda 1)
+
+Antes de buscar, `detect/normalize.py` crea una vista normalizada del texto con un mapa de posiciones; el texto original no se toca:
+
+- Se quitan los caracteres de formato invisibles (categoría Unicode Cf: espacio de ancho cero, ZWNJ/ZWJ, guion blando, BOM, word joiner, marcas de dirección…).
+- Los caracteres cuyo NFKC es **una** letra o cifra ASCII pasan a ese carácter (cifras y letras de ancho completo, letras matemáticas, superíndices). Los ordinales `º` y `ª` se quedan como están (los usan las direcciones).
+- Tabulador, espacio duro (NBSP) y los demás espacios Unicode pasan a un espacio normal. Los saltos de línea se conservan.
+- Homoglifos: las letras cirílicas `А В Е К М Н О Р С Т Х У З` y griegas `Α Β Ε Ζ Η Ι Κ Μ Ν Ο Ρ Τ Υ Χ` (y sus minúsculas) pasan a la latina que imitan (tabla `HOMOGLYPHS`; `З` y `Ζ` → `Z`).
+
+Cada carácter se sustituye por uno o se elimina, así que las posiciones se devuelven al original con un mapa monótono (bisección sobre los caracteres eliminados): el marcador cubre los caracteres originales, incluidos los invisibles que haya **dentro** del valor, y `restore()` devuelve el texto exacto. Un texto ASCII sin tabuladores no se copia.
+
+**Separadores:** DNI, NIE y NIF K/L/M aceptan un solo espacio, punto o guion entre grupos (`12 345 678 Z`, `12.345.678-Z`, `X 1 234 567 L`) y **un** salto de línea (`\n` o `\r\n`) en cualquier punto de las cifras o antes de la letra. El IBAN acepta un salto de línea entre grupos. Los recuentos siguen siendo exactos (8 o 7 cifras) y la letra o el mod 97 siguen siendo obligatorios; dos saltos de línea o dos espacios seguidos no valen.
+
+**Límites relajados para los tipos con control fuerte:** DNI, NIE, NIF K/L/M e IBAN pueden ir pegados a letras (`DNI12345678Z`, `NIEX1234567L`, `ref abc12345678Zxyz`, `IBANES91…`), pero nunca a cifras: un DNI dentro de una tira más larga de cifras sigue sin ser un DNI. Si hay separador antes de la letra de control, la letra no puede ir seguida de otra letra (en "12345678 casas" la "c" no es la letra de control). CIF, NSS, CCC, codice fiscale y NIF-IVA mantienen los límites estrictos (controles más débiles; "DNI és 16257107-V" sigue sin ser un CIF).
+
+**Cuerpos muy anidados:** un JSON con más de 100 niveles de objetos o listas se bloquea (`NestingTooDeep`, 400 `antifaz_blocked`) antes de cualquier recorrido recursivo; la comprobación de adjuntos es iterativa. Un `arguments` con JSON demasiado profundo se trata como texto y se enmascara como tal.
+
 **Limitaciones conocidas:**
-- Cifras Unicode (de ancho completo, árabes…) y separadores raros (tabulador, espacio duro NBSP, espacio de ancho cero) no se detectan todavía: haría falta normalizar el texto conservando las posiciones (issue aparte).
+- Cifras de otros sistemas de numeración (árabes, devanagari…) no se convierten: su NFKC no es ASCII. Solo se cubren los homoglifos de la tabla; otros alfabetos parecidos (armenio, cherokee…) no.
+- Un valor partido entre dos cadenas JSON distintas, o codificado (base64, hexadecimal, URL, HTML, al revés, rot13), no se detecta (tests `xfail` del red team).
 - Las direcciones se buscan con un patrón al estilo español (tipo de vía y nombre con mayúscula); las que no siguen ese formato quedan para el NER (issue 6). La ciudad no se incluye.
 - IPv6 y pasaportes de otros países, fuera de alcance por ahora.
 - El contexto solo se busca **antes** del valor y en 40 caracteres: no sirve una cabecera de CSV ni una palabra clave detrás ("AAB123456 (pasaporte)"). Propuesto como issue aparte.

@@ -13,6 +13,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from antifaz import DetectorFailed, mask, restore
+from antifaz.detect.scan import scan
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
 
 # Synthetic values with valid check digits: never real data.
@@ -137,3 +138,19 @@ malformed_spans = st.one_of(
 def test_malformed_spans_always_block(spans: list[Span]) -> None:
     with pytest.raises(DetectorFailed):
         mask("abcdef", detector=lambda _: spans)
+
+
+# ADR-0014: invisible characters, odd spaces and look-alike letters inside and around values.
+_ODD = ["\u200b", "\u00ad", "\ufeff", "\u2060", "\u00a0", "\t", "\u0417", "\u0425", "\uff11", "\n"]
+odd_texts = st.lists(
+    st.one_of(st.sampled_from(VALUES), st.sampled_from(_ODD), adversarial), max_size=12
+).map("".join)
+
+
+@settings(max_examples=500, deadline=None)
+@given(text=odd_texts)
+def test_restore_of_mask_is_identity_with_invisible_and_look_alike_characters(text: str) -> None:
+    result = mask(text)
+    assert restore(result.text, result.vault) == text
+    for span in scan(text):
+        assert 0 <= span.start < span.end <= len(text)
