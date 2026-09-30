@@ -2,6 +2,7 @@ import pytest
 from pydantic import SecretStr
 
 from antifaz.api.app import create_app
+from antifaz.api.gate import GateMiddleware
 from antifaz.config import MIN_KEY_LENGTH, Settings, UnsafeConfigError, check_safe_to_start
 
 
@@ -71,6 +72,10 @@ def test_a_safe_configuration_starts() -> None:
         ("short-test-key-not-real", "at least 32"),
         ("x" * (MIN_KEY_LENGTH - 1), "at least 32"),
         ("change-me-to-a-long-random-value-0123456789", "example value"),
+        ("change_me_to_a_long_random_value_0123456789", "example value"),
+        ("ChangeMe-to-a-long-random-value-0123456789ab", "example value"),
+        ("ab" * 20, "different characters"),
+        ("0123456" * 6, "different characters"),
         ("CHANGE-ME-to-a-long-random-value-0123456789", "example value"),
         ("test key with spaces not real 0123456789abc", "printable ASCII"),
         ("test-key-not-real-ñ-0123456789abcdefghijklm", "printable ASCII"),
@@ -92,7 +97,9 @@ def test_unsafe_gateway_key_refuses_to_start(key: str | None, reason: str) -> No
 
 
 def test_a_key_of_exactly_the_minimum_length_starts() -> None:
-    check_safe_to_start(_safe(antifaz_api_key=SecretStr("k" * MIN_KEY_LENGTH)))
+    fake = "test-minimum-key-not-real-012345"
+    assert len(fake) == MIN_KEY_LENGTH
+    check_safe_to_start(_safe(antifaz_api_key=SecretStr(fake)))
 
 
 @pytest.mark.parametrize(
@@ -178,3 +185,99 @@ def test_an_ipv6_host_first_is_not_read_as_json(monkeypatch: pytest.MonkeyPatch)
 
     assert settings.allowed_hosts == ["[::1]", "localhost"]
     assert settings.allowed_origins == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "change-me",
+        "Change_Me-provider-key",
+        "CHANGEME-provider-key",
+        "test provider key not real",
+        "test-provider-key-\u00f1-not-real",
+        "test-provider-key\n-not-real",
+    ],
+)
+@pytest.mark.parametrize(
+    ("field", "variable"),
+    [
+        ("openai_api_key", "ANTIFAZ_OPENAI_API_KEY"),
+        ("anthropic_api_key", "ANTIFAZ_ANTHROPIC_API_KEY"),
+    ],
+)
+def test_unsafe_provider_key_refuses_to_start(value: str, field: str, variable: str) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(**{field: SecretStr(value)}))
+
+    assert variable in str(info.value)
+    if value:
+        assert value not in str(info.value)
+
+
+@pytest.mark.parametrize("hosts", [["*.com"], ["*.example"], ["a*.example.com"], ["x.*.com"]])
+def test_broad_host_wildcards_refuse_to_start(hosts: list[str]) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(allowed_hosts=hosts))
+
+    assert "ANTIFAZ_ALLOWED_HOSTS" in str(info.value)
+
+
+def test_subdomain_wildcard_with_two_labels_starts() -> None:
+    check_safe_to_start(_safe(allowed_hosts=["*.example.com", "antifaz"]))
+
+
+def test_allowed_hosts_are_lower_cased() -> None:
+    assert _safe(allowed_hosts=["Antifaz.Example.COM"]).allowed_hosts == ["antifaz.example.com"]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://intranet.example/",
+        "https://intranet.example/app",
+        "https://intranet.example?x=1",
+        "intranet.example",
+        "ftp://intranet.example",
+        "https://",
+    ],
+)
+def test_origins_with_path_or_without_scheme_refuse_to_start(origin: str) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(allowed_origins=[origin]))
+
+    assert "ANTIFAZ_ALLOWED_ORIGINS" in str(info.value)
+    assert "scheme://host" in str(info.value)
+
+
+def test_exact_origins_start() -> None:
+    check_safe_to_start(
+        _safe(allowed_origins=["https://intranet.example", "http://localhost:3000"])
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('[ "a.example" , "b.example" ]', ["a.example", "b.example"]),
+        ("[]", []),
+        ("[ ]", []),
+        ("[::1]", ["[::1]"]),
+    ],
+)
+def test_json_lists_with_spaces_are_read(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: list[str]
+) -> None:
+    monkeypatch.setenv("ANTIFAZ_ALLOWED_HOSTS", raw)
+
+    assert Settings(_env_file=None).allowed_hosts == expected  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("key", ["", "short-key", "a" * 31])
+def test_gate_refuses_to_be_built_with_a_weak_key(key: str) -> None:
+    # The middleware fails closed on its own, even if someone skips check_safe_to_start().
+    async def app(scope: object, receive: object, send: object) -> None:  # pragma: no cover
+        return None
+
+    with pytest.raises(ValueError, match="key"):
+        GateMiddleware(app, api_key=key, allowed_origins=[])  # type: ignore[arg-type]

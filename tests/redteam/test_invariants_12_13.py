@@ -165,6 +165,18 @@ def _echo_headers(status: int) -> Callable[[httpx.Request], httpx.Response]:
     return handler
 
 
+def _escaped_key(status: int) -> Callable[[httpx.Request], httpx.Response]:
+    """A provider that repeats its key JSON-escaped: every character as a \\uXXXX escape."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = request.headers.get("x-api-key") or request.headers["authorization"][7:]
+        escaped = "".join(f"\\u{ord(c):04x}" for c in key)
+        body = '{"error": {"message": "bad key\\/' + escaped + '"}}'
+        return httpx.Response(status, content=body.encode(), headers={"content-type": "x"})
+
+    return handler
+
+
 def _redirect(request: httpx.Request) -> httpx.Response:
     return httpx.Response(302, headers={"Location": f"https://x.invalid/?k={PROVIDER_CANARY}"})
 
@@ -272,6 +284,20 @@ SCENARIOS: list[Scenario] = [
         {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
     ),
     (
+        "provider error with the key escaped",
+        _escaped_key(400),
+        "POST",
+        "",
+        {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
+    ),
+    (
+        "provider success with the key escaped",
+        _escaped_key(200),
+        "POST",
+        "",
+        {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
+    ),
+    (
         "provider success echoing its headers",
         _echo_headers(200),
         "POST",
@@ -324,6 +350,8 @@ def test_keys_never_leave_the_gateway(
     for text in seen:
         assert GATEWAY_CANARY not in text, name
         assert PROVIDER_CANARY not in text, name
+        unescaped = text.encode("ascii", "replace").decode("unicode_escape", "replace")
+        assert PROVIDER_CANARY not in unescaped, name
     if name.startswith("provider"):
         assert response.status_code == 502, name
         assert response.json()["error"]["code"] == "bad_upstream_response"

@@ -10,12 +10,11 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from antifaz import __version__
 from antifaz.api import anthropic, health, openai
 from antifaz.api.errors import register_error_handlers
-from antifaz.api.gate import GateMiddleware
+from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.middleware import request_id_middleware
 from antifaz.config import Settings, check_safe_to_start, get_settings
 from antifaz.detect.scan import scan
@@ -78,7 +77,7 @@ def create_app(
     # The last one added runs first: request id -> trusted host -> gate (key, Origin, JSON).
     app.add_middleware(GateMiddleware, api_key=api_key, allowed_origins=settings.allowed_origins)
     app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts, www_redirect=False
+        CaseInsensitiveTrustedHost, allowed_hosts=settings.allowed_hosts, www_redirect=False
     )
     app.middleware("http")(request_id_middleware)
     return app

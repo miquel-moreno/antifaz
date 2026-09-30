@@ -16,10 +16,12 @@ def test_response_includes_generated_request_id(client: TestClient) -> None:
     assert len(response.headers["X-Request-ID"]) == 32
 
 
-def test_incoming_request_id_is_propagated(client: TestClient) -> None:
+def test_incoming_request_id_is_not_trusted(client: TestClient) -> None:
+    # The gateway always makes its own id: the client's value never reaches logs or headers.
     response = client.get("/healthz", headers={"X-Request-ID": "abc-123"})
 
-    assert response.headers["X-Request-ID"] == "abc-123"
+    assert response.headers["X-Request-ID"] != "abc-123"
+    assert len(response.headers["X-Request-ID"]) == 32
 
 
 def test_a_request_id_that_could_carry_data_is_replaced(client: TestClient) -> None:

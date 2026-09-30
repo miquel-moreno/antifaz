@@ -7,8 +7,7 @@ destination from the client.
 """
 
 import json
-import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -26,7 +25,7 @@ from antifaz.api.errors import (
     UpstreamUnavailableError,
 )
 from antifaz.config import Settings
-from antifaz.providers.json_walk import too_deep
+from antifaz.providers.json_walk import READ_KEYS, fold_key, too_deep
 from antifaz.vault import Vault
 
 
@@ -56,17 +55,21 @@ def _reject_constant(_: str) -> object:
 
 
 def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """An object whose keys are all different, also ignoring case and width (ADR-0015).
+    """An object without repeated keys (ADR-0015).
 
-    With {"content": A, "content": B} one reader checks A and another sends B; with "content"
-    and "Content" a case-insensitive reader sees two copies of one field. Both are refused.
+    With {"content": A, "content": B} one reader checks A and another sends B: always refused.
+    Keys that only differ in case or width ("content" and "Content") are refused when they fold
+    to a key the gateway reads (READ_KEYS); a schema may have "name" and "Name".
     """
-    seen: set[str] = set()
+    exact: set[str] = set()
+    folded_read: set[str] = set()
     for key, _ in pairs:
-        folded = unicodedata.normalize("NFKC", key).casefold()
-        if folded in seen:
+        folded = fold_key(key)
+        if key in exact or (folded in READ_KEYS and folded in folded_read):
             raise ValueError("repeated key")  # the key is never in the message
-        seen.add(folded)
+        exact.add(key)
+        if folded in READ_KEYS:
+            folded_read.add(folded)
     return dict(pairs)
 
 
@@ -136,10 +139,30 @@ async def send_masked(
     raise (UpstreamTimeoutError() if timed_out else UpstreamUnavailableError()) from None
 
 
+def _json_texts(raw: bytes) -> Iterator[str]:
+    """Every decoded string and key of `raw` if it is JSON ("\\u0061" and "\\/" undone)."""
+    try:
+        stack: list[Any] = [json.loads(raw)]
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return
+    while stack:  # iterative: a deep answer cannot raise RecursionError here
+        node = stack.pop()
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            yield from node.keys()
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+
+
 def _echoes_a_key(upstream: httpx.Response, keys: Sequence[str]) -> bool:
-    """True if the body or the content type (the only header returned) holds a key."""
+    """True if the body (raw or its decoded JSON strings) or the content type holds a key."""
     content_type = upstream.headers.get("content-type", "").encode("latin-1", "replace")
-    return any(key.encode() in upstream.content or key.encode() in content_type for key in keys)
+    raw = upstream.content
+    if any(key.encode() in raw or key.encode() in content_type for key in keys):
+        return True
+    return any(key in text for text in _json_texts(raw) for key in keys)
 
 
 def passthrough(upstream: httpx.Response) -> Response:

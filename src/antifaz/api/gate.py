@@ -13,6 +13,7 @@ import hmac
 from collections.abc import Iterable
 
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from antifaz.api.errors import (
@@ -22,6 +23,7 @@ from antifaz.api.errors import (
     UnsupportedMediaTypeError,
     error_body,
 )
+from antifaz.config import MIN_KEY_LENGTH
 
 # Paths served without the key. Exact match only: "/healthz/" or "//healthz" need the key.
 PUBLIC_PATHS = frozenset({"/healthz"})
@@ -50,8 +52,27 @@ def _is_json(values: list[bytes]) -> bool:
     return all(param.strip().lower() in _UTF8 for param in params)
 
 
+class CaseInsensitiveTrustedHost(TrustedHostMiddleware):
+    """Starlette's host check with the Host header lower-cased (host names have no case).
+
+    It runs before the key check: a request for a host that is not ours (DNS rebinding) gets
+    400 without reaching anything else. The configured hosts are lower-cased in the settings.
+    """
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            scope["headers"] = [
+                (name, value.lower() if name == b"host" else value)
+                for name, value in scope["headers"]
+            ]
+        await super().__call__(scope, receive, send)
+
+
 class GateMiddleware:
     def __init__(self, app: ASGIApp, *, api_key: str, allowed_origins: Iterable[str]) -> None:
+        # Fails closed on its own, even if whoever builds it skipped check_safe_to_start().
+        if len(api_key) < MIN_KEY_LENGTH:
+            raise ValueError(f"the gateway key must have at least {MIN_KEY_LENGTH} characters")
         self.app = app
         self._key = api_key.encode()  # printable ASCII, checked at startup
         self._bearer = b"Bearer " + self._key
@@ -91,14 +112,16 @@ class GateMiddleware:
     def _authorized(self, headers: dict[bytes, list[bytes]]) -> bool:
         """The key in `Authorization: Bearer` or in `x-api-key`, compared in constant time.
 
-        A repeated key header is refused: two readers could pick different copies.
+        A repeated key header is refused: two readers could pick different copies. If both
+        headers are sent, both must hold the key: a conflict is refused, never resolved.
         """
         bearer = headers.get(b"authorization", [])
         api_key = headers.get(b"x-api-key", [])
-        if len(bearer) > 1 or len(api_key) > 1:
+        if len(bearer) > 1 or len(api_key) > 1 or not (bearer or api_key):
             return False
         matches = [
             hmac.compare_digest(bearer[0] if bearer else b"", self._bearer),
             hmac.compare_digest(api_key[0] if api_key else b"", self._key),
         ]
-        return any(matches)
+        sent = [bool(bearer), bool(api_key)]
+        return all(match for match, present in zip(matches, sent, strict=True) if present)

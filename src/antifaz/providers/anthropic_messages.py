@@ -25,9 +25,10 @@ from antifaz.errors import AttachmentBlocked, UnmaskableField
 from antifaz.mask import Detector, mask
 from antifaz.policy import DEFAULT_POLICY, Policy
 from antifaz.providers.json_walk import (
-    ATTACHMENT_KEYS,
     check_attachments,
     check_depth,
+    has_attachment_key,
+    is_attachment_key,
     mask_body,
     restore_strings,
     walk,
@@ -68,7 +69,7 @@ def _check_block(block: Any, allowed: frozenset[str]) -> None:
         ):
             raise AttachmentBlocked()
         return
-    if ATTACHMENT_KEYS.intersection(block):
+    if has_attachment_key(block):
         raise AttachmentBlocked()
     for name, value in block.items():
         if name == "cache_control":
@@ -112,7 +113,7 @@ def _check_tools(tools: Any) -> None:
             check_attachments(tool, None)
             continue
         for name, value in tool.items():
-            if name in ATTACHMENT_KEYS:
+            if is_attachment_key(name):
                 raise AttachmentBlocked()
             if name == "input_schema":
                 _check_schema(value)
@@ -121,7 +122,7 @@ def _check_tools(tools: Any) -> None:
 
 
 def _check(body: dict[str, Any]) -> None:
-    if ATTACHMENT_KEYS.intersection(body):
+    if has_attachment_key(body):
         raise AttachmentBlocked()
     for name, value in body.items():
         if name in CONFIG_KEYS:

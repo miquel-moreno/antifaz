@@ -177,12 +177,12 @@ Errores:
 
 | Caso | Respuesta |
 |---|---|
-| Sin clave, clave incorrecta o cabecera de clave repetida | 401 `unauthorized` |
+| Sin clave, clave incorrecta, cabecera de clave repetida o `Authorization` y `x-api-key` en conflicto | 401 `unauthorized` |
 | Cabecera `Origin` no permitida | 403 `origin_not_allowed` |
 | `Content-Type` que no es `application/json` (UTF-8) | 415 `unsupported_media_type` |
-| Claves repetidas en el JSON (también si solo cambian en mayúsculas) | 400 `invalid_request` |
+| Claves repetidas en el JSON (también si solo cambian en mayúsculas y es una clave que Antifaz lee) | 400 `invalid_request` |
 | `Host` que no está en `ANTIFAZ_ALLOWED_HOSTS` | 400 `Invalid host header` (texto) |
-| La respuesta del proveedor repite una clave configurada | 502 `bad_upstream_response` |
+| La respuesta del proveedor repite una clave configurada (también escapada en JSON) | 502 `bad_upstream_response` |
 | Dato en un sitio que no se puede enmascarar, adjunto, detector roto o guardia | 400 `antifaz_blocked`, mensaje fijo |
 | `stream: true` | 400 `streaming_not_supported` (llega en la parte 5c) |
 | El proveedor tarda más de `ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
@@ -220,36 +220,37 @@ Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Tod
 
 **Arranque.** Antifaz se niega a arrancar, y dice qué variable falla sin mostrar su valor, si:
 
-- `ANTIFAZ_API_KEY` falta, tiene menos de 32 caracteres, empieza por `change-me` (el valor de `.env.example`) o no es ASCII imprimible sin espacios. Genera una con `openssl rand -hex 32`;
-- `ANTIFAZ_OPENAI_API_KEY` o `ANTIFAZ_ANTHROPIC_API_KEY` empiezan por `change-me`;
-- `ANTIFAZ_ALLOWED_HOSTS` está vacía o tiene `*`, o `ANTIFAZ_ALLOWED_ORIGINS` tiene `*` o `null`.
+- `ANTIFAZ_API_KEY` falta, tiene menos de 32 caracteres o menos de 8 caracteres distintos, es el valor de `.env.example` (`change-me`, también escrito `change_me` o `ChangeMe`) o no es ASCII imprimible sin espacios. Genera una con `openssl rand -hex 32`;
+- `ANTIFAZ_OPENAI_API_KEY` o `ANTIFAZ_ANTHROPIC_API_KEY` están definidas pero vacías, son el valor de ejemplo o no son ASCII imprimible sin espacios;
+- `ANTIFAZ_ALLOWED_HOSTS` está vacía, tiene `*` o un comodín con menos de dos etiquetas detrás (`*.com`), o `ANTIFAZ_ALLOWED_ORIGINS` tiene algo que no sea `http(s)://host[:puerto]` (sin ruta ni barra final; `*` y `null` tampoco).
 
 La app ya no se crea al importar el módulo: `uvicorn --factory antifaz.api.app:create_app` (es lo que hace `make dev`).
 
-**Variables nuevas** (listas separadas por comas, o en JSON: `["a", "b"]`):
+**Variables nuevas** (listas separadas por comas, o en JSON: `[ "a", "b" ]`):
 
 | Variable | Por defecto | Qué hace |
 |---|---|---|
-| `ANTIFAZ_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Valores aceptados en la cabecera `Host` (sin el puerto). Otro → 400. Admite `*.ejemplo.com`, no `*` |
-| `ANTIFAZ_ALLOWED_ORIGINS` | vacía | Orígenes de navegador aceptados, exactos (`https://intranet.ejemplo.com`). Vacía: toda petición con `Origin` → 403 |
+| `ANTIFAZ_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Valores aceptados en la cabecera `Host` (sin el puerto y sin distinguir mayúsculas). Otro → 400. Admite `*.ejemplo.com`, no `*` ni `*.com` |
+| `ANTIFAZ_ALLOWED_ORIGINS` | vacía | Orígenes de navegador aceptados, exactos y sin barra final (`https://intranet.ejemplo.com`). Vacía: toda petición con `Origin` → 403 |
 
 **En cada petición**, en este orden:
 
-1. `Host` en la lista (si no, 400). Protege del DNS rebinding: una web ajena que apunta su dominio a la IP de la pasarela.
+1. `Host` en la lista (si no, 400), **antes** que la clave. Protege del DNS rebinding: una web ajena que apunta su dominio a la IP de la pasarela.
 2. Ruta pública solo `/healthz`, con coincidencia exacta sobre la ruta ya decodificada (`scope["path"]`). Cualquier otra ruta, exista o no, pide la clave: `/healthz/`, `//v1/messages` o `/docs` también.
-3. **Clave** en `Authorization: Bearer` o en `x-api-key` (en todas las rutas), con `hmac.compare_digest`. Si la cabecera viene dos veces → 401.
+3. **Clave** en `Authorization: Bearer` o en `x-api-key` (en todas las rutas), con `hmac.compare_digest`. Si la cabecera viene dos veces, o si vienen las dos y no llevan las dos la clave → 401.
 4. **`Origin`**: si viene y no está en `ANTIFAZ_ALLOWED_ORIGINS` → 403. No hay CORS: el navegador nunca recibe `Access-Control-Allow-Origin`, así que una web ajena no puede leer la respuesta ni pasar el preflight.
 5. **`Content-Type`**: en todo lo que no sea `GET`, `HEAD` u `OPTIONS`, debe ser `application/json` (con `charset=utf-8` como único parámetro opcional). Un formulario o `text/plain`, que el navegador manda sin preflight → 415.
-6. Al leer el cuerpo, un objeto con **claves repetidas** → 400. Cuentan como repetidas las que solo cambian en mayúsculas o anchura (`content` y `Content`), porque unos programas las leen como la misma y otros no.
+6. Al leer el cuerpo, un objeto con **claves repetidas** → 400. Si solo cambian en mayúsculas o anchura (`content` y `Content`) también, cuando es una clave que Antifaz lee (`READ_KEYS` en `providers/json_walk.py`), porque unos programas las leen como la misma y otros no. Un esquema con `Name` y `name` pasa.
+7. Las claves de adjunto (`source`, `data`, `image_url`, `file`…) bloquean también en mayúsculas (`SOURCE`, `Data`).
 
-Además: sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra final (`/v1/messages/` → 404); los WebSocket se cierran siempre; el log de cada petición solo escribe la ruta si es una ruta registrada (si no, `-`), para que una clave o un DNI pegados en la URL no acaben en el log; y si el proveedor devuelve en su respuesta alguna de las claves configuradas, se descarta con un 502 fijo.
+Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora); sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra final (`/v1/messages/` → 404); los WebSocket se cierran siempre; el log de cada petición solo escribe la ruta si es una ruta registrada (si no, `-`), para que una clave o un DNI pegados en la URL no acaben en el log; y si el proveedor devuelve en su respuesta alguna de las claves configuradas (tal cual o con escapes JSON como `\u0061`), se descarta con un 502 fijo.
 
 **Detrás de Docker o de un proxy inverso** (nginx, Traefik, Caddy):
 
 - Pon en `ANTIFAZ_ALLOWED_HOSTS` el nombre con el que llegan los clientes (`antifaz`, el nombre del servicio en compose, o `antifaz.ejemplo.com`). Si el proxy reescribe `Host`, pon el que reescribe. `X-Forwarded-Host` no se mira.
 - El proxy no debe añadir cabeceras CORS ni un `Origin` propio.
 - `/healthz` es pública: si el proxy la expone, solo dice la versión.
-- Si la sirves bajo un prefijo (`--root-path`), `/healthz` puede pedir clave: la lista pública compara la ruta exacta y, si no coincide, falla cerrada.
+- `root_path` no está soportado: si la sirves bajo un prefijo (`--root-path`), `/healthz` puede pedir clave, porque la lista pública compara la ruta exacta y, si no coincide, falla cerrada.
 
 **Tests.** `tests/redteam/test_invariants_12_13.py` recorre las rutas que la app registra de verdad (con `iter_route_contexts`, porque en FastAPI `app.routes` guarda los routers incluidos y no sus rutas), cada una con GET, HEAD, POST, PUT, PATCH, DELETE y OPTIONS y con alias (barra final, doble barra, mayúsculas, último carácter codificado): sin clave, 401 salvo `/healthz`. Cada ruta del proxy pasa por la guardia de salida con los mismos bytes que recibe el proveedor, y si la guardia bloquea no sale nada (invariante 12). Otro test usa claves canario y recorre 401, 400, 403, 404, 413, 415, 502 y 504, errores del proveedor y un proveedor que devuelve las cabeceras que recibió, con los loggers en `DEBUG`: ninguna clave aparece en logs, cuerpos ni cabeceras (invariante 13). Los ataques están en `tests/redteam/test_gateway.py`.
 
@@ -267,7 +268,7 @@ Además: sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra fi
 | Hooks de Claude Code con tests | Bloquean los casos comunes de leer `.env`, imprimir variables secretas, `--no-verify` y force push. Son **defensa en profundidad, no una barrera**: quien ejecuta código arbitrario puede saltárselos, y la revisión de privacidad encontró varios caminos (ver el modelo de amenazas). La barrera real es gitleaks en CI |
 | `uv audit` también sobre las herramientas de desarrollo | A propósito: esas herramientas corren en la CI con acceso al código; una vulnerable también es un riesgo |
 | Errores 422 sin claves del cliente y con tamaño máximo | En la ubicación del error solo quedan la parte (`body`, `query`…) y los índices; las claves de un diccionario las elige el cliente y podrían ser un DNI |
-| `X-Request-ID` del cliente validado | Se escribe en logs y cabeceras: solo se acepta si es corto y sin símbolos; si no, se genera uno nuevo |
+| `X-Request-ID` propio siempre (issue 20) | Se escribe en logs y cabeceras: el del cliente se ignora, porque hasta un valor corto y sin símbolos puede ser un DNI |
 
 ## Limitaciones
 
@@ -278,7 +279,7 @@ Además: sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra fi
 - Los errores del proveedor se devuelven con los marcadores `[[TIPO_N]]` sin restaurar.
 - El tamaño de la respuesta del proveedor no tiene tope en v0.1.
 - `Bearer` en la cabecera `Authorization` distingue mayúsculas: `bearer` se rechaza.
-- Un esquema de herramienta con dos propiedades que solo cambian en mayúsculas (`id` e `ID`) se rechaza con 400 (ADR-0015).
+- Un objeto con dos claves que solo cambian en mayúsculas se rechaza con 400 si es una clave que Antifaz lee (`content` y `Content`); las demás (`id` e `ID` en un esquema) pasan (ADR-0015).
 - Si el proveedor devuelve la clave recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), ese fragmento llega al cliente: solo se detecta la clave completa.
 - La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.

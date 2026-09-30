@@ -6,6 +6,7 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 """
 
 import json
+import re
 from functools import lru_cache
 from typing import Annotated
 
@@ -14,8 +15,17 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Shortest gateway key accepted at startup (32 characters, about 190 bits if random).
 MIN_KEY_LENGTH = 32
-# Every key in .env.example starts with this: a copied example never starts.
-EXAMPLE_PREFIX = "change-me"
+# Fewer different characters than this ("aaaa...", "abab...") is not a random key.
+MIN_DISTINCT_CHARACTERS = 8
+# Every key in .env.example starts with "change-me": a copied example never starts. Compared
+# without case, spaces, "-" or "_", so "change_me" and "ChangeMe" are caught too.
+EXAMPLE_MARK = "changeme"
+# "*.example.com": a wildcard must keep at least two labels after it ("*.com" is refused).
+_SUBDOMAIN_WILDCARD = re.compile(r"\*\.[^.*]+\.[^.*]+(?:\.[^.*]+)*")
+# An origin as browsers send it: scheme://host[:port], nothing after.
+_ORIGIN = re.compile(
+    r"https?://(?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?"
+)
 DEFAULT_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 
 
@@ -61,47 +71,87 @@ class Settings(BaseSettings):
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod
     def _split_list(cls, value: object) -> object:
-        """A comma-separated list ("a, b") or a JSON list ('["a", "b"]')."""
+        """A JSON list ('[ "a", "b" ]') or a comma-separated one ("a, b", "[::1],localhost")."""
         if not isinstance(value, str):
             return value
         text = value.strip()
-        if text == "[]" or text.startswith('["'):  # JSON; "[::1],localhost" is not
-            return json.loads(text)
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None  # "[::1],localhost" is not JSON: read it as a comma list
+            if isinstance(parsed, list):
+                return parsed
         return [item.strip() for item in text.split(",") if item.strip()]
 
+    @field_validator("allowed_hosts", mode="after")
+    @classmethod
+    def _lower_hosts(cls, hosts: list[str]) -> list[str]:
+        return [host.lower() for host in hosts]  # host names have no case; Host is lowered too
 
-def _key_problem(key: str) -> str | None:
-    """Why `key` cannot be the gateway key, or None if it can."""
+
+def _is_example(key: str) -> bool:
+    """The .env.example value, also written "change_me", "ChangeMe" or "CHANGE-ME"."""
+    return re.sub(r"[\s_-]", "", key.casefold()).startswith(EXAMPLE_MARK)
+
+
+def _format_problem(key: str) -> str | None:
+    """Why `key` cannot travel as a key (gateway or provider), or None if it can."""
     if not key:
-        return "is missing: set a random value of at least 32 characters"
-    if key.casefold().startswith(EXAMPLE_PREFIX):
+        return "is empty: set a value or remove the variable"
+    if _is_example(key):
         return "still has the example value from .env.example: set your own random value"
-    if len(key) < MIN_KEY_LENGTH:
-        return f"is too short: use at least {MIN_KEY_LENGTH} characters"
     if not (key.isascii() and key.isprintable()) or " " in key:
         return "must be printable ASCII without spaces (it travels in an HTTP header)"
     return None
 
 
+def _gateway_key_problem(key: str) -> str | None:
+    """Why `key` cannot be the gateway key, or None if it can."""
+    if not key:
+        return "is missing: set a random value of at least 32 characters"
+    problem = _format_problem(key)
+    if problem:
+        return problem
+    if len(key) < MIN_KEY_LENGTH:
+        return f"is too short: use at least {MIN_KEY_LENGTH} characters"
+    if len(set(key)) < MIN_DISTINCT_CHARACTERS:
+        return (
+            f"has fewer than {MIN_DISTINCT_CHARACTERS} different characters: "
+            "use a random value (for example: openssl rand -hex 32)"
+        )
+    return None
+
+
+def _host_problem(host: str) -> bool:
+    """True for an empty host, "*" or a wildcard broader than "*.<two labels>"."""
+    if not host:
+        return True
+    return "*" in host and not _SUBDOMAIN_WILDCARD.fullmatch(host)
+
+
 def check_safe_to_start(settings: Settings) -> None:
     """Raise UnsafeConfigError if the gateway would start open. Messages never carry values."""
     gateway_key = settings.antifaz_api_key.get_secret_value() if settings.antifaz_api_key else ""
-    problem = _key_problem(gateway_key)
+    problem = _gateway_key_problem(gateway_key)
     if problem:
         raise UnsafeConfigError(f"ANTIFAZ_API_KEY {problem}")
     for variable, secret in (
         ("ANTIFAZ_OPENAI_API_KEY", settings.openai_api_key),
         ("ANTIFAZ_ANTHROPIC_API_KEY", settings.anthropic_api_key),
     ):
-        if secret is not None and secret.get_secret_value().casefold().startswith(EXAMPLE_PREFIX):
-            raise UnsafeConfigError(f"{variable} still has the example value from .env.example")
-    if not settings.allowed_hosts or any(h in ("", "*") for h in settings.allowed_hosts):
+        problem = None if secret is None else _format_problem(secret.get_secret_value())
+        if problem:
+            raise UnsafeConfigError(f"{variable} {problem}")
+    if not settings.allowed_hosts or any(_host_problem(h) for h in settings.allowed_hosts):
         raise UnsafeConfigError(
-            "ANTIFAZ_ALLOWED_HOSTS must list the host names clients use; '*' is not accepted"
+            "ANTIFAZ_ALLOWED_HOSTS must list the host names clients use; '*' is not accepted "
+            "and a wildcard needs two labels after it ('*.example.com')"
         )
-    if any(o in ("", "*", "null") for o in settings.allowed_origins):
+    if not all(_ORIGIN.fullmatch(origin) for origin in settings.allowed_origins):
         raise UnsafeConfigError(
-            "ANTIFAZ_ALLOWED_ORIGINS only accepts exact origins; '*' and 'null' are not accepted"
+            "ANTIFAZ_ALLOWED_ORIGINS only accepts exact origins written as scheme://host[:port] "
+            "(http or https, no path and no trailing slash); '*' and 'null' are not accepted"
         )
 
 

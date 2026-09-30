@@ -72,12 +72,12 @@ def test_clave_duplicada_anidada_se_rechaza(
         ("content", "Content"),
         ("messages", "MESSAGES"),
         ("type", "Type"),
+        ("role", "ROLE"),
+        ("source", "Source"),
         ("content", chr(0xFF43) + "ontent"),  # "c" de ancho completo: NFKC la hace "c"
-        ("strasse", "STRASSE"),
-        ("stra" + chr(0xDF) + "e", "strasse"),  # casefold: "ß" == "ss"
     ],
 )
-def test_claves_que_solo_cambian_en_mayusculas_se_rechazan(
+def test_claves_leidas_que_solo_cambian_en_mayusculas_se_rechazan(
     gateway: TestClient, upstream_any: FakeUpstream, first: str, second: str
 ) -> None:
     """El atacante usa `content` y `Content`: unos lectores ven una clave y otros otra."""
@@ -87,6 +87,28 @@ def test_claves_que_solo_cambian_en_mayusculas_se_rechazan(
     )
     assert _raw(gateway, "/v1/chat/completions", raw) == 400
     assert upstream_any.requests == []
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("Name", "name"),
+        ("strasse", "STRASSE"),
+        ("stra" + chr(0xDF) + "e", "strasse"),  # casefold: "ß" == "ss"
+        ("id", "ID"),
+    ],
+)
+def test_propiedades_de_esquema_que_solo_cambian_en_mayusculas_pasan(
+    gateway: TestClient, first: str, second: str
+) -> None:
+    """Un esquema legítimo puede tener `name` y `Name`: Antifaz no lee esas claves."""
+    properties = '{"' + first + '": {}, "' + second + '": {}}'
+    raw = (
+        '{"model": "m", "messages": [{"role": "user", "content": "hola"}],'
+        ' "tools": [{"type": "function", "function": {"name": "f",'
+        ' "parameters": {"type": "object", "properties": ' + properties + "}}}]}"
+    )
+    assert _raw(gateway, "/v1/chat/completions", raw) == 200
 
 
 def test_clave_duplicada_en_esquema_de_herramienta_se_rechaza(
@@ -446,6 +468,55 @@ def test_cabeceras_de_clave_repetidas_o_raras_dan_401(
     )
     assert response.status_code == 401
     assert upstream_any.requests == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": f"Bearer {GATEWAY_KEY}", "x-api-key": "wrong"},
+        {"Authorization": "Bearer wrong", "x-api-key": GATEWAY_KEY},
+        {"Authorization": f"Bearer {GATEWAY_KEY}", "x-api-key": ""},
+    ],
+)
+def test_authorization_y_x_api_key_en_conflicto_dan_401(
+    gateway: TestClient, upstream_any: FakeUpstream, headers: dict[str, str]
+) -> None:
+    """Una cabecera con la clave buena y otra con una mala: no se elige, se rechaza."""
+    response = gateway.post("/v1/messages", json=GATEWAY_BODY, headers=headers)
+    assert response.status_code == 401
+    assert upstream_any.requests == []
+
+
+def test_authorization_y_x_api_key_iguales_se_aceptan(gateway: TestClient) -> None:
+    headers = {"Authorization": f"Bearer {GATEWAY_KEY}", "x-api-key": GATEWAY_KEY}
+    assert gateway.post("/v1/messages", json=GATEWAY_BODY, headers=headers).status_code == 200
+
+
+@pytest.mark.parametrize("host", ["TESTSERVER", "TestServer:8000"])
+def test_host_se_compara_sin_mayusculas(gateway: TestClient, host: str) -> None:
+    response = gateway.post(
+        "/v1/chat/completions", json=GATEWAY_BODY, headers={**AUTH, "Host": host}
+    )
+    assert response.status_code == 200
+
+
+def test_x_request_id_del_cliente_no_se_usa(
+    gateway: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """El atacante mete un DNI en X-Request-ID para que acabe en los logs."""
+    caplog.set_level("DEBUG")
+    for request_id in (DNI, f"id-{DNI}", "abc-123"):
+        response = gateway.post(
+            "/v1/chat/completions",
+            json=GATEWAY_BODY,
+            headers={**AUTH, "X-Request-ID": request_id},
+        )
+        assert response.headers["X-Request-ID"] != request_id
+        assert DNI not in response.text
+        assert DNI not in str(response.headers.raw)
+    assert caplog.records
+    assert DNI not in caplog.text
+    assert all(DNI not in str(record.__dict__) for record in caplog.records)
 
 
 @pytest.mark.parametrize("path", ["/v1/chat/completions", "/healthz", "/ws"])
