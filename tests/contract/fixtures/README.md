@@ -19,15 +19,18 @@ Cuando Miquel lo apruebe (cuesta céntimos), se grabarán respuestas reales con 
 1. se quitan cabeceras (`Authorization`, `x-api-key`, cookies, ids de organización);
 2. los datos se cambian por marcadores o por los valores sintéticos de los tests;
 3. las firmas de razonamiento se cambian por la falsa;
-4. se pone `provenance` como `recorded AAAA-MM-DD model <modelo>`.
+4. **revisión a mano, obligatoria**, de nombres de personas, direcciones y cualquier otro dato que el detector todavía no busca (no hay tipo de persona hasta el NER, issue 6): el test automático no los ve;
+5. se pone `provenance` como `recorded AAAA-MM-DD model <modelo>`.
 
 Pueden sustituir a las escritas a mano o añadirse a ellas.
 
 ## Lo que se comprueba siempre
 
-`tests/contract/test_fixtures_sanitised.py` recorre **todos** los archivos de esta carpeta y falla si encuentra:
+`tests/contract/test_fixtures_sanitised.py` recorre **todos** los archivos de esta carpeta, tal cual y ya decodificados (el JSON entero, los `data:` de cada evento SSE y el JSON dentro de cadenas, claves incluidas, para que un escape `1` no esconda nada), y falla si encuentra:
 
 - algo que parece una clave (`sk-`, `sk-ant-`, `Bearer `, o una cadena larga de alta entropía que no esté en la lista de valores falsos conocidos);
 - cabeceras `Authorization`, `x-api-key`, `Cookie` o `Set-Cookie`;
 - un dato personal (con el detector de Antifaz y patrones de email y teléfono) que no esté en la lista de ejemplos sintéticos;
 - un archivo sin `provenance` válido.
+
+No detecta nombres de personas: por eso la revisión a mano del paso 4.
