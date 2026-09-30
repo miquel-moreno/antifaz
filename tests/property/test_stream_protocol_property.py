@@ -92,8 +92,11 @@ def test_anthropic_tool_input_and_thinking(args: dict[str, str], data: st.DataOb
         )
         for piece in _cut(data, masked_args)
     ]
+    block = {"type": "tool_use", "id": "t", "name": "f", "input": {}}
+    start = anthropic_event({"type": "content_block_start", "index": 1, "content_block": block})
     stream = (
         thinking
+        + start
         + "".join(tool)
         + anthropic_event({"type": "content_block_stop", "index": 1})
         + anthropic_event({"type": "message_stop"})

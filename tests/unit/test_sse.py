@@ -117,3 +117,12 @@ def test_serialized_event_parses_back_the_same() -> None:
     (event,) = _parse(text)
     assert event.event == "x"
     assert event.data == " leading space\nsecond"
+
+
+def test_a_bom_at_the_start_of_the_stream_is_dropped() -> None:
+    parser = SSEParser()
+    assert parser.feed(chr(0xFEFF)) == []
+    (event,) = parser.feed("data: x\n\n")
+    assert event.fields == (("data", "x"),)
+    (again,) = parser.feed(chr(0xFEFF) + "data: y\n\n")  # only at the very start
+    assert again.fields == ((chr(0xFEFF) + "data", "y"),)

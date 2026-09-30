@@ -39,8 +39,9 @@ class StreamTransformer(Protocol):
     def end(self) -> str:
         """The provider closed the stream: what is left, or StreamCut if it was not finished."""
 
-    def abort(self, code: str, message: str) -> str:
-        """The safe text still held, then an error event with a fixed code and message."""
+    def abort(self, code: str, message: str, *, safe_text: bool = True) -> str:
+        """The safe text still held (unless `safe_text` is False), then an error event with a
+        fixed code and message."""
 
 
 def json_object(data: str | None) -> dict[str, Any] | None:

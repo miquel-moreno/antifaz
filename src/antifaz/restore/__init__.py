@@ -12,6 +12,7 @@ Forbidden: Never restore inside reasoning blocks or unknown events: those pass t
 """
 
 import re
+from collections.abc import Callable
 
 from antifaz.vault import Vault
 
@@ -27,13 +28,17 @@ _PLACEHOLDER_START = re.compile(
     r"\[\[[ \t]*(?:[A-Za-z]+(?:_[A-Za-z]+)*(?:_(?:[0-9]+[ \t]*\]?)?)?)?",
     re.IGNORECASE | re.ASCII,
 )
-# Longest tail held back: the longest placeholder (type name of 17 letters, "_" and a
-# 9-digit number) with 16 spaces or tabs on each side fits. More than this is refused.
+
+# Most characters held back. Only a run of spaces or tabs inside "[[ ... ]]" can make a
+# possible placeholder of this request longer than this (the longest token is ~30
+# characters): past it, the held text is let go as it is (documented limit, never an error).
 MAX_HOLDBACK = 64
+_BLANKS = " \t"
+_TOKEN_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 class StreamLimitExceeded(Exception):  # noqa: N818 - reads as the event it names
-    """A streamed answer held back or accumulated more than the gateway allows."""
+    """A streamed answer accumulated more than the gateway allows."""
 
     def __init__(self) -> None:
         super().__init__("streamed answer exceeded a size limit")  # fixed: never a value
@@ -48,8 +53,12 @@ def placeholder_tokens(text: str) -> frozenset[str]:
     )
 
 
-def restore(text: str, vault: Vault) -> str:
-    """Undo the escapes and put back the values of this request's placeholders."""
+def restore(text: str, vault: Vault, *, encode: Callable[[str], str] | None = None) -> str:
+    """Undo the escapes and put back the values of this request's placeholders.
+
+    `encode`, if given, is applied to each value put back (for example, JSON string escaping
+    when the text is JSON that could not be parsed).
+    """
 
     def replace(match: re.Match[str]) -> str:
         brackets = match.group("esc")
@@ -57,19 +66,37 @@ def restore(text: str, vault: Vault) -> str:
             return brackets
         # _lookup is package-internal API: only mask/, restore/ and guard/ may call it.
         value = vault._lookup(match.group("token").upper())
-        return match.group(0) if value is None else value
+        if value is None:
+            return match.group(0)
+        return value if encode is None else encode(value)
 
     return _ESCAPE_OR_PLACEHOLDER.sub(replace, text)
 
 
-def _safe_end(text: str) -> int:
+def _could_be_ours(tail: str, tokens: frozenset[str]) -> bool:
+    """False if the placeholder being written in `tail` ("[[ es_dni_1 ]") can no longer be
+    one of this request's tokens: restore() would then leave it as it is anyway."""
+    rest = tail[2:].lstrip(_BLANKS)
+    size = 0
+    while size < len(rest) and rest[size] in _TOKEN_CHARS:
+        size += 1
+    token = rest[:size].upper()
+    if size == len(rest):  # still writing the token (or nothing yet)
+        return any(known.startswith(token) for known in tokens)
+    return token in tokens  # the token is finished: spaces or "]" come after it
+
+
+def _safe_end(text: str, tokens: frozenset[str]) -> int:
     """Where `text` can be cut so that restore(head) never changes whatever comes next.
 
-    Only a tail that restore() could still read as an escape or a placeholder is held: it
-    starts in the last run of "[" (no other "[" can follow the start of one).
+    Only a tail that restore() could still read as an escape or as a placeholder of this
+    request is held: it starts in the last run of "[" (no other "[" can follow the start of
+    one).
       - The text ends with "[" run: its brackets are text whatever follows (a "!" only drops
         the "!"; a placeholder only uses the last two), so only the last two are held.
-      - "[[" + a placeholder being written ("[[ es_dni_1 ]"): held from that "[[".
+      - "[[" + a placeholder being written ("[[ es_dni_1 ]") that can still become one of
+        this request's tokens: held from that "[[". Any other token would be left as it is by
+        restore(), so it is not held (a wiki link "[[Pagina]]" flows at once).
     Anything else is final and is cut at the end.
     """
     last = text.rfind("[")
@@ -81,7 +108,11 @@ def _safe_end(text: str) -> int:
             run_start -= 1
         return max(run_start, len(text) - 2)
     start = last - 1
-    if start >= 0 and _PLACEHOLDER_START.fullmatch(text, start):
+    if (
+        start >= 0
+        and _PLACEHOLDER_START.fullmatch(text, start)
+        and _could_be_ours(text[start:], tokens)
+    ):
         return start
     return len(text)
 
@@ -90,14 +121,17 @@ class StreamRestorer:
     """Restores one streamed text field. feed() each chunk in order, then flush() once.
 
     The concatenation of every feed() and the final flush() equals restore() of the whole
-    text (invariant 3). Held back text is at most MAX_HOLDBACK characters: a longer possible
-    placeholder raises StreamLimitExceeded (the held text stays for flush()).
+    text (invariant 3). Documented limit: a possible placeholder held for more than
+    MAX_HOLDBACK characters (only possible with a long run of spaces or tabs inside the
+    brackets) is let go as it is, so it shows as a placeholder, never as a wrong value.
     """
 
-    __slots__ = ("_pending", "_vault")
+    __slots__ = ("_pending", "_tokens", "_vault")
 
     def __init__(self, vault: Vault) -> None:
         self._vault = vault
+        # _tokens is package-internal API: placeholders of this request, never values.
+        self._tokens = vault._tokens()
         self._pending = ""
 
     @property
@@ -107,10 +141,9 @@ class StreamRestorer:
 
     def feed(self, chunk: str) -> str:
         text = self._pending + chunk
-        cut = _safe_end(text)
+        cut = _safe_end(text, self._tokens)
         if len(text) - cut > MAX_HOLDBACK:
-            self._pending = text  # nothing is lost: flush() still gives it back restored
-            raise StreamLimitExceeded()
+            cut = len(text)  # the documented limit: let it go, never block the stream
         self._pending = text[cut:]
         return restore(text[:cut], self._vault)
 

@@ -43,6 +43,7 @@ class AnthropicMessagesStream:
         self._vault = vault
         self._text: TextFields[int] = TextFields(vault)
         self._json: Accumulator[int] = Accumulator()
+        self._blocks: dict[int, object] = {}  # block index -> its type
         self._done = False
         self.unknown = 0
 
@@ -54,6 +55,8 @@ class AnthropicMessagesStream:
         if payload is None or kind in PASS_EVENTS:
             if payload is None:
                 self.unknown += 1
+            if kind == "error":
+                self._done = True  # the provider ended the stream with its own error
             return event.raw
         if kind == "message_stop":
             self._done = True
@@ -75,16 +78,18 @@ class AnthropicMessagesStream:
             raise StreamCut()
         return ""
 
-    def abort(self, code: str, message: str) -> str:
+    def abort(self, code: str, message: str, *, safe_text: bool = True) -> str:
         self._json.clear()  # half tool input is not valid JSON: never emitted
         error = {"type": "error", "error": {"type": "api_error", "message": message}}
-        return self._flush_open(with_input=False) + format_event("error", dumps(error))
+        text = self._flush_open(with_input=False) if safe_text else ""
+        return text + format_event("error", dumps(error))
 
     def _start(self, event: SSEEvent, payload: dict[str, Any], index: int) -> str:
         block = payload.get("content_block")
         if not isinstance(block, dict):
             return event.raw
         kind = block.get("type")
+        self._blocks[index] = kind
         if kind == "text" and isinstance(block.get("text"), str) and block["text"]:
             block["text"] = self._text.feed(index, block["text"])
         elif kind == "tool_use" and isinstance(block.get("input"), dict | list) and block["input"]:
@@ -106,6 +111,7 @@ class AnthropicMessagesStream:
             isinstance(delta, dict)
             and kind == "input_json_delta"
             and isinstance(delta.get("partial_json"), str)
+            and self._blocks.get(index) == "tool_use"  # only the input of blocks we restore
         ):
             self._json.add(index, delta["partial_json"])
             return ""

@@ -20,6 +20,7 @@ MAX_EVENT_CHARS = 4 * 1024 * 1024
 _LINE_END = re.compile(r"\r\n|\r|\n")
 _CR = chr(13)
 _LF = chr(10)
+_BOM = chr(0xFEFF)
 
 
 class MalformedStream(Exception):  # noqa: N818 - reads as the event it names
@@ -84,6 +85,7 @@ class SSEParser:
         self._raw: list[str] = []
         self._size = 0
         self._skip_lf = False  # the last chunk ended in CR: a LF right after belongs to it
+        self._at_start = True
 
     @property
     def finished(self) -> bool:
@@ -93,6 +95,12 @@ class SSEParser:
     def feed(self, text: str) -> list[SSEEvent]:
         if not text:
             return []
+        if self._at_start:
+            self._at_start = False
+            if text[0] == _BOM:  # a byte order mark at the start of the stream is dropped
+                text = text[1:]
+                if not text:
+                    return []
         if self._skip_lf:
             self._skip_lf = False
             if text[0] == _LF:  # the end of a CRLF split between two chunks

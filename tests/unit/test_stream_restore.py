@@ -4,7 +4,7 @@ import pytest
 
 from antifaz import mask
 from antifaz.detect.types import EntityType
-from antifaz.restore import MAX_HOLDBACK, StreamLimitExceeded, StreamRestorer, restore
+from antifaz.restore import MAX_HOLDBACK, StreamRestorer, restore
 from antifaz.vault import Vault
 
 DNI = "12345678Z"  # synthetic, checksum-valid
@@ -101,20 +101,45 @@ def test_holdback_cap_covers_the_longest_placeholder_with_spaces() -> None:
     assert len(placeholder) <= MAX_HOLDBACK
 
 
-def test_holdback_cap_exceeded_raises_and_keeps_the_tail() -> None:
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x [[" + "A" * 200,  # longer than any token of this request
+        "enlace [[Pagina_De_Ejemplo]] fin",  # a wiki link
+        "[[ES_DNI_12",  # a longer number than any token
+        "[[EMAIL_1",  # a type this request never used
+        "[[ES_DNI_1_",
+        "[[ES_NIE",  # no token of this request starts like this
+    ],
+)
+def test_text_that_cannot_become_a_token_of_this_request_is_not_held(text: str) -> None:
     _, vault = _vault_with_dni()
     restorer = StreamRestorer(vault)
-    restorer.feed("ok [[")
-    with pytest.raises(StreamLimitExceeded):
-        restorer.feed(" " * MAX_HOLDBACK)
-    assert restorer.flush() == "[[" + " " * MAX_HOLDBACK  # no data: shown as it is
+    assert restorer.feed(text) == text
+    assert restorer.pending == 0
 
 
-def test_holdback_cap_exceeded_in_one_big_chunk() -> None:
+@pytest.mark.parametrize("tail", ["[[es_dni", "[[ ES_DNI_1", "[[ES_DNI_1 \t", "[[es_dni_1]"])
+def test_a_prefix_of_a_token_of_this_request_is_held(tail: str) -> None:
     _, vault = _vault_with_dni()
     restorer = StreamRestorer(vault)
-    with pytest.raises(StreamLimitExceeded):
-        restorer.feed("x [[" + "A" * 200)
+    assert restorer.feed(tail) == ""
+    assert restorer.flush() == tail
+
+
+def test_long_whitespace_is_released_at_the_cap_without_error() -> None:
+    """Documented limit: more than MAX_HOLDBACK characters of "[[" and spaces are let go."""
+    _, vault = _vault_with_dni()
+    restorer = StreamRestorer(vault)
+    assert restorer.feed("ok [[") == "ok "
+    out = restorer.feed(" " * MAX_HOLDBACK) + restorer.feed("ES_DNI_1]]") + restorer.flush()
+    assert out == "[[" + " " * MAX_HOLDBACK + "ES_DNI_1]]"  # a placeholder, never a wrong value
+
+
+def test_an_empty_vault_holds_nothing_but_escapes() -> None:
+    restorer = StreamRestorer(mask("sin datos").vault)
+    assert restorer.feed("a [[ES_DNI_1]] b [[") == "a [[ES_DNI_1]] b "
+    assert restorer.feed("!c") == "[[c"
 
 
 def test_flush_resets_the_restorer() -> None:

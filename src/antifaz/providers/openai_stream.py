@@ -24,12 +24,18 @@ from antifaz.providers.streaming import (
     is_index,
     json_object,
 )
+from antifaz.restore import StreamLimitExceeded
 from antifaz.vault import Vault
 
 TEXT_FIELDS = ("content", "refusal")
 KNOWN_DELTA_KEYS = frozenset({"role", "content", "refusal", "tool_calls", "function_call"})
 _LEGACY = -1  # tool index used for the legacy `function_call`
 _DONE = "[DONE]"
+# Top-level fields of a chunk that say nothing on their own: a chunk with only these and
+# empty deltas can be skipped while its text is held back.
+_ENVELOPE_KEYS = frozenset(
+    {"id", "object", "created", "model", "system_fingerprint", "service_tier", "choices", "usage"}
+)
 
 
 def _empty(value: object) -> bool:
@@ -45,6 +51,8 @@ class OpenAIChatStream:
         self._arguments: Accumulator[tuple[int, int]] = Accumulator()
         self._envelope: dict[str, Any] = {"object": "chat.completion.chunk"}
         self._done = False
+        self._failed: StreamLimitExceeded | None = None
+        self._salvaged = ""  # what the chunk that hit a limit had already restored
         self.unknown = 0
 
     def event(self, event: SSEEvent) -> str:
@@ -59,13 +67,20 @@ class OpenAIChatStream:
             return self._flush_open(with_arguments=True) + event.raw
         chunk = json_object(data)
         if chunk is None or not isinstance(chunk.get("choices"), list):
-            if chunk is None or "error" not in chunk:  # a provider error passes, not counted
+            if chunk is not None and "error" in chunk:
+                self._done = True  # the provider ended the stream with its own error
+            else:
                 self.unknown += 1
             return event.raw
         self._envelope = {k: v for k, v in chunk.items() if k not in ("choices", "usage")}
         changed = False
         for choice in chunk["choices"]:
             changed = self._choice(choice) or changed
+        if self._failed is not None:
+            # A choice hit a limit: the text the other choices restored is kept for abort().
+            empty = self._only_empty_deltas(chunk)
+            self._salvaged = "" if empty else replace_data(event, dumps(chunk))
+            raise self._failed
         if not changed:
             return event.raw  # byte for byte
         if self._only_empty_deltas(chunk):
@@ -77,10 +92,12 @@ class OpenAIChatStream:
             raise StreamCut()
         return ""
 
-    def abort(self, code: str, message: str) -> str:
+    def abort(self, code: str, message: str, *, safe_text: bool = True) -> str:
         self._arguments.clear()  # half arguments are not valid JSON: never emitted
         error = {"error": {"message": message, "type": "antifaz_error", "code": code}}
-        return self._flush_open(with_arguments=False) + format_event(None, dumps(error))
+        text = self._salvaged + self._flush_open(with_arguments=False) if safe_text else ""
+        self._salvaged = ""
+        return text + format_event(None, dumps(error))
 
     # --- one choice -------------------------------------------------------------------------
 
@@ -97,11 +114,17 @@ class OpenAIChatStream:
                 if isinstance(delta.get(field), str):
                     delta[field] = self._text.feed((index, field), delta[field])
                     changed = True
-            changed = self._take_arguments(index, delta) or changed
+            try:
+                changed = self._take_arguments(index, delta) or changed
+            except StreamLimitExceeded as error:
+                self._failed = error  # raised by event() once every choice is done
+                delta.pop("tool_calls", None)  # half arguments are never sent
+                delta.pop("function_call", None)
+                changed = True
         if choice.get("finish_reason") is not None:
             if not isinstance(delta, dict):
                 delta = {}
-            if self._finish(index, delta, with_arguments=True):
+            if self._finish(index, delta, with_arguments=self._failed is None):
                 choice["delta"] = delta
                 changed = True
         return changed
@@ -114,6 +137,8 @@ class OpenAIChatStream:
             kept = []
             for call in calls:
                 function = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(call, dict) or not is_index(call.get("index")):
+                    self.unknown += 1  # without an index it cannot be joined: passes as it is
                 if (
                     isinstance(function, dict)
                     and is_index(call.get("index"))
@@ -193,6 +218,8 @@ class OpenAIChatStream:
     @staticmethod
     def _only_empty_deltas(chunk: dict[str, Any]) -> bool:
         choices = chunk["choices"]
+        if not set(chunk) <= _ENVELOPE_KEYS:
+            return False  # an extra top-level field (obfuscation...) is always sent
         if not choices or not _empty(chunk.get("usage")):
             return False
         for choice in choices:

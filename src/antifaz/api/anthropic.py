@@ -17,7 +17,6 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
 from antifaz.api.errors import InvalidHeaderError, NotConfiguredError
 from antifaz.api.proxy import (
@@ -27,6 +26,7 @@ from antifaz.api.proxy import (
     passthrough,
     read_json,
     refuse_streaming,
+    restored_json,
     send_masked,
     stream_requested,
 )
@@ -102,8 +102,8 @@ async def messages(request: Request) -> Response:
     if call.stream and is_event_stream(upstream):
         counters = request.app.state.stream_counters
         return stream_response(upstream, AnthropicMessagesStream(call.vault), call.keys, counters)
-    return JSONResponse(
-        restore_response(answer_json(upstream), call.vault), status_code=upstream.status_code
+    return restored_json(
+        restore_response(answer_json(upstream), call.vault), call.keys, upstream.status_code
     )
 
 

@@ -212,12 +212,60 @@ def _holds_a_key(raw: bytes, keys: Sequence[str]) -> bool:
     return any(key.encode() in raw for key in keys)
 
 
+def _decoded(text: str) -> list[str]:
+    """One layer down: the strings of `text` if it is JSON, and `text` with its escapes undone."""
+    out: list[str] = []
+    if text.lstrip()[:1] in ("{", "[", '"'):
+        out.extend(json_texts(text))
+    if _BACKSLASH in text:
+        try:
+            unescaped = json.loads('"' + text + '"')  # a JSON string body with its escapes
+        except (ValueError, RecursionError):
+            unescaped = None
+        if isinstance(unescaped, str) and unescaped != text:
+            out.append(unescaped)
+    return out
+
+
+_BACKSLASH = chr(92)
+# How many times a string is decoded again: JSON in a string (tool arguments) holding escapes.
+_LAYERS = 3
+
+
+def key_texts(raw: bytes | str) -> Iterator[str]:
+    """`raw` and every string inside it, decoded again where a string holds JSON or escapes.
+
+    Up to three layers, so a key written as escapes inside tool arguments (JSON inside a JSON
+    string: "\\\\u0061" on the wire) is seen in clear.
+    """
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+    pending = [(text, _LAYERS)]
+    while pending:
+        current, layers = pending.pop()
+        yield current
+        if layers:
+            pending.extend((nested, layers - 1) for nested in _decoded(current))
+
+
+def contains_key(raw: bytes | str, keys: Sequence[str]) -> bool:
+    """True if a key is in `raw` as it is or in any decoded layer of it (invariant 13)."""
+    return any(key in text for text in key_texts(raw) for key in keys)
+
+
 def _echoes_a_key(upstream: httpx.Response, keys: Sequence[str]) -> bool:
-    """True if the body (raw or its decoded JSON strings) or the content type holds a key."""
-    raw = upstream.content
-    if _holds_a_key(raw, keys) or _holds_a_key(_content_type(upstream), keys):
+    """True if the body (raw or any decoded layer) or the content type holds a key."""
+    if _holds_a_key(_content_type(upstream), keys):
         return True
-    return any(key in text for text in json_texts(raw) for key in keys)
+    return contains_key(upstream.content, keys)
+
+
+def restored_json(body: dict[str, Any], keys: Sequence[str], status_code: int) -> Response:
+    """The restored answer, checked for keys AFTER restoring (a value decoded from escapes in
+    tool arguments could be one): a fixed 502 if it holds one."""
+    content = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if contains_key(content, keys):
+        raise UpstreamEchoedKeyError()
+    return Response(content=content, status_code=status_code, media_type="application/json")
 
 
 def passthrough(upstream: httpx.Response) -> Response:

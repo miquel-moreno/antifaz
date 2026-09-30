@@ -12,7 +12,6 @@ destination from the client.
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
 from antifaz.api.errors import InvalidStreamOptionsError, NotConfiguredError
 from antifaz.api.proxy import (
@@ -21,6 +20,7 @@ from antifaz.api.proxy import (
     is_event_stream,
     passthrough,
     read_json,
+    restored_json,
     send_masked,
     stream_requested,
 )
@@ -66,6 +66,4 @@ async def chat_completions(request: Request) -> Response:
         return passthrough(upstream)
     if stream and is_event_stream(upstream):
         return stream_response(upstream, OpenAIChatStream(vault), keys, state.stream_counters)
-    return JSONResponse(
-        restore_response(answer_json(upstream), vault), status_code=upstream.status_code
-    )
+    return restored_json(restore_response(answer_json(upstream), vault), keys, upstream.status_code)

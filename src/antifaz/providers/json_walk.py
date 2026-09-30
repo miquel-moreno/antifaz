@@ -248,14 +248,27 @@ def restore_strings(node: Any, vault: Vault) -> Any:
 def restore_json_text(text: str, vault: Vault) -> str:
     """Tool arguments or input written as JSON text, restored (invariant 4).
 
-    Parsed, every string value restored and serialized again, so the result is valid JSON even
-    if a value has quotes or backslashes. Text that is not a JSON object or array is restored
-    as plain text.
+    Valid JSON of any kind (object, array, string, number...) is parsed, every string value
+    restored and serialized again, so the result is valid JSON even if a value has quotes or
+    backslashes. Text that is not valid JSON (cut arguments, plain text) gets each value
+    escaped as inside a JSON string: a placeholder inside a JSON string stays a valid string,
+    and nothing that was valid JSON can stop being so.
     """
-    parsed = parse_container(text)
-    if parsed is None:
-        return restore(text, vault)
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError):
+        parsed = _INVALID
+    if parsed is _INVALID or too_deep(parsed):
+        return restore(text, vault, encode=_json_string_body)
     return json.dumps(restore_strings(parsed, vault), ensure_ascii=False)
+
+
+_INVALID = object()
+
+
+def _json_string_body(value: str) -> str:
+    """`value` escaped as the inside of a JSON string (quotes and backslashes escaped)."""
+    return json.dumps(value, ensure_ascii=False)[1:-1]
 
 
 __all__ = [

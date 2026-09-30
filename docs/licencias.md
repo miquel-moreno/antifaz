@@ -10,6 +10,12 @@ En lo que se distribuye (la librería y la imagen) **no entra nada no comercial 
 
 Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que se prueban y se comprueban aquí están en `uv.lock`.
 
+## Dependencias directas añadidas después del scaffold
+
+| Paquete | Licencia | Para qué |
+|---|---|---|
+| anyio | MIT | Ya venía con Starlette y httpx; se declara porque el streaming (parte 5c) la usa directamente para cerrar la conexión con el proveedor aunque el cliente se vaya (`CancelScope(shield=True)`). |
+
 ## Dependencias de copyleft débil
 
 | Paquete | Licencia | Por qué se acepta |

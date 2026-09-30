@@ -342,8 +342,10 @@ def test_anthropic_stream_without_message_stop_is_cut() -> None:
 
 
 def test_anthropic_abort_flushes_text_drops_tool_input_and_ends_with_error() -> None:
+    tool = {"type": "tool_use", "id": "t", "name": "f", "input": {}}
     text = (
         anthropic_event(TEXT_BLOCK_START)
+        + anthropic_event({"type": "content_block_start", "index": 1, "content_block": tool})
         + anthropic_event(
             {
                 "type": "content_block_delta",
@@ -374,3 +376,73 @@ def test_anthropic_accumulated_input_has_a_limit() -> None:
     deltas = [{"type": "input_json_delta", "partial_json": big} for big in _BIG_PIECES]
     with pytest.raises(StreamLimitExceeded):
         _run(AnthropicMessagesStream(_vault()), _block(0, {"type": "tool_use"}, deltas), end=False)
+
+
+# --- Review round -------------------------------------------------------------------------------
+
+
+def test_openai_limit_in_one_choice_keeps_what_other_choices_restored() -> None:
+    stream = OpenAIChatStream(_vault())
+    choices = [
+        {"index": 0, "delta": {"content": "hola [[ES_DNI_1]] y [[EMA"}},
+        {"index": 1, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "x"}}]}},
+    ]
+    stream._arguments._size = MAX_ACCUMULATED_CHARS  # the next piece passes the limit
+    event = SSEParser().feed(f"data: {json.dumps({'id': 'c', 'choices': choices})}\n\n")[0]
+    with pytest.raises(StreamLimitExceeded):
+        stream.event(event)
+    out = stream.abort("stream_limit_exceeded", "fixed")
+    assert openai_text(out) == f"hola {DNI} y [[EMA"  # restored text is never dropped
+    assert "arguments" not in out
+
+
+def test_openai_tool_call_without_index_passes_and_is_counted() -> None:
+    call = {"id": "x", "function": {"name": "f", "arguments": '{"a": "[[ES_DNI_1]]"}'}}
+    chunk = _chunk({"tool_calls": [call]})
+    stream = OpenAIChatStream(_vault())
+    assert _run(stream, chunk, end=False) == chunk
+    assert stream.unknown == 1
+
+
+def test_openai_empty_delta_with_extra_top_level_field_is_kept() -> None:
+    chunk = {"id": "c", "obfuscation": "abc", "choices": [{"index": 0, "delta": {"content": "[["}}]}
+    out = _run(OpenAIChatStream(_vault()), f"data: {json.dumps(chunk)}\n\n", end=False)
+    (payload,) = sse_payloads(out)
+    assert payload["obfuscation"] == "abc"
+    assert payload["choices"][0]["delta"]["content"] == ""
+
+
+def test_openai_provider_error_event_ends_the_stream_without_a_cut() -> None:
+    stream = OpenAIChatStream(_vault())
+    _run(stream, 'data: {"error": {"message": "overloaded"}}\n\n', end=False)
+    assert stream.end() == ""
+
+
+def test_anthropic_provider_error_event_ends_the_stream_without_a_cut() -> None:
+    stream = AnthropicMessagesStream(_vault())
+    error = anthropic_event({"type": "error", "error": {"type": "overloaded_error"}})
+    _run(stream, error, end=False)
+    assert stream.end() == ""
+
+
+@pytest.mark.parametrize("block", [{"type": "server_tool_use", "id": "s", "name": "web"}, None])
+def test_anthropic_input_json_of_other_blocks_passes_untouched(
+    block: dict[str, Any] | None,
+) -> None:
+    delta = anthropic_event(
+        {
+            "type": "content_block_delta",
+            "index": 3,
+            "delta": {"type": "input_json_delta", "partial_json": '{"q": "[[ES_DNI_1]]"}'},
+        }
+    )
+    start = (
+        anthropic_event({"type": "content_block_start", "index": 3, "content_block": block})
+        if block
+        else ""
+    )
+    stream = AnthropicMessagesStream(_vault())
+    out = _run(stream, start + delta, end=False)
+    assert delta in out
+    assert DNI not in out
+    assert stream.unknown == 1

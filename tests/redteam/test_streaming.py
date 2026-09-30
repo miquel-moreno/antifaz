@@ -222,16 +222,24 @@ def test_stream_malformado_termina_con_error_fijo(route: str, body: bytes) -> No
 
 
 @pytest.mark.parametrize("route", ROUTES)
-def test_marcador_eterno_supera_el_tope(route: str) -> None:
-    """El modelo escribe "[[" y cientos de espacios para que la pasarela retenga sin fin."""
+@pytest.mark.parametrize(
+    "text",
+    [
+        "hola [[" + " " * (MAX_HOLDBACK * 3) + "fin]]",
+        "enlace [[" + "Pagina_De_Ejemplo_Muy_Larga_" * 4 + "]] y sigue",
+        "tabla [[" + "A" * 200,
+    ],
+    ids=["spaces", "wiki-link", "letters"],
+)
+def test_corchetes_largos_legitimos_no_cortan_el_stream(route: str, text: str) -> None:
+    """Un texto normal con "[[" y mucho detrás (enlace wiki, espacios) llega entero y sin error."""
     build = ROUTES[route][4]
-    text = "hola [[" + " " * (MAX_HOLDBACK * 3)
     _, clients = _clients(route, lambda _: sse_response(build([text[:40], text[40:]]))[0])
     for client in clients:
-        response = _post(route, client, "hola")
-        event = _error_event(route, response.text)
-        assert event["message"] == "the provider's answer passed a size limit"
-        assert TEXT_OF[route](response.text).startswith("hola [[")
+        response = _post(route, client, f"DNI {DNI}")
+        assert TEXT_OF[route](response.text) == text
+        assert "antifaz_error" not in response.text
+        assert "event: error" not in response.text
 
 
 # --- Markers, reasoning and unknown events ------------------------------------------------------
@@ -369,6 +377,150 @@ def test_la_clave_nunca_sale_en_el_stream(
             assert response.status_code == 502
         else:
             assert "contained a key" in response.text
+
+
+def _assert_key_dropped(response: httpx.Response, caplog: pytest.LogCaptureFixture) -> None:
+    unescaped = response.text.encode("ascii", "replace").decode("unicode_escape", "replace")
+    twice = unescaped.encode("ascii", "replace").decode("unicode_escape", "replace")
+    for seen in (response.text, unescaped, twice, str(response.headers.raw), caplog.text):
+        assert CANARY not in seen
+        assert GATEWAY_CANARY not in seen
+    assert "contained a key" in response.text
+
+
+CANARY_AUTH = {"x-api-key": GATEWAY_CANARY, "anthropic-version": "2023-06-01"}
+
+
+def _openai_tool_stream(pieces: list[str]) -> str:
+    first = {"index": 0, "id": "c1", "type": "function", "function": {"name": "f"}}
+    calls = [first] + [{"index": 0, "function": {"arguments": p}} for p in pieces]
+    chunks = [{"choices": [{"index": 0, "delta": {"tool_calls": [c]}}]} for c in calls]
+    chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+    return "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+
+
+def _anthropic_tool_stream(pieces: list[str]) -> str:
+    tool = {"type": "tool_use", "id": "t", "name": "f", "input": {}}
+    events = [anthropic_event({"type": "content_block_start", "index": 0, "content_block": tool})]
+    events += [
+        anthropic_event(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": p},
+            }
+        )
+        for p in pieces
+    ]
+    events.append(anthropic_event({"type": "content_block_stop", "index": 0}))
+    return "".join(events) + anthropic_event({"type": "message_stop"})
+
+
+TOOL_STREAM = {"openai": _openai_tool_stream, "anthropic": _anthropic_tool_stream}
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_clave_escapada_dos_veces_en_argumentos_del_stream(
+    route: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Los argumentos traen la clave escapada en su JSON: al restaurar saldría en claro."""
+    caplog.set_level(logging.DEBUG)
+    arguments = '{"a": "' + _escaped(CANARY) + '"}'
+    pieces = [arguments[i : i + 9] for i in range(0, len(arguments), 9)]
+    upstream = FakeUpstream(lambda _: sse_response(TOOL_STREAM[route](pieces))[0])
+    for client in _canary_client(upstream):
+        path, body = ROUTES[route][1], ROUTES[route][3]
+        response = client.post(path, json=body("hola", stream=True), headers=CANARY_AUTH)
+        _assert_key_dropped(response, caplog)
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_clave_escapada_en_herramientas_sin_stream(
+    route: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Sin stream: la clave escapada dentro de arguments o de tool_use.input da un 502 fijo."""
+    caplog.set_level(logging.DEBUG)
+    if route == "openai":
+        call = {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "f", "arguments": '{"a": "' + _escaped(CANARY) + '"}'},
+        }
+        answer = {"choices": [{"index": 0, "message": {"role": "assistant", "tool_calls": [call]}}]}
+    else:
+        tool = {"type": "tool_use", "id": "t", "name": "f", "input": {"a": _escaped(CANARY)}}
+        answer = {"type": "message", "role": "assistant", "content": [tool]}
+    upstream = FakeUpstream(lambda _: httpx.Response(200, json=answer))
+    for client in _canary_client(upstream):
+        path, body = ROUTES[route][1], ROUTES[route][3]
+        response = client.post(path, json=body("hola"), headers=CANARY_AUTH)
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "bad_upstream_response"
+        _assert_key_dropped(response, caplog)
+
+
+def _openai_chunks(*deltas: tuple[int, dict[str, Any]]) -> str:
+    chunks = [{"choices": [{"index": i, "delta": d}]} for i, d in deltas]
+    return "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+
+
+def _anthropic_deltas(*deltas: tuple[int, dict[str, Any]]) -> str:
+    events = [
+        anthropic_event({"type": "content_block_delta", "index": i, "delta": d}) for i, d in deltas
+    ]
+    return "".join(events) + anthropic_event({"type": "message_stop"})
+
+
+HEAD, TAIL = CANARY[:12], CANARY[12:]
+INTERLEAVED = {
+    "choices": (
+        "openai",
+        _openai_chunks((0, {"content": HEAD}), (1, {"content": "otra"}), (0, {"content": TAIL})),
+    ),
+    "content-refusal": (
+        "openai",
+        _openai_chunks((0, {"content": HEAD}), (0, {"refusal": "no"}), (0, {"content": TAIL})),
+    ),
+    "reasoning_content": (
+        "openai",
+        _openai_chunks(
+            (0, {"reasoning_content": HEAD}),
+            (0, {"content": "x"}),
+            (0, {"reasoning_content": TAIL}),
+        ),
+    ),
+    "text-thinking": (
+        "anthropic",
+        _anthropic_deltas(
+            (0, {"type": "text_delta", "text": HEAD}),
+            (1, {"type": "thinking_delta", "thinking": "pienso"}),
+            (0, {"type": "text_delta", "text": TAIL}),
+        ),
+    ),
+    "citations": (
+        "anthropic",
+        _anthropic_deltas(
+            (2, {"type": "citations_delta", "citation": {"cited_text": HEAD}}),
+            (0, {"type": "text_delta", "text": "x"}),
+            (2, {"type": "citations_delta", "citation": {"cited_text": TAIL}}),
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", INTERLEAVED)
+def test_clave_partida_entre_campos_intercalados(
+    case: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """La clave llega partida en un campo, con otros campos o choices en medio."""
+    caplog.set_level(logging.DEBUG)
+    route, stream = INTERLEAVED[case]
+    upstream = FakeUpstream(lambda _: sse_response(stream)[0])
+    for client in _canary_client(upstream):
+        path, body = ROUTES[route][1], ROUTES[route][3]
+        response = client.post(path, json=body("hola", stream=True), headers=CANARY_AUTH)
+        assert "contained a key" in response.text, case
+        assert CANARY not in response.text.replace("\n", "").replace('"', ""), case
 
 
 # --- The client goes away -------------------------------------------------------------------------
