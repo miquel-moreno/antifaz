@@ -1,6 +1,6 @@
 # ADR-0013 · El proxy: qué se enmascara, qué se envía y qué se restaura
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-09-30)
 - **Fecha:** 2026-09-30
 - **Concreta:** el ADR-0006 (campos desconocidos) y el ADR-0012 (escape) para la pasarela HTTP
 
