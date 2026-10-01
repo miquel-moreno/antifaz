@@ -130,6 +130,7 @@ jobs:
           syft-version: v1.51.1
           format: cyclonedx-json
           artifact-name: antifaz-image.cdx.json
+          upload-artifact-retention: 30
           upload-release-assets: false
       - name: Vulnerability scan of the image (Grype, fails on high or critical)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2

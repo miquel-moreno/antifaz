@@ -123,8 +123,14 @@ def test_the_image_has_no_env_file_anywhere(stack: Stack) -> None:
 def test_the_image_has_no_dev_tools_nor_http_clients() -> None:
     pytest_import = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-c", "import pytest")
     assert pytest_import.returncode != 0
-    tools = docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c", "command -v curl wget")
+    tools = docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c", "command -v curl wget pip")
     assert tools.stdout.strip() == ""
+
+
+def test_the_image_ships_no_pip() -> None:
+    for module in ("pip", "ensurepip"):
+        found = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", module, "--version")
+        assert found.returncode != 0, f"python -m {module} works in the image"
 
 
 def test_image_size_is_recorded_and_bounded() -> None:
@@ -237,6 +243,18 @@ def test_container_logs_hold_no_values_and_no_keys(stack: Stack) -> None:
         json={"model": "gpt-x", "messages": [{"role": "user", "content": _message("e2e-logs")}]},
         timeout=30,
     )
+    # The DNI in a query string (refused by the detector) and in an unknown path (404).
+    in_query = httpx.get(
+        f"{stack.gateway}/v1/models",
+        params={"after_id": DNI},
+        headers=_anthropic_headers(stack),
+        timeout=30,
+    )
+    assert in_query.status_code == 400
+    in_path = httpx.get(f"{stack.gateway}/v1/{DNI}", headers=_openai_headers(stack), timeout=30)
+    assert in_path.status_code == 404
+    for answer in (in_query, in_path):
+        assert DNI not in answer.text
     logs = stack.compose("logs", "--no-color", "antifaz").stdout
     assert logs, "no logs to check"
     assert DNI not in logs and EMAIL not in logs

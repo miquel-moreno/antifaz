@@ -15,10 +15,9 @@ services:
       # ANTIFAZ_ENV_FILE lets the end-to-end tests use a throwaway file instead of your .env.
       - path: ${ANTIFAZ_ENV_FILE:-.env}
         required: true
-    environment:
-      # The host names clients use. "antifaz" is the service name, for other containers on
-      # the same Compose network (http://antifaz:8000). Set it in .env to change it.
-      ANTIFAZ_ALLOWED_HOSTS: ${ANTIFAZ_ALLOWED_HOSTS:-localhost,127.0.0.1,[::1],antifaz}
+    # Every setting comes from that file (no `environment:` here to override it). The host
+    # names in .env.example include "antifaz", the service name, so other containers on the
+    # same Compose network reach it at http://antifaz:8000.
     # Only this machine can reach it. To expose it to a network, put a reverse proxy with HTTPS
     # in front (docs/TECNICO.md) instead of publishing the port on 0.0.0.0.
     ports:

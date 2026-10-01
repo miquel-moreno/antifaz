@@ -52,6 +52,17 @@ def test_the_server_starts_from_the_factory_without_proxy_headers() -> None:
     (entrypoint,) = _instructions("ENTRYPOINT")
     assert '"--factory", "antifaz.api.app:create_app"' in entrypoint
     assert '"--no-proxy-headers"' in entrypoint
+    # No uvicorn access log (it would hold paths and queries) and no Server header.
+    assert '"--no-access-log"' in entrypoint
+    assert '"--no-server-header"' in entrypoint
+
+
+def test_the_final_stage_removes_pip_and_ensurepip() -> None:
+    final = re.sub(r"\\\n\s*", " ", DOCKERFILE.rsplit("AS runtime", 1)[1])
+    joined = " ".join(re.findall(r"^RUN\s+(.+)$", final, re.MULTILINE))
+    for leftover in ("site-packages/pip", "site-packages/setuptools", "site-packages/wheel"):
+        assert leftover in joined, leftover
+    assert "ensurepip" in joined and "/usr/local/bin/pip" in joined
 
 
 def test_the_image_installs_no_dev_dependencies_and_no_extras() -> None:
@@ -95,8 +106,13 @@ def test_compose_publishes_the_port_on_loopback_only() -> None:
     assert SERVICE["ports"] == ["127.0.0.1:${ANTIFAZ_PORT:-8000}:8000"]
 
 
-def test_compose_allows_the_service_name_as_host() -> None:
-    hosts = SERVICE["environment"]["ANTIFAZ_ALLOWED_HOSTS"]
-    assert hosts.startswith("${ANTIFAZ_ALLOWED_HOSTS:-")
-    default = hosts.removeprefix("${ANTIFAZ_ALLOWED_HOSTS:-").removesuffix("}").split(",")
-    assert "antifaz" in default and "localhost" in default
+def test_the_env_file_is_the_only_source_of_settings() -> None:
+    # No `environment:` that could silently override what the admin wrote in .env.
+    assert "environment" not in SERVICE
+
+
+def test_the_example_env_file_allows_the_service_name_as_host() -> None:
+    example = (REPO / ".env.example").read_text(encoding="utf-8")
+    (line,) = [x for x in example.splitlines() if x.startswith("ANTIFAZ_ALLOWED_HOSTS=")]
+    hosts = line.removeprefix("ANTIFAZ_ALLOWED_HOSTS=").split(",")
+    assert "antifaz" in hosts and "localhost" in hosts

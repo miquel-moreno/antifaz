@@ -4,6 +4,7 @@ The image has no curl or wget (fewer tools for an attacker), so Docker runs this
 asks the gateway inside the same container (127.0.0.1:8000) with a Host header taken from
 ANTIFAZ_ALLOWED_HOSTS, so the trusted-host check accepts it whatever names the admin set.
 It reads only the environment (never a .env file) and prints nothing but a short reason.
+It never goes through a proxy: HTTP(S)_PROXY in the environment is ignored for this check.
 """
 
 import json
@@ -25,11 +26,16 @@ def host_header(allowed_hosts: Sequence[str]) -> str:
     return allowed_hosts[0].replace("*", "healthcheck", 1)
 
 
+def make_opener() -> urllib.request.OpenerDirector:
+    """An opener with no proxies (ProxyHandler({}) replaces the one that reads HTTP_PROXY)."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def main() -> int:
     try:
         hosts = Settings(_env_file=None).allowed_hosts
         request = urllib.request.Request(URL, headers={"Host": host_header(hosts)})
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+        with make_opener().open(request, timeout=TIMEOUT_SECONDS) as response:
             body = json.loads(response.read(4096))
             healthy = response.status == 200 and body.get("status") == "ok"
     except (OSError, ValueError, AttributeError):

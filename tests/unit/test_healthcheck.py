@@ -35,12 +35,33 @@ class _Response(io.BytesIO):
         self.close()
 
 
+class _Opener:
+    def __init__(self, open_: Any) -> None:
+        self.open = open_
+
+
 def _fake_urlopen(status: int, body: bytes, seen: list[urllib.request.Request]) -> Any:
     def urlopen(request: urllib.request.Request, timeout: float) -> _Response:
         seen.append(request)
         return _Response(status, body)
 
-    return urlopen
+    return lambda: _Opener(urlopen)
+
+
+def test_the_check_never_goes_through_an_http_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://proxy.invalid:3128")
+
+    def proxied(opener: urllib.request.OpenerDirector) -> bool:
+        # `handlers` and `proxies` are real attributes that typeshed does not declare.
+        return any(
+            isinstance(handler, urllib.request.ProxyHandler) and bool(handler.proxies)  # type: ignore[attr-defined]
+            for handler in opener.handlers  # type: ignore[attr-defined]
+        )
+
+    # A default opener would send the check to the proxy; ours never does.
+    assert proxied(urllib.request.build_opener())
+    assert not proxied(healthcheck.make_opener())
 
 
 def test_healthy_gateway_exits_0_and_sends_an_allowed_host(
@@ -49,7 +70,7 @@ def test_healthy_gateway_exits_0_and_sends_an_allowed_host(
     monkeypatch.setenv("ANTIFAZ_ALLOWED_HOSTS", "antifaz,localhost")
     seen: list[urllib.request.Request] = []
     body = json.dumps({"status": "ok", "version": "0.1.0"}).encode()
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(200, body, seen))
+    monkeypatch.setattr(healthcheck, "make_opener", _fake_urlopen(200, body, seen))
 
     assert healthcheck.main() == 0
     assert seen[0].full_url == "http://127.0.0.1:8000/healthz"
@@ -59,14 +80,14 @@ def test_healthy_gateway_exits_0_and_sends_an_allowed_host(
 def test_a_body_that_is_not_ok_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[urllib.request.Request] = []
     body = json.dumps({"status": "starting"}).encode()
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(200, body, seen))
+    monkeypatch.setattr(healthcheck, "make_opener", _fake_urlopen(200, body, seen))
 
     assert healthcheck.main() == 1
 
 
 def test_a_non_json_body_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[urllib.request.Request] = []
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(200, b"<html>", seen))
+    monkeypatch.setattr(healthcheck, "make_opener", _fake_urlopen(200, b"<html>", seen))
 
     assert healthcheck.main() == 1
 
@@ -77,7 +98,7 @@ def test_an_unreachable_gateway_exits_1_without_a_traceback(
     def urlopen(request: urllib.request.Request, timeout: float) -> _Response:
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(healthcheck, "make_opener", lambda: _Opener(urlopen))
 
     assert healthcheck.main() == 1
     assert "Traceback" not in capsys.readouterr().err

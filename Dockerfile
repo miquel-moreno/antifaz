@@ -54,6 +54,17 @@ RUN groupadd --system --gid 10001 antifaz \
     && useradd --system --uid 10001 --gid 10001 --no-create-home \
        --home-dir /nonexistent --shell /usr/sbin/nologin antifaz
 
+# The base image ships pip (and ensurepip to reinstall it): the gateway needs neither, and an
+# installer is one more tool for an attacker and more packages to scan. Removed, not shipped.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+           /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+           /usr/local/lib/python3.12/site-packages/setuptools \
+           /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
+           /usr/local/lib/python3.12/site-packages/wheel \
+           /usr/local/lib/python3.12/site-packages/wheel-*.dist-info \
+           /usr/local/lib/python3.12/ensurepip \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
+
 # Owned by root and not writable by the user that runs the gateway.
 COPY --from=build /app/.venv /app/.venv
 
