@@ -141,6 +141,25 @@ async def send_masked(
     request = client.build_request(
         "POST", url, content=payload, headers={**headers, "Content-Type": "application/json"}
     )
+    return await _send(client, request, keys, stream=stream)
+
+
+async def send_get(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: Mapping[str, str],
+    params: Sequence[tuple[str, str]],
+    keys: Sequence[str],
+) -> httpx.Response:
+    """A GET without a body (the model list): the same fixed errors, no redirects and the
+    same check for keys in the answer as send_masked. `params` must be checked already."""
+    request = client.build_request("GET", url, params=list(params), headers=dict(headers))
+    return await _send(client, request, keys, stream=False)
+
+
+async def _send(
+    client: httpx.AsyncClient, request: httpx.Request, keys: Sequence[str], *, stream: bool
+) -> httpx.Response:
     try:
         upstream = await client.send(request, stream=stream)
     except httpx.TimeoutException:

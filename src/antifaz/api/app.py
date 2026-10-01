@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 
 from antifaz import __version__
-from antifaz.api import anthropic, health, openai
+from antifaz.api import anthropic, health, models, openai, scan
 from antifaz.api.errors import register_error_handlers
 from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.middleware import request_id_middleware
@@ -22,7 +22,8 @@ from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.setup import ner_from_settings
-from antifaz.detect.scan import Scanner, scan
+from antifaz.detect.scan import Scanner
+from antifaz.detect.scan import scan as scan_text
 from antifaz.logging import configure_logging
 from antifaz.mask import Detector
 from antifaz.policy import DEFAULT_POLICY, Policy
@@ -89,7 +90,7 @@ def create_app(
         redirect_slashes=False,
     )
     app.state.settings = settings
-    app.state.detector = detector or (Scanner(ner) if ner is not None else scan)
+    app.state.detector = detector or (Scanner(ner) if ner is not None else scan_text)
     app.state.ner = ner
     app.state.policy = policy
     app.state.stream_counters = StreamCounters()
@@ -97,6 +98,8 @@ def create_app(
     app.include_router(health.router)
     app.include_router(openai.router)
     app.include_router(anthropic.router)
+    app.include_router(models.router)
+    app.include_router(scan.router)
     app.state.route_paths = registered_paths(app)
     # The last one added runs first: request id -> trusted host -> gate (key, Origin, JSON).
     app.add_middleware(GateMiddleware, api_key=api_key, allowed_origins=settings.allowed_origins)

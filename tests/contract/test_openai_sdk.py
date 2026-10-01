@@ -19,6 +19,7 @@ from tests.contract.conftest import (
     FixtureUpstream,
     assert_nothing_leaked,
 )
+from tests.integration.fakes import GATEWAY_KEY, PROVIDER_KEY
 
 MODEL = "gpt-4o-mini"
 TOOLS: list[Any] = [
@@ -315,3 +316,18 @@ async def test_recorded_streamed_tool_call_arguments_are_restored_json(
     assert names == ["lookup_customer"]
     assert json.loads("".join(arguments)) == {"dni": DNI}
     assert_nothing_leaked(upstream)
+
+
+async def test_models_list_reaches_openai_and_is_parsed(
+    openai_client: openai.AsyncOpenAI, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("openai_models.json")
+
+    page = await openai_client.models.list()
+
+    assert [model.id for model in page.data] == ["gpt-4.1-nano", "gpt-4o-mini"]
+    (sent,) = upstream.requests
+    assert sent.method == "GET"
+    assert str(sent.url) == "https://openai.invalid/v1/models"
+    assert sent.headers["authorization"] == f"Bearer {PROVIDER_KEY}"
+    assert GATEWAY_KEY not in upstream.sent()

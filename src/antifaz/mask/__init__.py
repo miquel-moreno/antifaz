@@ -90,6 +90,18 @@ def _well_formed(spans: list[Span], length: int) -> bool:
     return True
 
 
+def find_spans(
+    texts: Sequence[str], policy: Policy = DEFAULT_POLICY, *, detector: Detector = scan
+) -> list[list[Span]]:
+    """The spans mask() works with, per text: the detector's (checked) plus every other
+    appearance of a NER value the policy hides (ADR-0016). Types the policy allows are kept:
+    this says what was found, mask() decides what to hide. Raises DetectorFailed.
+    """
+    return propagate(
+        texts, _detect(texts, detector), lambda entity: policy.action_for(entity) is Action.MASK
+    )
+
+
 def mask(
     texts: str | Sequence[str],
     policy: Policy = DEFAULT_POLICY,
@@ -103,9 +115,7 @@ def mask(
     `reserved` tokens (e.g. "ES_DNI_1") are skipped by the numbering and never restored.
     """
     items = (texts,) if isinstance(texts, str) else tuple(texts)
-    found = propagate(
-        items, _detect(items, detector), lambda entity: policy.action_for(entity) is Action.MASK
-    )
+    found = find_spans(items, policy, detector=detector)
     vault = Vault(reserved)
     hidden: dict[EntityType, None] = {}
     masked = []
@@ -125,4 +135,4 @@ def mask(
     return MaskResult(texts=tuple(masked), vault=vault, hidden=tuple(hidden))
 
 
-__all__ = ["BatchDetector", "Detector", "MaskResult", "escape", "mask"]
+__all__ = ["BatchDetector", "Detector", "MaskResult", "escape", "find_spans", "mask"]

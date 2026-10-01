@@ -13,6 +13,7 @@ import pytest
 from antifaz import DetectorFailed, guard, mask, restore
 from antifaz.detect.scan import Scanner
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
+from antifaz.mask import find_spans
 from antifaz.mask.propagate import MAX_PROPAGATED_VALUES
 from antifaz.policy import Action, Policy
 from tests.conftest import SENTINEL_DNI
@@ -199,3 +200,37 @@ def test_too_many_ner_values_in_one_request_block() -> None:
     with pytest.raises(DetectorFailed):
         mask([text], detector=lambda _: spans)
     assert mask([text], detector=lambda _: spans[:-1]).texts[0].count("[[PERSON_") == len(spans) - 1
+
+
+# --- find_spans(): what mask() would hide, as positions (POST /antifaz/scan, issue 29) -------
+
+
+def test_find_spans_gives_the_spans_mask_uses_with_propagation() -> None:
+    texts = [f"Hola, soy {CARMEN}.", f"{CARMEN} otra vez"]
+
+    found = find_spans(texts, detector=only_first(CARMEN))
+
+    assert [[(s.start, s.end, s.type) for s in spans] for spans in found] == [
+        [(10, 10 + len(CARMEN), EntityType.PERSON)],
+        [(0, len(CARMEN), EntityType.PERSON)],
+    ]
+
+
+def test_find_spans_keeps_types_the_policy_allows() -> None:
+    allow = Policy(entities=MappingProxyType({EntityType.ES_DNI: Action.ALLOW}))
+
+    (spans,) = find_spans([f"DNI {SENTINEL_DNI}"], allow)
+
+    assert [s.type for s in spans] == [EntityType.ES_DNI]
+
+
+@pytest.mark.parametrize(
+    "detector",
+    [
+        lambda text: 1 / 0,
+        lambda text: [Span(0, 99, EntityType.ES_DNI, Layer.VALIDATOR, Confidence.HIGH)],
+    ],
+)
+def test_find_spans_blocks_when_the_detector_fails(detector: Callable[[str], object]) -> None:
+    with pytest.raises(DetectorFailed):
+        find_spans(["hola"], detector=detector)  # type: ignore[arg-type]

@@ -20,6 +20,7 @@ from tests.contract.conftest import (
     assert_nothing_leaked,
     load_json,
 )
+from tests.integration.fakes import GATEWAY_KEY, PROVIDER_KEY
 
 MODEL = "claude-sonnet-4-5"
 SIGNATURE = load_json("anthropic_messages_thinking.json")["body"]["content"][0]["signature"]
@@ -317,3 +318,19 @@ async def test_image_is_blocked_with_bad_request_error(
         )
 
     assert upstream.requests == []
+
+
+async def test_models_list_reaches_anthropic_and_is_parsed(
+    anthropic_client: anthropic.AsyncAnthropic, upstream: FixtureUpstream
+) -> None:
+    upstream.serve("anthropic_models.json")
+
+    page = await anthropic_client.models.list(limit=5)
+
+    assert [model.id for model in page.data] == ["claude-sonnet-4-5"]
+    (sent,) = upstream.requests
+    assert sent.method == "GET"
+    assert str(sent.url) == "https://anthropic.invalid/v1/models?limit=5"
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+    assert sent.headers["x-api-key"] == PROVIDER_KEY
+    assert GATEWAY_KEY not in upstream.sent()

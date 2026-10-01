@@ -4,7 +4,7 @@ Estas son las respuestas que el **proveedor falso** devuelve a Antifaz en `tests
 
 ## Cómo se hicieron
 
-- **Escritas a mano** (2026-09-30, parte 5d, sin coste), todas las que no empiezan por `openai_recorded_`. Copian la forma de las respuestas oficiales de OpenAI Chat Completions y Anthropic Messages (con y sin streaming, herramientas, razonamiento, `count_tokens` y errores 400, 401, 429 y 502) según su documentación pública.
+- **Escritas a mano** (2026-09-30, parte 5d, sin coste), todas las que no empiezan por `openai_recorded_`. Copian la forma de las respuestas oficiales de OpenAI Chat Completions y Anthropic Messages (con y sin streaming, herramientas, razonamiento, `count_tokens` y errores 400, 401, 429 y 502) según su documentación pública. `openai_models.json` y `anthropic_models.json` (issue 29, 2026-10-01) son la lista de modelos de cada uno.
 - Solo llevan **marcadores** (`[[ES_DNI_1]]`, `[[EMAIL_1]]`, `[[IBAN_1]]`) y datos inventados: ids como `msg_contract_text_0001`, una firma de razonamiento falsa (`fake-signature-for-contract-tests` en base64) y cifras de uso inventadas.
 - Cada una dice de dónde sale:
   - `.json`: campo `"provenance"` (junto a `"status"` y `"body"`);

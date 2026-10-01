@@ -18,7 +18,13 @@ from antifaz.detect.scan import scan
 from antifaz.mask import Detector
 from tests.integration import test_proxy_anthropic as anth
 from tests.integration import test_proxy_openai as oai
-from tests.integration.fakes import GATEWAY_KEY, PROVIDER_KEY, FakeUpstream, compact
+from tests.integration.fakes import (
+    GATEWAY_KEY,
+    PROVIDER_KEY,
+    FakeUpstream,
+    compact,
+    models_list,
+)
 
 # Synthetic, checksum-valid values (never real people).
 DNI = "12345678Z"
@@ -116,7 +122,11 @@ GATEWAY_BODY: dict[str, Any] = {
 
 
 def both_echo(request: httpx.Request) -> httpx.Response:
-    """Answers like the OpenAI or the Anthropic fake, depending on the destination."""
+    """Answers like the OpenAI or the Anthropic fake, depending on the destination.
+
+    GET is the model list (`GET /v1/models`), the only route without a body."""
+    if request.method == "GET":
+        return models_list(request)
     if request.url.host == httpx.URL(oai.UPSTREAM).host:
         return oai.echo(request)
     return anth.echo(request)

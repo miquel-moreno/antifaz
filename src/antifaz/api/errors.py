@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from antifaz.errors import AntifazBlocked
 
@@ -71,6 +72,23 @@ class InvalidHeaderError(AppError):
         )
 
 
+class InvalidQueryError(AppError):
+    code = "invalid_query"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "query parameters: none for OpenAI; for Anthropic only limit (1-1000), after_id and "
+            "before_id (letters, digits, . _ : -), each at most once"
+        )
+
+
+class InvalidScanBodyError(AppError):
+    code = "invalid_request"
+
+    def __init__(self) -> None:
+        super().__init__('the body must be a JSON object with only "text", a string')
+
+
 class PayloadTooLargeError(AppError):
     status_code = 413
     code = "payload_too_large"
@@ -136,6 +154,44 @@ class UpstreamEchoedKeyError(BadUpstreamResponseError):
 
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    """Every error of Antifaz itself: a stable code and a fixed message (OpenAPI only)."""
+
+    error: ErrorDetail
+
+
+_STATUS_TEXT = {
+    400: "Invalid request, or blocked to protect personal data (`antifaz_blocked`)",
+    401: "Missing or invalid Antifaz key",
+    403: "Request from a browser origin that is not allowed",
+    413: "Body too large",
+    415: "Content-Type is not application/json (UTF-8)",
+    502: "The provider could not be reached, redirected or answered with a key",
+    503: "The gateway has no key for this provider",
+    504: "The provider did not answer in time",
+}
+
+
+def json_body(description: str) -> dict[str, object]:
+    """`openapi_extra` for a route that reads its JSON body itself (the proxy's own rules)."""
+    schema = {"type": "object", "description": description}
+    return {"requestBody": {"required": True, "content": {"application/json": {"schema": schema}}}}
+
+
+def error_responses(*statuses: int) -> dict[int | str, dict[str, object]]:
+    """The `responses` of a route in the OpenAPI file, for its own errors."""
+    return {s: {"model": ErrorBody, "description": _STATUS_TEXT[s]} for s in statuses}
+
+
+# The errors of the routes that send a body to a provider.
+PROXY_ERRORS = error_responses(400, 401, 403, 413, 415, 502, 503, 504)
 
 
 async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
