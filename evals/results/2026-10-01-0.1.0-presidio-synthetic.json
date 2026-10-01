@@ -1,0 +1,405 @@
+{
+ "dataset": "synthetic-v1 (evals/datasets/synthetic-v1.jsonl)",
+ "documents": 600,
+ "by_source_label": {
+  "ADDRESS": {
+   "type": null,
+   "n": 240,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 230,
+   "leaks_per_100": 95.83333333333333
+  },
+  "CREDIT_CARD": {
+   "type": "CREDIT_CARD",
+   "n": 80,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "DATE_OF_BIRTH": {
+   "type": null,
+   "n": 60,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 13,
+   "leaks_per_100": 21.666666666666668
+  },
+  "EMAIL": {
+   "type": "EMAIL",
+   "n": 420,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_CCC": {
+   "type": null,
+   "n": 60,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 60,
+   "leaks_per_100": 100.0
+  },
+  "ES_CIF": {
+   "type": null,
+   "n": 60,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 60,
+   "leaks_per_100": 100.0
+  },
+  "ES_DNI": {
+   "type": "ES_DNI",
+   "n": 400,
+   "precision": null,
+   "recall": 0.6875,
+   "f1": null,
+   "leaks": 94,
+   "leaks_per_100": 23.5
+  },
+  "ES_NIE": {
+   "type": "ES_NIE",
+   "n": 60,
+   "precision": null,
+   "recall": 0.7166666666666667,
+   "f1": null,
+   "leaks": 16,
+   "leaks_per_100": 26.666666666666668
+  },
+  "ES_NIF": {
+   "type": null,
+   "n": 40,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 35,
+   "leaks_per_100": 87.5
+  },
+  "ES_NSS": {
+   "type": null,
+   "n": 60,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 60,
+   "leaks_per_100": 100.0
+  },
+  "ES_PASSPORT": {
+   "type": "ES_PASSPORT",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_PLATE": {
+   "type": null,
+   "n": 60,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 60,
+   "leaks_per_100": 100.0
+  },
+  "IBAN": {
+   "type": "IBAN",
+   "n": 120,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "IP": {
+   "type": "IP",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "PHONE": {
+   "type": "PHONE",
+   "n": 440,
+   "precision": null,
+   "recall": 0.9363636363636364,
+   "f1": null,
+   "leaks": 28,
+   "leaks_per_100": 6.363636363636363
+  }
+ },
+ "by_type": {
+  "CREDIT_CARD": {
+   "tp": 80,
+   "fp": 5,
+   "fn": 0,
+   "precision": 0.9411764705882353,
+   "recall": 1.0,
+   "f1": 0.9696969696969697,
+   "strict_precision": 0.9411764705882353,
+   "strict_recall": 1.0,
+   "strict_f1": 0.9696969696969697,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "EMAIL": {
+   "tp": 420,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_DNI": {
+   "tp": 275,
+   "fp": 6,
+   "fn": 125,
+   "precision": 0.9786476868327402,
+   "recall": 0.6875,
+   "f1": 0.8076358296622614,
+   "strict_precision": 0.9786476868327402,
+   "strict_recall": 0.6875,
+   "strict_f1": 0.8076358296622614,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_NIE": {
+   "tp": 43,
+   "fp": 0,
+   "fn": 17,
+   "precision": 1.0,
+   "recall": 0.7166666666666667,
+   "f1": 0.8349514563106796,
+   "strict_precision": 1.0,
+   "strict_recall": 0.7166666666666667,
+   "strict_f1": 0.8349514563106796,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_PASSPORT": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "IBAN": {
+   "tp": 120,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "IP": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "PERSON": {
+   "tp": 0,
+   "fp": 581,
+   "fn": 0,
+   "precision": 0.0,
+   "recall": 0.0,
+   "f1": 0.0,
+   "strict_precision": 0.0,
+   "strict_recall": 0.0,
+   "strict_f1": 0.0,
+   "any_pii_precision": 0.14974182444061962,
+   "non_pii_fp": 494
+  },
+  "PHONE": {
+   "tp": 412,
+   "fp": 0,
+   "fn": 28,
+   "precision": 1.0,
+   "recall": 0.9363636363636364,
+   "f1": 0.9671361502347418,
+   "strict_precision": 1.0,
+   "strict_recall": 0.9363636363636364,
+   "strict_f1": 0.9671361502347418,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  }
+ },
+ "overall": {
+  "total": 2220,
+  "leaked": 656,
+  "leaks_per_100": 29.54954954954955,
+  "covered_total": 1640,
+  "covered_leaked": 138,
+  "covered_leaks_per_100": 8.414634146341463
+ },
+ "latency_ms": {
+  "p50": 4.53315,
+  "p95": 5.15956
+ },
+ "environment": {
+  "date": "2026-10-01",
+  "antifaz": "0.1.0",
+  "commit": "29d06c7",
+  "python": "3.12.12",
+  "os": "Windows-11-10.0.26200-SP0",
+  "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD"
+ },
+ "unmatched_types": {
+  "DATE_TIME": {
+   "detections": 87,
+   "overlapping_gold": 47
+  },
+  "LOCATION": {
+   "detections": 256,
+   "overlapping_gold": 203
+  },
+  "ORGANIZATION": {
+   "detections": 362,
+   "overlapping_gold": 36
+  },
+  "URL": {
+   "detections": 828,
+   "overlapping_gold": 768
+  }
+ },
+ "ner": {},
+ "baseline": {
+  "tool": "presidio-analyzer",
+  "versions": {
+   "presidio-analyzer": "2.2.364",
+   "spacy": "3.8.16",
+   "xx-ent-wiki-sm": "3.8.0",
+   "model_sha256": "6f3c4b853852ea9e9d2dc76cc950dddb10a7e4c42d813308caefe6c5e8be2f0a"
+  },
+  "configuration": {
+   "language": "es",
+   "recognizers": [
+    "CreditCardRecognizer",
+    "CryptoRecognizer",
+    "DateRecognizer",
+    "EmailRecognizer",
+    "IbanRecognizer",
+    "IpRecognizer",
+    "MacAddressRecognizer",
+    "PhoneRecognizer",
+    "UrlRecognizer",
+    "EsNifRecognizer",
+    "EsNieRecognizer",
+    "EsPassportRecognizer",
+    "SpacyRecognizer"
+   ],
+   "phone_regions": [
+    "ES"
+   ],
+   "phone_context": [
+    "teléfono",
+    "telefono",
+    "tel",
+    "móvil",
+    "movil",
+    "fax",
+    "contacto",
+    "llamar"
+   ],
+   "credit_card_context": [
+    "tarjeta",
+    "credito",
+    "visa",
+    "mastercard",
+    "cc",
+    "amex",
+    "discover",
+    "jcb",
+    "diners",
+    "maestro",
+    "instapayment"
+   ],
+   "score_threshold": 0.0,
+   "nlp_configuration": {
+    "nlp_engine_name": "spacy",
+    "models": [
+     {
+      "lang_code": "es",
+      "model_name": "xx_ent_wiki_sm"
+     }
+    ],
+    "ner_model_configuration": {
+     "model_to_presidio_entity_mapping": {
+      "PER": "PERSON",
+      "LOC": "LOCATION",
+      "ORG": "ORGANIZATION"
+     },
+     "low_confidence_score_multiplier": 0.4,
+     "low_score_entity_names": [
+      "ORG",
+      "ORGANIZATION"
+     ],
+     "labels_to_ignore": [
+      "MISC"
+     ]
+    }
+   },
+   "mapping": {
+    "EMAIL_ADDRESS": "EMAIL",
+    "PHONE_NUMBER": "PHONE",
+    "IBAN_CODE": "IBAN",
+    "CREDIT_CARD": "CREDIT_CARD",
+    "IP_ADDRESS": "IP",
+    "ES_NIF": "ES_DNI",
+    "ES_NIE": "ES_NIE",
+    "ES_PASSPORT": "ES_PASSPORT",
+    "PERSON": "PERSON",
+    "LOCATION": null,
+    "ORGANIZATION": null,
+    "DATE_TIME": null,
+    "URL": null,
+    "CRYPTO": null,
+    "MAC_ADDRESS": null
+   },
+   "public_suffix_list": "tldextract's bundled snapshot (no download)"
+  },
+  "shared_types": [
+   "EMAIL",
+   "PHONE",
+   "IBAN",
+   "CREDIT_CARD",
+   "IP",
+   "ES_DNI",
+   "ES_NIE",
+   "ES_PASSPORT"
+  ]
+ }
+}

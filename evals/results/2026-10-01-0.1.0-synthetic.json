@@ -344,13 +344,13 @@
   "covered_leaks_per_100": 0.0
  },
  "latency_ms": {
-  "p50": 0.30225,
-  "p95": 0.407305
+  "p50": 0.3015,
+  "p95": 0.445425
  },
  "environment": {
   "date": "2026-10-01",
   "antifaz": "0.1.0",
-  "commit": "bb6290b",
+  "commit": "29d06c7",
   "python": "3.12.12",
   "os": "Windows-11-10.0.26200-SP0",
   "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD"

@@ -3,10 +3,10 @@
  "documents": 250,
  "by_source_label": {
   "CALLE": {
-   "type": "ADDRESS",
+   "type": null,
    "n": 413,
    "precision": null,
-   "recall": 0.0,
+   "recall": null,
    "f1": null,
    "leaks": 403,
    "leaks_per_100": 97.57869249394673
@@ -53,8 +53,8 @@
    "precision": null,
    "recall": null,
    "f1": null,
-   "leaks": 606,
-   "leaks_per_100": 99.18166939443535
+   "leaks": 105,
+   "leaks_per_100": 17.18494271685761
   },
   "HOSPITAL": {
    "type": null,
@@ -66,10 +66,10 @@
    "leaks_per_100": 39.23076923076923
   },
   "ID_ASEGURAMIENTO": {
-   "type": "ES_NSS",
+   "type": null,
    "n": 198,
    "precision": null,
-   "recall": 0.0,
+   "recall": null,
    "f1": null,
    "leaks": 198,
    "leaks_per_100": 100.0
@@ -188,24 +188,11 @@
    "precision": null,
    "recall": null,
    "f1": null,
-   "leaks": 449,
-   "leaks_per_100": 46.96652719665272
+   "leaks": 447,
+   "leaks_per_100": 46.75732217573222
   }
  },
  "by_type": {
-  "ADDRESS": {
-   "tp": 0,
-   "fp": 0,
-   "fn": 413,
-   "precision": 0.0,
-   "recall": 0.0,
-   "f1": 0.0,
-   "strict_precision": 0.0,
-   "strict_recall": 0.0,
-   "strict_f1": 0.0,
-   "any_pii_precision": 0.0,
-   "non_pii_fp": 0
-  },
   "EMAIL": {
    "tp": 247,
    "fp": 2,
@@ -218,19 +205,6 @@
    "strict_f1": 0.9919678714859438,
    "any_pii_precision": 0.9919678714859438,
    "non_pii_fp": 2
-  },
-  "ES_NSS": {
-   "tp": 0,
-   "fp": 0,
-   "fn": 198,
-   "precision": 0.0,
-   "recall": 0.0,
-   "f1": 0.0,
-   "strict_precision": 0.0,
-   "strict_recall": 0.0,
-   "strict_f1": 0.0,
-   "any_pii_precision": 0.0,
-   "non_pii_fp": 0
   },
   "PERSON": {
    "tp": 849,
@@ -261,26 +235,30 @@
  },
  "overall": {
   "total": 5661,
-  "leaked": 3193,
-  "leaks_per_100": 56.40346228581523,
-  "covered_total": 1896,
-  "covered_leaked": 682,
-  "covered_leaks_per_100": 35.970464135021096
+  "leaked": 2690,
+  "leaks_per_100": 47.51810634163575,
+  "covered_total": 1285,
+  "covered_leaked": 81,
+  "covered_leaks_per_100": 6.303501945525292
  },
  "latency_ms": {
-  "p50": 25.57225,
-  "p95": 53.43691
+  "p50": 27.53265,
+  "p95": 55.85321
  },
  "environment": {
   "date": "2026-10-01",
   "antifaz": "0.1.0",
-  "commit": "bb6290b",
+  "commit": "29d06c7",
   "python": "3.12.12",
   "os": "Windows-11-10.0.26200-SP0",
   "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
   "dataset_md5": "6a09eb975580fdf56bc7041eadc9c921"
  },
  "unmatched_types": {
+  "DATE_TIME": {
+   "detections": 532,
+   "overlapping_gold": 508
+  },
   "LOCATION": {
    "detections": 2112,
    "overlapping_gold": 1298
@@ -288,6 +266,10 @@
   "ORGANIZATION": {
    "detections": 1461,
    "overlapping_gold": 89
+  },
+  "URL": {
+   "detections": 296,
+   "overlapping_gold": 279
   }
  },
  "ner": {},
@@ -302,11 +284,15 @@
   "configuration": {
    "language": "es",
    "recognizers": [
-    "EmailRecognizer",
-    "PhoneRecognizer",
-    "IbanRecognizer",
     "CreditCardRecognizer",
+    "CryptoRecognizer",
+    "DateRecognizer",
+    "EmailRecognizer",
+    "IbanRecognizer",
     "IpRecognizer",
+    "MacAddressRecognizer",
+    "PhoneRecognizer",
+    "UrlRecognizer",
     "EsNifRecognizer",
     "EsNieRecognizer",
     "EsPassportRecognizer",
@@ -374,7 +360,11 @@
     "ES_PASSPORT": "ES_PASSPORT",
     "PERSON": "PERSON",
     "LOCATION": null,
-    "ORGANIZATION": null
+    "ORGANIZATION": null,
+    "DATE_TIME": null,
+    "URL": null,
+    "CRYPTO": null,
+    "MAC_ADDRESS": null
    },
    "public_suffix_list": "tldextract's bundled snapshot (no download)"
   },
