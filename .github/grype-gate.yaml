@@ -1,0 +1,12 @@
+# Grype configuration for the CI gate only (the full report does not use it, so it still
+# lists everything). Kept outside the auto-detected paths (.grype.yaml) on purpose.
+#
+# Every ignore rule needs a reason and a date, and is reviewed when the base image changes.
+ignore:
+  # CVE-2026-82049 in CPython 3.12.14: the only fix is in 3.14 (Grype reports 3.14.0b1 as
+  # the fix version), there is no 3.12 backport. Moving to 3.14 is a separate decision.
+  # Added 2026-10-01. Remove it when a 3.12 fix exists or when the image moves to 3.14.
+  - vulnerability: CVE-2026-82049
+    package:
+      name: python
+      type: binary

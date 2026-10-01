@@ -1,0 +1,38 @@
+# End-to-end override (`make e2e`), always used together with the main docker-compose.yml:
+#   docker compose -p antifaz-e2e -f docker-compose.yml -f tests/e2e/docker-compose.e2e.yml ...
+# It adds a fake provider that records what it gets. The tests write a throwaway env file
+# (random keys, base URLs pointing at the fake) and pass it with --env-file and
+# ANTIFAZ_ENV_FILE, so your .env is never read. Paths are relative to the repository root.
+services:
+  antifaz:
+    depends_on:
+      fake-upstream:
+        condition: service_healthy
+    restart: "no"
+
+  fake-upstream:
+    # The Antifaz image itself (it already has Python): no other image is pulled.
+    image: antifaz:local
+    pull_policy: never
+    entrypoint: ["python", "/e2e/fake_upstream.py"]
+    volumes:
+      - ./tests/e2e/fake_upstream.py:/e2e/fake_upstream.py:ro
+    ports:
+      - "127.0.0.1:${ANTIFAZ_E2E_FAKE_PORT:?set by the e2e tests}:9000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/_e2e/health', timeout=2)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
+    restart: "no"

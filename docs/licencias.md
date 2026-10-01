@@ -106,6 +106,23 @@ presidio-analyzer pide `numpy < 2.5` y el extra `ner` fija una versión más nue
 | tqdm | MPL-2.0 AND MIT | Barras de progreso que usan gliner y transformers (solo con el extra `ner`). Se usa sin modificar; MPL solo obliga a publicar cambios en sus propios archivos. |
 | python-stdnum | LGPL-2.1-or-later | Valida los identificadores de la UE y sirve de oráculo en los tests de DNI, NIE, CIF, CCC e IBAN (ADR-0005). Se usa sin modificar, como dependencia instalada aparte. |
 
+## La imagen de Docker (issue 7, parte 7a)
+
+La imagen lleva Antifaz y sus dependencias de ejecución (las mismas que comprueba `scripts/check_licenses.py`, sin el extra `ner`) sobre la imagen oficial `python:3.12-slim` (Debian 13 "trixie"). Esa base trae los paquetes del sistema de Debian, y algunos son **GPL** (por ejemplo bash, coreutils o apt). Van **sin modificar**, como programas separados que Antifaz no enlaza ni incluye en su código: es la "agregación" que permite la GPL, igual que en cualquier imagen basada en Debian. El SBOM que genera la CI (CycloneDX, Syft) lista cada paquete con su versión exacta y su licencia.
+
+Dos son **bibliotecas** GPL-3, no programas sueltos, y conviene nombrarlas:
+
+| Paquete de Debian | Versión (base del 2026-10-01) | Licencia | Quién la enlaza |
+|---|---|---|---|
+| `libreadline8t64` (GNU readline) | 8.2-6 | GPL-3+ | Solo el módulo `readline` de CPython (`lib-dynload/readline…so`), para la consola interactiva |
+| `libgdbm6t64` (GNU dbm) | 1.24-2 | GPL-3+ | Solo el módulo `_gdbm` de CPython (`dbm.gnu`) |
+
+Antifaz no importa ninguno de esos dos módulos: comprobado el 2026-10-01 importando la app y el healthcheck dentro de la imagen, sin `readline`, `_gdbm` ni `dbm` en `sys.modules`. Vienen con la imagen oficial de Python, sin modificar.
+
+**Código fuente**: el de cada paquete de Debian, en la versión exacta, está en [snapshot.debian.org](https://snapshot.debian.org/) (buscando por nombre y versión, o por la fecha de la imagen base); las versiones exactas salen del SBOM de la CI o de `dpkg -l` dentro de la imagen.
+
+**Pendiente de decidir por Miquel**: si esta excepción de la regla (que habla de "la librería y la imagen") basta así anotada, o si se prefiere una base sin paquetes GPL (por ejemplo una distroless, sin readline ni gdbm), con más trabajo de mantenimiento.
+
 ## Modelos y datos
 
 ### Datos del benchmark (no se distribuyen)

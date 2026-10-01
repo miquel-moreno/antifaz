@@ -93,6 +93,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "N", "S", "RUF"]
 "tests/**" = ["S101", "S105", "S106"]
 # Dev scripts: asserts for invariants; randomness is for fake data, not security.
 "scripts/**" = ["S101", "S311"]
+# End-to-end tests drive the docker CLI with fixed argument lists (never a shell).
+"tests/e2e/**" = ["S101", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
 strict = true
@@ -120,6 +122,7 @@ asyncio_mode = "auto"
 addopts = "-q"
 markers = [
     "ner_model: needs the real NER model (skipped unless ANTIFAZ_NER_MODEL_DIR is set; issue 6b)",
+    "e2e: needs Docker; builds the image and runs Compose (skipped unless --e2e, `make e2e`; issue 7a)",
 ]
 
 [tool.coverage.run]
