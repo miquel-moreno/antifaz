@@ -28,7 +28,7 @@ docker compose up -d --build
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
 ```
 
-Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar y el contenedor se para: es a propósito (ADR-0015). En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
+Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
 
 ### Cómo está hecha la imagen
 
@@ -40,7 +40,8 @@ Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con lo
 | Usuario fijo sin privilegios `10001:10001`, sin home ni shell de login | Si alguien consigue ejecutar código dentro, no es root. El UID fijo permite usarlo en `securityContext` de Kubernetes |
 | El virtualenv es de root y no se puede escribir; bytecode compilado al construir y `PYTHONDONTWRITEBYTECODE=1` | Nada se escribe en tiempo de ejecución: la imagen funciona con el sistema de archivos de solo lectura |
 | `.dockerignore` como lista de permitidos (`pyproject.toml`, `uv.lock`, `README.md`, `LICENSE`, `NOTICE`, `src/`), más exclusiones explícitas (`.env*`, `models/`, `evals/`, `.git`, `.venv`, cachés) por si la lista crece por error | Un `.env`, un modelo, un dataset o un archivo nuevo no entran en la imagen por despiste. Ninguna clave va en la imagen: todas llegan como variables de entorno al arrancar |
-| `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración |
+| Sin pip, setuptools, wheel ni `ensurepip`: se borran de la imagen base en la etapa final | La pasarela no instala nada al ejecutarse; un instalador es una herramienta más para un atacante y más paquetes que escanear. Se borran en una capa posterior, así que el tamaño en disco casi no cambia, pero ya no están en el sistema de archivos de la imagen (`make e2e` comprueba que `python -m pip` falla) |
+| `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración. No usa nunca un proxy aunque haya `HTTP_PROXY`/`HTTPS_PROXY` en el entorno. Cada comprobación (cada 30 s) deja una línea `INFO` de la petición a `/healthz` en el log de Antifaz: es ruido esperado y no lleva datos |
 | `uvicorn --factory antifaz.api.app:create_app --no-access-log --no-proxy-headers --no-server-header` | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso" |
 
 Tamaño medido el 2026-10-01: **244,7 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB) y **57,6 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
@@ -54,8 +55,9 @@ Tamaño medido el 2026-10-01: **244,7 MB** en disco según `docker image inspect
 - **Solo lectura**: `read_only: true` y un `tmpfs` en `/tmp` (16 MB, `noexec`, `nosuid`, `nodev`).
 - **Sin privilegios**: `cap_drop: [ALL]` y `no-new-privileges`.
 - **Límites**: 512 MB de memoria, 1 CPU y 128 procesos (con el NER activado hace falta más memoria: el modelo ocupa más de 1 GB por proceso).
-- **Hosts**: `ANTIFAZ_ALLOWED_HOSTS` sale de `.env` o, si no está, vale `localhost,127.0.0.1,[::1],antifaz`. `antifaz` es el nombre del servicio, para que otros contenedores de la misma red de Compose lleguen en `http://antifaz:8000`.
-- Healthcheck, reinicio `unless-stopped`, 25 s para apagarse limpio y logs rotados (3 × 10 MB).
+- **Una sola fuente de configuración**: todo sale de `.env`; el archivo de Compose no tiene `environment:` que pueda pisar lo que pone allí el administrador.
+- **Hosts**: `.env.example` trae `ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],antifaz`. `antifaz` es el nombre del servicio, para que otros contenedores de la misma red de Compose lleguen en `http://antifaz:8000`.
+- Healthcheck, reinicio `unless-stopped` (con una configuración rechazada, se reinicia en bucle con espera creciente: ver el motivo con `docker compose logs antifaz`), 25 s para apagarse limpio y logs rotados (3 × 10 MB).
 
 ### Proxy inverso (HTTPS)
 
@@ -72,15 +74,17 @@ No forma parte de `make check` (necesita Docker y tarda alrededor de un minuto).
 1. Construye la imagen con `docker compose build`.
 2. Arranca Compose con `tests/e2e/docker-compose.e2e.yml` encima del archivo principal: añade un **proveedor falso** (`tests/e2e/fake_upstream.py`, solo biblioteca estándar) que corre en la propia imagen de Antifaz (no se descarga ninguna otra), guarda los bytes que recibe y devuelve el texto que le llega.
 3. Las claves son aleatorias y nuevas en cada ejecución, en un archivo temporal que se borra al final; tu `.env` no se lee nunca. Las URL de los proveedores apuntan al falso con `http://` dentro de la red de Compose: las URL base son configuración del administrador y Antifaz no les exige HTTPS.
-4. Comprueba, con un DNI y un email sintéticos, que el proveedor solo ve marcadores y el cliente recibe sus valores (OpenAI Chat y Anthropic Messages, con y sin streaming, con los marcadores partidos entre eventos); que el proveedor recibe su clave y nunca la de Antifaz; que sin clave se responde 401; que el contenedor está `healthy`, corre como `10001`, no puede escribir fuera de `/tmp`, no tiene capacidades y solo publica en `127.0.0.1`; que la imagen no tiene `.env` (ni en `/app` ni en ningún sitio), ni pytest, ni curl, ni wget; y que los logs no tienen el DNI, el email ni ninguna clave.
+4. Comprueba, con un DNI y un email sintéticos, que el proveedor solo ve marcadores y el cliente recibe sus valores (OpenAI Chat y Anthropic Messages, con y sin streaming, con los marcadores partidos entre eventos); que el proveedor recibe su clave y nunca la de Antifaz; que sin clave se responde 401; que el contenedor está `healthy`, corre como `10001`, no puede escribir fuera de `/tmp`, no tiene capacidades y solo publica en `127.0.0.1`; que la imagen no tiene `.env` (ni en `/app` ni en ningún sitio), ni pytest, ni curl, ni wget, ni pip; y que los logs no tienen el DNI, el email ni ninguna clave, tampoco cuando el DNI va en la query (`/v1/models?after_id=…`, 400) o en una ruta inventada (`/v1/<DNI>`, 404).
 
-Resultado el 2026-10-01: **14 de 14 tests en verde** (Windows 11, Docker Desktop 29.8).
+Resultado el 2026-10-01: **15 de 15 tests en verde** (Windows 11, Docker Desktop 29.8).
 
 Los mismos puntos de la imagen y de Compose (digest, usuario, healthcheck, `.dockerignore`, solo lectura, puerto…) también se comprueban sin Docker en `tests/unit/test_container_files.py`, dentro de `make check`.
 
 ### CI de la imagen
 
-Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (no se publica: eso será un workflow aparte, parte 7c), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto) y la escanea con Grype (`anchore/scan-action`), que **falla con vulnerabilidades altas o críticas**. Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen (`docker buildx --attest`) llegan con la publicación (7c).
+Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (no se publica: eso será un workflow aparte, parte 7c), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`), que **falla con vulnerabilidades altas o críticas**. Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen (`docker buildx --attest`) llegan con la publicación (7c).
+
+Grype solo se ejecuta en la CI, no en `make e2e` ni en local. Hoy falla con cualquier vulnerabilidad alta o crítica, **también las que Debian todavía no ha arreglado**: una de esas pone la CI en rojo sin que se pueda hacer nada en el repo. Está documentado a propósito; si pasa, se decidirá si se pasa a `only-fixed` (fallar solo con las que tienen arreglo) y se anotará aquí.
 
 ## Arquitectura
 
