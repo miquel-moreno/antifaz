@@ -72,7 +72,9 @@ def test_dockerignore_is_an_allowlist_that_keeps_env_files_out() -> None:
     assert rules[0] == "*"
     allowed = {r for r in rules if r.startswith("!")}
     assert allowed == {"!pyproject.toml", "!uv.lock", "!README.md", "!LICENSE", "!NOTICE", "!src/"}
-    assert "**/.env" in rules and "**/.env.*" in rules
+    # The allowlist already keeps these out; the explicit rules also cover the allowed folders.
+    for never in ("**/.env", "**/.env.*", "**/models", "**/evals", "**/.git", "**/.cache"):
+        assert never in rules, never
 
 
 def test_compose_reads_keys_from_the_env_file_and_never_holds_them() -> None:

@@ -8,8 +8,17 @@
 !NOTICE
 !src/
 
-# Never, even inside an allowed folder.
-**/__pycache__
-**/*.py[cod]
+# Never, even inside an allowed folder or if the allowlist above grows by mistake.
 **/.env
 **/.env.*
+**/models
+**/evals
+**/.git
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.cache
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
