@@ -16,8 +16,23 @@ from antifaz.config import Settings
 SENTINEL_DNI = "12345678Z"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--e2e",
+        action="store_true",
+        default=False,
+        help="run the end-to-end tests (Docker Compose, tests/e2e): `make e2e`",
+    )
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Tests marked `ner_model` need the real model (issue 6b): skipped unless it is there."""
+    """Tests marked `ner_model` need the real model (issue 6b): skipped unless it is there.
+    Tests marked `e2e` need Docker and only run with --e2e (`make e2e`, issue 7a)."""
+    skip_e2e = pytest.mark.skip(reason="end-to-end test with Docker: run `make e2e`")
+    if not config.getoption("--e2e"):
+        for item in items:
+            if "e2e" in item.keywords:
+                item.add_marker(skip_e2e)
     if os.environ.get("ANTIFAZ_NER_MODEL_DIR"):
         return
     skip = pytest.mark.skip(reason="needs the real NER model: set ANTIFAZ_NER_MODEL_DIR")

@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract secrets check audit licenses bench workflows ner-model openapi
+.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -13,6 +13,7 @@ help:
 	@echo "typecheck  Check types (mypy strict)"
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
+	@echo "e2e        End-to-end: builds the image, runs Compose with a fake provider (needs Docker)"
 	@echo "secrets    Scan the repository for secrets (gitleaks)"
 	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
@@ -51,6 +52,11 @@ test:
 # `make check`) already runs them with the rest of tests/; this target is for a quick loop.
 contract:
 	uv run pytest tests/contract --no-cov
+
+# The real image under Docker Compose with a fake provider (tests/e2e). Not part of `check`:
+# it needs Docker and takes a few minutes. Never reads your .env (throwaway keys per run).
+e2e:
+	uv run pytest tests/e2e --no-cov --e2e -p no:cacheprovider
 
 secrets:
 	gitleaks detect --source . --no-banner
