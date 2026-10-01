@@ -6,7 +6,7 @@ Antifaz se distribuye con licencia **Apache-2.0** (`LICENSE` y `NOTICE`).
 
 En lo que se distribuye (la librería y la imagen) **no entra nada no comercial (NC) ni copyleft fuerte** (GPL, AGPL, SSPL…). Se permiten dependencias de **copyleft débil sin modificar** (LGPL, MPL, EPL), y cada una se anota aquí con su motivo.
 
-`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor) no se distribuyen y no cuentan.
+`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor) no se distribuyen y no cuentan. El grupo `bench` (Presidio y spaCy, solo para el benchmark) tampoco se distribuye, pero el script lo comprueba con la misma regla (ver más abajo).
 
 La CI no instala el extra `ner` (PyTorch pesa cientos de MB). Para los paquetes que solo trae ese extra, el script usa la licencia que dicen sus metadatos, anotada a mano en `RECORDED_EXTRA` con las versiones de `uv.lock`; un test la compara con los metadatos instalados cuando el extra está (en local).
 
@@ -61,6 +61,43 @@ Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic cont
 | typer, rich, shellingham, markdown-it-py, mdurl, pygments, colorama | — | MIT, MIT, ISC, MIT, MIT, BSD-2-Clause, BSD | huggingface-hub (su línea de comandos) |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | gliner, transformers |
 
+## Solo para el benchmark: el grupo `bench` (Presidio)
+
+La comparación con Presidio de Antifaz-Bench (issue 13, ADR-0011) usa presidio-analyzer, spaCy y un modelo de spaCy. Están en el grupo de dependencias `bench` de `pyproject.toml`: **no se distribuyen** (ni en la librería ni en la imagen), `uv sync` no los instala y la CI tampoco; solo `make bench PRESIDIO=1`. Un test comprueba que `uv export --no-dev` (lo que se distribuye, con todos los extras) no los lista.
+
+Aunque no se distribuyen, `scripts/check_licenses.py` también los comprueba (nada prohibido ni desconocido), con las licencias anotadas a mano en `RECORDED_BENCH` para la CI. Leídas de los metadatos el 2026-10-01, con las versiones de `uv.lock`. Solo los paquetes que trae este grupo y no el resto:
+
+| Paquete | Versión | Licencia | Llega por |
+|---|---|---|---|
+| presidio-analyzer | 2.2.364 | MIT | directa (grupo `bench`) |
+| spacy | 3.8.16 | MIT | directa (grupo `bench`) |
+| xx-ent-wiki-sm | 3.8.0 | MIT | directa (grupo `bench`): el modelo multilingüe de spaCy, descargado de su release de GitHub y fijado por SHA-256 en `uv.lock`. Entrenado con [WikiNER](https://figshare.com/articles/Learning_multilingual_named_entity_recognition_from_Wikipedia/5462500) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); Nothman, Ringland, Radford, Murphy y Curran, 2013); fuente: [release del modelo](https://github.com/explosion/spacy-models/releases/tag/xx_ent_wiki_sm-3.8.0) |
+| phonenumbers | 9.0.40 | Apache-2.0 | presidio-analyzer |
+| tldextract | 5.3.2 | BSD-3-Clause | presidio-analyzer |
+| requests-file | 3.0.1 | Apache-2.0 | tldextract |
+| requests | 2.34.2 | Apache-2.0 | tldextract, spacy |
+| urllib3 | 2.8.0 | MIT | requests |
+| charset-normalizer | 3.5.2 | MIT | requests |
+| thinc | 8.3.13 | MIT | spacy |
+| blis | 1.3.3 | BSD | thinc |
+| cymem | 2.0.13 | MIT | spacy, thinc |
+| preshed | 3.0.13 | MIT | spacy, thinc |
+| murmurhash | 1.0.15 | MIT | spacy, thinc |
+| srsly | 2.5.4 | MIT | spacy, thinc |
+| catalogue | 2.0.10 | MIT | spacy, thinc |
+| confection | 1.3.3 | MIT | spacy, thinc |
+| wasabi | 1.1.3 | MIT | spacy, thinc |
+| spacy-legacy | 3.0.12 | MIT | spacy |
+| spacy-loggers | 1.0.5 | MIT | spacy |
+| weasel | 1.0.0 | MIT | spacy |
+| cloudpathlib | 0.25.0 | MIT | weasel |
+| smart-open | 8.0.2 | MIT | weasel |
+| wrapt | 2.5.0 | BSD-2-Clause | smart-open |
+
+presidio-analyzer pide `numpy < 2.5` y el extra `ner` fija una versión más nueva: en `pyproject.toml` el grupo `bench` y el extra `ner` se declaran incompatibles (`[tool.uv] conflicts`), así uv los resuelve por separado y el grupo `bench` no cambia nada de lo que se distribuye con el extra. Por eso no se pueden instalar a la vez: la comparación lee los resultados del NER ya guardados en `evals/results/`.
+
+**Por qué este modelo y no uno en español.** Los modelos de spaCy en español (`es_core_news_sm/md/lg`) son **GPL-3.0** (ADR-0003): no se usan ni en el benchmark. `xx_ent_wiki_sm` es MIT, multilingüe (incluye español) y pequeño (11 MB).
+
 ## Dependencias de copyleft débil
 
 | Paquete | Licencia | Por qué se acepta |
@@ -97,4 +134,4 @@ El modelo **no se distribuye** con Antifaz ni está en el repositorio: `make ner
 
 **Riesgo declarado.** Los datos de partida del modelo base y de mDeBERTa no tienen licencia documentada. Es lo habitual en modelos publicados así y la licencia del modelo (Apache-2.0 y MIT) es la que rige su uso, pero se anota aquí para que quien lo despliegue lo sepa.
 
-En el benchmark: MEDDOCAN (CC-BY-4.0, citado) y, solo en el entorno del benchmark y nunca en lo que se distribuye, spaCy `es_core_news_*` (GPL-3.0; hoy no se usa).
+En el benchmark: MEDDOCAN (CC-BY-4.0, citado) y, solo en el grupo `bench` y nunca en lo que se distribuye, el modelo de spaCy `xx_ent_wiki_sm` 3.8.0 (MIT; ver la sección del grupo `bench`). Los `es_core_news_*` (GPL-3.0) no se usan.

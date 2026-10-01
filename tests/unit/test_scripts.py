@@ -148,3 +148,56 @@ def test_recorded_licenses_match_the_installed_metadata() -> None:
         assert classify(check_licenses.metadata_texts(meta)) is classify([text]), name
     if not checked:
         pytest.skip("the ner extra is not installed")
+
+
+# --- the `bench` dependency group (Presidio baseline, issue 13): never shipped ------------
+
+
+def test_the_shipped_dependencies_never_bring_presidio_or_spacy() -> None:
+    """`uv export --no-dev` (what ships, every extra included) lists none of the bench group."""
+    shipped = {name for name, _ in check_licenses.runtime_dependencies()}
+    assert not shipped & {"presidio-analyzer", "spacy", "xx-ent-wiki-sm", "thinc"}
+
+
+def test_the_bench_group_is_read_from_uv_lock() -> None:
+    bench = {name for name, _ in check_licenses.bench_dependencies()}
+    assert {"presidio-analyzer", "spacy", "xx-ent-wiki-sm"} <= bench
+
+
+def test_every_package_only_the_bench_group_brings_has_a_recorded_license() -> None:
+    """CI never installs the bench group: its licenses, read by hand, stand in for metadata."""
+    shipped = {name for name, _ in check_licenses.runtime_dependencies()}
+    bench = {name for name, _ in check_licenses.bench_dependencies()}
+    assert bench - shipped <= set(check_licenses.RECORDED_BENCH)
+
+
+def test_every_recorded_bench_license_is_allowed() -> None:
+    documented = documented_packages(check_licenses.LICENSES_DOC.read_text(encoding="utf-8"))
+    for name, text in check_licenses.RECORDED_BENCH.items():
+        verdict = classify([text])
+        assert verdict in (Verdict.OK, Verdict.WEAK_COPYLEFT), name
+        assert name in documented, name  # every bench package is listed in docs/licencias.md
+
+
+def test_recorded_bench_licenses_match_the_installed_metadata() -> None:
+    checked = 0
+    for name, text in check_licenses.RECORDED_BENCH.items():
+        try:
+            meta = metadata.metadata(name)
+        except metadata.PackageNotFoundError:
+            continue
+        checked += 1
+        assert classify(check_licenses.metadata_texts(meta)) is classify([text]), name
+    if not checked:
+        pytest.skip("the bench group is not installed")
+
+
+def test_a_forbidden_license_in_the_bench_group_fails_the_check(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(check_licenses, "runtime_dependencies", lambda extras=True: [])
+    monkeypatch.setattr(check_licenses, "bench_dependencies", lambda: [("es-core-news-sm", False)])
+    monkeypatch.setattr(check_licenses, "license_texts", lambda name: ["GPL-3.0-only"])
+
+    assert check_licenses.main() == 1
+    assert "es-core-news-sm" in capsys.readouterr().err

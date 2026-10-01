@@ -1,0 +1,377 @@
+{
+ "dataset": "MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
+ "documents": 250,
+ "by_source_label": {
+  "CALLE": {
+   "type": null,
+   "n": 413,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 403,
+   "leaks_per_100": 97.57869249394673
+  },
+  "CENTRO_SALUD": {
+   "type": null,
+   "n": 6,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 4,
+   "leaks_per_100": 66.66666666666667
+  },
+  "CORREO_ELECTRONICO": {
+   "type": "EMAIL",
+   "n": 249,
+   "precision": null,
+   "recall": 0.9919678714859438,
+   "f1": null,
+   "leaks": 2,
+   "leaks_per_100": 0.8032128514056225
+  },
+  "EDAD_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 518,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 518,
+   "leaks_per_100": 100.0
+  },
+  "FAMILIARES_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 81,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 79,
+   "leaks_per_100": 97.53086419753086
+  },
+  "FECHAS": {
+   "type": null,
+   "n": 611,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 105,
+   "leaks_per_100": 17.18494271685761
+  },
+  "HOSPITAL": {
+   "type": null,
+   "n": 130,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 51,
+   "leaks_per_100": 39.23076923076923
+  },
+  "ID_ASEGURAMIENTO": {
+   "type": null,
+   "n": 198,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 198,
+   "leaks_per_100": 100.0
+  },
+  "ID_CONTACTO_ASISTENCIAL": {
+   "type": null,
+   "n": 39,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 37,
+   "leaks_per_100": 94.87179487179488
+  },
+  "ID_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 283,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 281,
+   "leaks_per_100": 99.29328621908127
+  },
+  "ID_TITULACION_PERSONAL_SANITARIO": {
+   "type": null,
+   "n": 234,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 232,
+   "leaks_per_100": 99.14529914529915
+  },
+  "INSTITUCION": {
+   "type": null,
+   "n": 67,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 16,
+   "leaks_per_100": 23.880597014925375
+  },
+  "NOMBRE_PERSONAL_SANITARIO": {
+   "type": "PERSON",
+   "n": 501,
+   "precision": null,
+   "recall": 0.9421157684630739,
+   "f1": null,
+   "leaks": 33,
+   "leaks_per_100": 6.586826347305389
+  },
+  "NOMBRE_SUJETO_ASISTENCIA": {
+   "type": "PERSON",
+   "n": 502,
+   "precision": null,
+   "recall": 0.750996015936255,
+   "f1": null,
+   "leaks": 45,
+   "leaks_per_100": 8.96414342629482
+  },
+  "NUMERO_FAX": {
+   "type": "PHONE",
+   "n": 7,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "NUMERO_TELEFONO": {
+   "type": "PHONE",
+   "n": 26,
+   "precision": null,
+   "recall": 0.9615384615384616,
+   "f1": null,
+   "leaks": 1,
+   "leaks_per_100": 3.8461538461538463
+  },
+  "OTROS_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 7,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 7,
+   "leaks_per_100": 100.0
+  },
+  "PAIS": {
+   "type": null,
+   "n": 363,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 2,
+   "leaks_per_100": 0.5509641873278237
+  },
+  "PROFESION": {
+   "type": null,
+   "n": 9,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 9,
+   "leaks_per_100": 100.0
+  },
+  "SEXO_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 461,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 220,
+   "leaks_per_100": 47.72234273318872
+  },
+  "TERRITORIO": {
+   "type": null,
+   "n": 956,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 447,
+   "leaks_per_100": 46.75732217573222
+  }
+ },
+ "by_type": {
+  "EMAIL": {
+   "tp": 247,
+   "fp": 2,
+   "fn": 2,
+   "precision": 0.9919678714859438,
+   "recall": 0.9919678714859438,
+   "f1": 0.9919678714859438,
+   "strict_precision": 0.9919678714859438,
+   "strict_recall": 0.9919678714859438,
+   "strict_f1": 0.9919678714859438,
+   "any_pii_precision": 0.9919678714859438,
+   "non_pii_fp": 2
+  },
+  "PERSON": {
+   "tp": 849,
+   "fp": 826,
+   "fn": 154,
+   "precision": 0.5068656716417911,
+   "recall": 0.8464606181455633,
+   "f1": 0.6340552651232263,
+   "strict_precision": 0.33492537313432835,
+   "strict_recall": 0.559322033898305,
+   "strict_f1": 0.41896938013442864,
+   "any_pii_precision": 0.7301492537313433,
+   "non_pii_fp": 452
+  },
+  "PHONE": {
+   "tp": 32,
+   "fp": 7,
+   "fn": 1,
+   "precision": 0.8205128205128205,
+   "recall": 0.9696969696969697,
+   "f1": 0.8888888888888888,
+   "strict_precision": 0.7692307692307693,
+   "strict_recall": 0.9090909090909091,
+   "strict_f1": 0.8333333333333333,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  }
+ },
+ "overall": {
+  "total": 5661,
+  "leaked": 2690,
+  "leaks_per_100": 47.51810634163575,
+  "covered_total": 1285,
+  "covered_leaked": 81,
+  "covered_leaks_per_100": 6.303501945525292
+ },
+ "latency_ms": {
+  "p50": 27.53265,
+  "p95": 55.85321
+ },
+ "environment": {
+  "date": "2026-10-01",
+  "antifaz": "0.1.0",
+  "commit": "29d06c7",
+  "python": "3.12.12",
+  "os": "Windows-11-10.0.26200-SP0",
+  "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+  "dataset_md5": "6a09eb975580fdf56bc7041eadc9c921"
+ },
+ "unmatched_types": {
+  "DATE_TIME": {
+   "detections": 532,
+   "overlapping_gold": 508
+  },
+  "LOCATION": {
+   "detections": 2112,
+   "overlapping_gold": 1298
+  },
+  "ORGANIZATION": {
+   "detections": 1461,
+   "overlapping_gold": 89
+  },
+  "URL": {
+   "detections": 296,
+   "overlapping_gold": 279
+  }
+ },
+ "ner": {},
+ "baseline": {
+  "tool": "presidio-analyzer",
+  "versions": {
+   "presidio-analyzer": "2.2.364",
+   "spacy": "3.8.16",
+   "xx-ent-wiki-sm": "3.8.0",
+   "model_sha256": "6f3c4b853852ea9e9d2dc76cc950dddb10a7e4c42d813308caefe6c5e8be2f0a"
+  },
+  "configuration": {
+   "language": "es",
+   "recognizers": [
+    "CreditCardRecognizer",
+    "CryptoRecognizer",
+    "DateRecognizer",
+    "EmailRecognizer",
+    "IbanRecognizer",
+    "IpRecognizer",
+    "MacAddressRecognizer",
+    "PhoneRecognizer",
+    "UrlRecognizer",
+    "EsNifRecognizer",
+    "EsNieRecognizer",
+    "EsPassportRecognizer",
+    "SpacyRecognizer"
+   ],
+   "phone_regions": [
+    "ES"
+   ],
+   "phone_context": [
+    "teléfono",
+    "telefono",
+    "tel",
+    "móvil",
+    "movil",
+    "fax",
+    "contacto",
+    "llamar"
+   ],
+   "credit_card_context": [
+    "tarjeta",
+    "credito",
+    "visa",
+    "mastercard",
+    "cc",
+    "amex",
+    "discover",
+    "jcb",
+    "diners",
+    "maestro",
+    "instapayment"
+   ],
+   "score_threshold": 0.0,
+   "nlp_configuration": {
+    "nlp_engine_name": "spacy",
+    "models": [
+     {
+      "lang_code": "es",
+      "model_name": "xx_ent_wiki_sm"
+     }
+    ],
+    "ner_model_configuration": {
+     "model_to_presidio_entity_mapping": {
+      "PER": "PERSON",
+      "LOC": "LOCATION",
+      "ORG": "ORGANIZATION"
+     },
+     "low_confidence_score_multiplier": 0.4,
+     "low_score_entity_names": [
+      "ORG",
+      "ORGANIZATION"
+     ],
+     "labels_to_ignore": [
+      "MISC"
+     ]
+    }
+   },
+   "mapping": {
+    "EMAIL_ADDRESS": "EMAIL",
+    "PHONE_NUMBER": "PHONE",
+    "IBAN_CODE": "IBAN",
+    "CREDIT_CARD": "CREDIT_CARD",
+    "IP_ADDRESS": "IP",
+    "ES_NIF": "ES_DNI",
+    "ES_NIE": "ES_NIE",
+    "ES_PASSPORT": "ES_PASSPORT",
+    "PERSON": "PERSON",
+    "LOCATION": null,
+    "ORGANIZATION": null,
+    "DATE_TIME": null,
+    "URL": null,
+    "CRYPTO": null,
+    "MAC_ADDRESS": null
+   },
+   "public_suffix_list": "tldextract's bundled snapshot (no download)"
+  },
+  "shared_types": [
+   "EMAIL",
+   "PHONE",
+   "PERSON"
+  ]
+ }
+}

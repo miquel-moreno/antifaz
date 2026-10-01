@@ -3,6 +3,11 @@
 With --ner (`make bench NER=1`) it also runs the NER model (`make ner-model` first): the
 threshold is chosen on the MEDDOCAN dev split, then the test split is measured ONCE with it,
 with the cache cold and warm. The report records the model revision and the manifest hash.
+
+With --presidio (`make bench PRESIDIO=1`, the `bench` dependency group) it also measures
+Presidio on the MEDDOCAN test split with the same metrics, and compares it with Antifaz only on
+the types both cover (evals/presidio_baseline.py). The NER numbers come from the latest
+committed results; the NER is not run again.
 """
 
 import argparse
@@ -36,6 +41,7 @@ from antifaz.detect.ner.setup import GLINER_FACTORY
 from antifaz.detect.scan import Scanner, scan
 from antifaz.detect.types import EntityType, Span
 from antifaz.errors import DetectorFailed
+from evals import presidio_baseline
 from evals.datasets import meddocan
 from evals.datasets.meddocan import Document
 from evals.generate import from_jsonl
@@ -80,6 +86,8 @@ START_MARKER = "<!-- bench:start -->"
 END_MARKER = "<!-- bench:end -->"
 SYNTHETIC_START = "<!-- bench-synthetic:start -->"
 SYNTHETIC_END = "<!-- bench-synthetic:end -->"
+PRESIDIO_START = "<!-- bench-presidio:start -->"
+PRESIDIO_END = "<!-- bench-presidio:end -->"
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "evals" / "results"
 BENCHMARK_DOC = ROOT / "docs" / "benchmark.md"
@@ -114,6 +122,9 @@ class Report:
     # Only with the NER: threshold and how it was chosen, warm-cache latency, model revision,
     # manifest hash and memory of the worker process.
     ner: dict[str, object] = field(default_factory=dict)
+    # Only for another tool measured the same way (Presidio): its name, versions, configuration
+    # and the types compared.
+    baseline: dict[str, object] = field(default_factory=dict)
 
 
 def _add(a: Counts, b: Counts) -> Counts:
@@ -161,11 +172,13 @@ def _environment() -> dict[str, str]:
 def evaluate(
     documents: Sequence[Document],
     mapping: Mapping[str, EntityType | None],
-    detect: Callable[[str], list[Span]] = scan,
+    detect: Callable[[str], Sequence[Span | Annotation]] = scan,
     *,
     dataset: str = "custom documents",
 ) -> Report:
-    """Run detect on every document and compare it with the gold annotations."""
+    """Run detect on every document and compare it with the gold annotations. detect returns
+    Antifaz Spans, or Annotations labelled with an Antifaz type or, when the tool has a type
+    with no Antifaz equivalent, with that tool's own name (Presidio's LOCATION)."""
     overlap: dict[str, Counts] = defaultdict(Counts)
     strict: dict[str, Counts] = defaultdict(Counts)
     any_gold: dict[str, Counts] = defaultdict(Counts)
@@ -187,7 +200,10 @@ def evaluate(
         started = time.perf_counter_ns()
         spans = detect(document.text)
         samples.append(time.perf_counter_ns() - started)
-        predicted = [Annotation(s.start, s.end, s.type.value) for s in spans]
+        predicted = [
+            s if isinstance(s, Annotation) else Annotation(s.start, s.end, s.type.value)
+            for s in spans
+        ]
         gold = _mapped(document.annotations, mapping)
         for p in predicted:
             if p.label not in mapped_types:
@@ -383,8 +399,7 @@ def _save(report: Report, suffix: str) -> str:
 
 def run_synthetic(documents: Sequence[Document]) -> Report:
     """The synthetic set is labelled directly with Antifaz types."""
-    mapping = {entity_type.value: entity_type for entity_type in EntityType}
-    return evaluate(documents, mapping, dataset="synthetic-v1 (evals/datasets/synthetic-v1.jsonl)")
+    return evaluate(documents, SYNTHETIC_MAPPING, dataset=SYNTHETIC_DATASET)
 
 
 @dataclass
@@ -791,6 +806,338 @@ def save_dev_selection(document: Mapping[str, object]) -> str:
     return name
 
 
+# --- Presidio baseline (issue 13) --------------------------------------------------------------
+
+MEDDOCAN_TEST = "MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)"
+SYNTHETIC_DATASET = "synthetic-v1 (evals/datasets/synthetic-v1.jsonl)"
+# The synthetic set is labelled directly with Antifaz types.
+SYNTHETIC_MAPPING: dict[str, EntityType | None] = {t.value: t for t in EntityType}
+NOT_FOUND = {"detections": 0, "overlapping_gold": 0}
+ANTIFAZ_WITHOUT_NER = "Antifaz sin NER"
+ANTIFAZ_WITH_NER = "Antifaz con NER"
+SYNTHETIC_BIAS = "Conjunto escrito por el mismo equipo que Antifaz: favorece a Antifaz."
+OTHER_NER_ENGINES = (
+    "Presidio admite otros motores de NER (transformers, GLiNER) con modelos en español con "
+    "licencia permisiva que aquí no se han medido."
+)
+
+
+def load_report(path: Path) -> Report:
+    """A report written by to_json (an older one without the newer fields gets their default)."""
+    return Report(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def latest_report(results_dir: Path, suffix: str) -> tuple[Report, str] | None:
+    """The newest <date>-<version><suffix>.json of results_dir (by name: the date comes first)
+    and its name, or None. "-ner" does not match the "-ner-dev" tables."""
+    names = sorted(path.name for path in results_dir.glob(f"*{suffix}.json"))
+    return (load_report(results_dir / names[-1]), names[-1]) if names else None
+
+
+def presidio_mapping(mapping: Mapping[str, EntityType | None]) -> dict[str, EntityType | None]:
+    """The dataset mapping as Presidio sees it: only the types Presidio also covers keep their
+    type. CALLE (ADDRESS) or ID_ASEGURAMIENTO (ES_NSS) are "not covered" for Presidio, so its
+    covered leaks and per-label rows only speak of what it looks for."""
+    both = set(presidio_baseline.BOTH_COVER)
+    return {label: (t if t in both else None) for label, t in mapping.items()}
+
+
+def shared_types(
+    documents: Sequence[Document], mapping: Mapping[str, EntityType | None]
+) -> list[str]:
+    """The types both Antifaz and Presidio cover that the documents really annotate (through
+    mapping), in the order of presidio_baseline.BOTH_COVER."""
+    annotated = {mapping.get(a.label) for d in documents for a in d.annotations}
+    return [entity.value for entity in presidio_baseline.BOTH_COVER if entity in annotated]
+
+
+def run_presidio(
+    documents: Sequence[Document],
+    analyzer: presidio_baseline.Analyzer,
+    *,
+    versions: Mapping[str, str],
+    configuration: Mapping[str, object],
+    mapping: Mapping[str, EntityType | None] = meddocan.MEDDOCAN_TO_ANTIFAZ_NER,
+    dataset: str = MEDDOCAN_TEST,
+) -> Report:
+    """Presidio on `documents` with the same evaluate() as Antifaz. On MEDDOCAN names map to
+    PERSON (the NER mapping), so PERSON can be compared with Antifaz's NER."""
+    report = evaluate(
+        documents, presidio_mapping(mapping), presidio_baseline.detector(analyzer), dataset=dataset
+    )
+    report.baseline = {
+        "tool": "presidio-analyzer",
+        "versions": dict(versions),
+        "configuration": dict(configuration),
+        "shared_types": shared_types(documents, mapping),
+    }
+    return report
+
+
+def _labels_of(entity: str, mapping: Mapping[str, EntityType | None]) -> list[str]:
+    return [label for label, mapped in mapping.items() if mapped is not None and mapped == entity]
+
+
+def _tool_row(report: Report | None, entity: str, covers: bool, labels: Sequence[str]) -> list[str]:
+    """Recall, precision (same type), precision (any personal data), strict F1, leaks per 100."""
+    if report is None:
+        return ["sin resultados"] * 5
+    leaked = _leaks(report, labels)
+    if not covers:
+        return ["no aplica (no busca este tipo)", "—", "—", "—", leaked]
+    metrics = report.by_type.get(entity, {})
+    return [
+        _pct(metrics.get("recall")),
+        _pct(metrics.get("precision")),
+        _pct(metrics.get("any_pii_precision")),
+        _pct(metrics.get("strict_f1")),
+        leaked,
+    ]
+
+
+def _shared_table(
+    presidio: Report,
+    tools: Sequence[tuple[str, Report | None]],
+    mapping: Mapping[str, EntityType | None],
+) -> list[str]:
+    shared = presidio.baseline.get("shared_types")
+    shared = [str(entity) for entity in shared] if isinstance(shared, list) else []
+    lines = [
+        "| Tipo | Herramienta | Datos | Recall (solape) | Precisión (mismo tipo) "
+        "| Precisión (cualquier dato personal) | F1 estricto | Fugas por cada 100 |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for entity in shared:
+        labels = _labels_of(entity, mapping)
+        rows = [presidio.by_source_label.get(label) for label in labels]
+        total = sum(int(row["n"] or 0) for row in rows if row is not None)
+        for name, report in tools:
+            covers = not (name == ANTIFAZ_WITHOUT_NER and entity == EntityType.PERSON.value)
+            cells = " | ".join(_tool_row(report, entity, covers, labels))
+            lines.append(f"| {entity} | {name} | {total} | {cells} |")
+    return lines
+
+
+def _ms(report: Report | None) -> str:
+    if report is None:
+        return "sin resultados | sin resultados"
+    return f"{report.latency_ms['p50']:.2f} ms | {report.latency_ms['p95']:.2f} ms"
+
+
+def _found(report: Report, entity: str) -> str:
+    counts = report.unmatched_types.get(entity, NOT_FOUND)
+    return f"{counts['detections']} ({counts['overlapping_gold']})"
+
+
+def _overall(report: Report | None, key: str) -> str:
+    return "sin resultados" if report is None else f"{float(report.overall[key]):.1f}"
+
+
+def _setup_lines(presidio: Report, ner: Report | None, ner_name: str | None) -> list[str]:
+    versions = presidio.baseline.get("versions")
+    versions = versions if isinstance(versions, dict) else {}
+    configuration = presidio.baseline.get("configuration")
+    configuration = configuration if isinstance(configuration, dict) else {}
+    recognizers = ", ".join(f"`{name}`" for name in configuration.get("recognizers", []))
+    regions = ", ".join(configuration.get("phone_regions", []))
+    commit = presidio.environment.get("commit", "unknown")
+    if ner is not None and ner_name:
+        ner_source = (
+            f"`evals/results/{ner_name}` (commit `{ner.environment.get('commit', 'unknown')}`; "
+            "no se vuelve a ejecutar)"
+        )
+    else:
+        ner_source = "no hay resultados con NER en `evals/results/`"
+    return [
+        "### Configuración de Presidio",
+        "",
+        f"- **Versiones:** presidio-analyzer {versions.get('presidio-analyzer', '—')}, spaCy "
+        f"{versions.get('spacy', '—')} y el modelo `{presidio_baseline.MODEL}` "
+        f"{versions.get(presidio_baseline.MODEL_PACKAGE, '—')} (MIT, multilingüe, entrenado con "
+        f"WikiNER); SHA-256 de su rueda `{str(versions.get('model_sha256', '—'))[:12]}…`, fijado "
+        "en `uv.lock`.",
+        f"- **Idioma:** `{configuration.get('language', '—')}` en el motor NLP, en el registro de "
+        "reconocedores y en el analizador. Si falta un reconocedor en español o alguna pieza no es "
+        "española, el script se para en vez de seguir en inglés sin avisar.",
+        f"- **Reconocedores:** {recognizers}. Son todos los que Presidio activa por defecto "
+        "(`default_recognizers.yaml`) y sirven para cualquier idioma o para español, más el de "
+        "pasaporte español, que Presidio trae desactivado. Teléfonos con región "
+        f"{regions}; tarjetas con las palabras de contexto en español de esa misma configuración.",
+        f"- **Umbral de puntuación:** {configuration.get('score_threshold', '—')} (el de Presidio "
+        "por defecto): cuenta cada resultado.",
+        "- **NER:** los ajustes de `spacy_multilingual.yaml` de Presidio (PER, LOC y ORG) con este "
+        "modelo. Los modelos de spaCy en español (`es_core_news_*`) son GPL-3.0 y no se usan.",
+        "- **Tipos de Presidio -> Antifaz:** EMAIL_ADDRESS -> EMAIL, PHONE_NUMBER -> PHONE, "
+        "IBAN_CODE -> IBAN, CREDIT_CARD -> CREDIT_CARD, IP_ADDRESS -> IP, ES_NIF -> ES_DNI, "
+        "ES_NIE -> ES_NIE, ES_PASSPORT -> ES_PASSPORT, PERSON -> PERSON. LOCATION, ORGANIZATION, "
+        "DATE_TIME, URL, CRYPTO y MAC_ADDRESS no tienen equivalente: no se comparan, pero tapan "
+        "texto y cuentan para las fugas, como cualquier detección.",
+        f"- **Antifaz sin NER y Presidio:** medidos en esta ejecución (commit `{commit}`). "
+        f"**{ANTIFAZ_WITH_NER}:** {ner_source}.",
+    ]
+
+
+def _global_lines(presidio: Report, base: Report, ner: Report | None) -> list[str]:
+    """Leaks over every annotated value, per tool, a plain sentence, and the labels outside the
+    shared types (where the totals differ)."""
+    p, a = float(presidio.overall["leaks_per_100"]), float(base.overall["leaks_per_100"])
+    relation = "menos" if p < a else "las mismas" if p == a else "más"
+    sentence = f"Presidio deja {relation} fugas en total que {ANTIFAZ_WITHOUT_NER}"
+    if ner is not None:
+        n = float(ner.overall["leaks_per_100"])
+        sentence += f" y {'menos' if p < n else 'las mismas' if p == n else 'más'} que "
+        sentence += ANTIFAZ_WITH_NER
+    lines = [
+        "### Todos los datos anotados",
+        "",
+        "Fugas por cada 100 datos de **todas** las etiquetas de MEDDOCAN, también las que no "
+        "entran en la comparación, y sobre los tipos que busca cada herramienta.",
+        "",
+        "| Herramienta | Fugas por cada 100 (todos los datos) | Fugas por cada 100 (tipos que "
+        "busca) |",
+        "|---|---|---|",
+        f"| {ANTIFAZ_WITHOUT_NER} | {_overall(base, 'leaks_per_100')} | "
+        f"{_overall(base, 'covered_leaks_per_100')} |",
+        f"| {ANTIFAZ_WITH_NER} | {_overall(ner, 'leaks_per_100')} | "
+        f"{_overall(ner, 'covered_leaks_per_100')} |",
+        f"| Presidio | {_overall(presidio, 'leaks_per_100')} | "
+        f"{_overall(presidio, 'covered_leaks_per_100')} |",
+        "",
+        f"**{sentence}.** La cifra total no coincide con la de los tipos comparados porque una "
+        "fuga se evita con una detección de cualquier tipo: las detecciones de Presidio sin tipo "
+        "en Antifaz (LOCATION, ORGANIZATION, DATE_TIME, URL…) también tapan datos que no entran "
+        "en la comparación, como TERRITORIO, PAIS, HOSPITAL o FECHAS. Por etiqueta:",
+        "",
+        "| Etiqueta de MEDDOCAN | Datos | Fugas por cada 100: Antifaz sin NER | Antifaz con NER "
+        "| Presidio |",
+        "|---|---|---|---|---|",
+    ]
+    shared = presidio.baseline.get("shared_types")
+    shared = set(shared) if isinstance(shared, list) else set()
+    for label, row in presidio.by_source_label.items():
+        mapped = meddocan.MEDDOCAN_TO_ANTIFAZ_NER.get(label)
+        if mapped is not None and mapped.value in shared:
+            continue
+        ner_cell = _leaks(ner, (label,)) if ner is not None else "sin resultados"
+        lines.append(
+            f"| {label} | {row['n']} | {_leaks(base, (label,))} | {ner_cell} | "
+            f"{_leaks(presidio, (label,))} |"
+        )
+    return lines
+
+
+def _synthetic_lines(synthetic: Report, synthetic_base: Report) -> list[str]:
+    return [
+        "",
+        "### Conjunto sintético",
+        "",
+        f"**{SYNTHETIC_BIAS}** El generador (`evals/generate.py`) y el detector de Antifaz los "
+        "escribió el mismo equipo, con los formatos españoles que Antifaz busca; por eso esta "
+        "tabla va aparte y no se suma a la de MEDDOCAN. Añade los tipos que MEDDOCAN no tiene. Sin "
+        "NER (el conjunto no anota nombres).",
+        "",
+        *_shared_table(
+            synthetic,
+            ((ANTIFAZ_WITHOUT_NER, synthetic_base), ("Presidio", synthetic)),
+            SYNTHETIC_MAPPING,
+        ),
+        "",
+        "| Herramienta | Fugas por cada 100 (todos los datos del conjunto) |",
+        "|---|---|",
+        f"| {ANTIFAZ_WITHOUT_NER} | {_overall(synthetic_base, 'leaks_per_100')} |",
+        f"| Presidio | {_overall(synthetic, 'leaks_per_100')} |",
+    ]
+
+
+def render_presidio_markdown(
+    presidio: Report,
+    base: Report,
+    ner: Report | None,
+    ner_name: str | None,
+    synthetic: Report | None = None,
+    synthetic_base: Report | None = None,
+) -> str:
+    """The "Comparación con Presidio" section: the setup, then Antifaz without NER, Antifaz with
+    NER (the latest committed results, not run again) and Presidio on the types both cover and
+    MEDDOCAN annotates, the leaks over every annotated value and, apart and with its bias
+    stated, the synthetic set. Numbers only, no adjectives."""
+    tools = ((ANTIFAZ_WITHOUT_NER, base), (ANTIFAZ_WITH_NER, ner), ("Presidio", presidio))
+    lines = [
+        "## Comparación con Presidio",
+        "",
+        "Mismo script, mismos datos (partición de test de MEDDOCAN) y mismas métricas que el resto "
+        "de esta página. Solo se comparan los tipos que **cubren los dos** y que MEDDOCAN anota.",
+        "",
+        *_setup_lines(presidio, ner, ner_name),
+        "",
+        "### Tipos que cubren los dos",
+        "",
+        *_shared_table(presidio, tools, meddocan.MEDDOCAN_TO_ANTIFAZ_NER),
+        "",
+        "Datos de cada tipo en MEDDOCAN: EMAIL = CORREO_ELECTRONICO; PHONE = NUMERO_TELEFONO y "
+        "NUMERO_FAX; PERSON = NOMBRE_SUJETO_ASISTENCIA y NOMBRE_PERSONAL_SANITARIO. Una fuga se "
+        "evita con una detección de **cualquier** tipo de la misma herramienta (ADR-0011).",
+        "",
+        *_global_lines(presidio, base, ner),
+        "",
+        "### Tipos que cubren los dos y MEDDOCAN no anota",
+        "",
+        "No aplica: MEDDOCAN no tiene estos datos, así que no hay recall ni fugas que medir. Cada "
+        "detección de estos tipos cae sobre otro texto; entre paréntesis, cuántas tocan un dato "
+        "anotado de otra etiqueta.",
+        "",
+        "| Tipo | Antifaz sin NER: detecciones | Presidio: detecciones |",
+        "|---|---|---|",
+    ]
+    shared = presidio.baseline.get("shared_types")
+    shared = shared if isinstance(shared, list) else []
+    for entity_type in presidio_baseline.BOTH_COVER:
+        if entity_type.value not in shared:
+            lines.append(
+                f"| {entity_type.value} | {_found(base, entity_type.value)} "
+                f"| {_found(presidio, entity_type.value)} |"
+            )
+    lines += [
+        "",
+        "### Detecciones de Presidio sin tipo en Antifaz",
+        "",
+        "| Tipo de Presidio | Detecciones | Tocan un dato anotado |",
+        "|---|---|---|",
+    ]
+    for presidio_type, mapped in presidio_baseline.PRESIDIO_TO_ANTIFAZ.items():
+        if mapped is None:
+            counts = presidio.unmatched_types.get(presidio_type, NOT_FOUND)
+            lines.append(
+                f"| {presidio_type} | {counts['detections']} | {counts['overlapping_gold']} |"
+            )
+    lines += [
+        "",
+        "### Latencia por documento (CPU)",
+        "",
+        "| Herramienta | p50 | p95 |",
+        "|---|---|---|",
+        f"| {ANTIFAZ_WITHOUT_NER} | {_ms(base)} |",
+        f"| {ANTIFAZ_WITH_NER} (caché fría) | {_ms(ner)} |",
+        f"| Presidio | {_ms(presidio)} |",
+    ]
+    if synthetic is not None and synthetic_base is not None:
+        lines += _synthetic_lines(synthetic, synthetic_base)
+    lines += [
+        "",
+        "### Límites",
+        "",
+        "- MEDDOCAN es texto clínico: tiene emails, teléfonos y nombres, pero ningún DNI, NIE, "
+        "IBAN, tarjeta, pasaporte ni IP: en MEDDOCAN la comparación se queda en tres tipos.",
+        "- El NER de Presidio aquí es un modelo multilingüe pequeño de spaCy, entrenado con "
+        "Wikipedia y no con texto clínico; los modelos de spaCy en español son GPL-3.0. "
+        f"{OTHER_NER_ENGINES} El NER de Antifaz es otro modelo (GLiNER), opcional y apagado por "
+        "defecto.",
+        "- Las cifras miden esta configuración en estos conjuntos de datos, nada más.",
+        "- La latencia de Antifaz con NER viene de otra ejecución (otro momento, misma máquina).",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Command line entry point: download MEDDOCAN if needed, evaluate both sets (and, with
     --ner, the NER) and write the results. Every file is written at the END of the run (a
@@ -802,19 +1149,51 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--dev-only", action="store_true", help="with the NER: only the dev threshold table"
     )
     parser.add_argument("--threads", type=int, default=0, help="torch threads with --ner")
+    parser.add_argument(
+        "--presidio",
+        action="store_true",
+        help="also measure Presidio on MEDDOCAN test (needs the bench dependency group)",
+    )
     args = parser.parse_args(argv)
+    if args.presidio and (args.ner or args.dev_only):
+        # The bench group and the ner extra are never installed together (pyproject.toml).
+        parser.error("--presidio reads the NER results from evals/results/; run it without --ner")
     ner_on = args.ner or args.dev_only
 
     archive = meddocan.download()
     synthetic = report = None
+    synthetic_documents = from_jsonl(SYNTHETIC.read_text(encoding="utf-8"))
     if not args.dev_only:
-        synthetic = run_synthetic(from_jsonl(SYNTHETIC.read_text(encoding="utf-8")))
+        synthetic = run_synthetic(synthetic_documents)
         report = evaluate(
             meddocan.load_test(archive),
             meddocan.MEDDOCAN_TO_ANTIFAZ,
             dataset="MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
         )
         report.environment["dataset_md5"] = meddocan.MD5
+    presidio_report = presidio_synthetic = None
+    if args.presidio:  # pragma: no cover - needs the bench group (make bench PRESIDIO=1)
+        try:
+            analyzer = presidio_baseline.build_analyzer()
+            versions = presidio_baseline.versions()
+        except (ImportError, presidio_baseline.PresidioSetupError) as error:
+            print(f"Presidio baseline not run: {error}", file=sys.stderr)
+            return 2
+        presidio_report = run_presidio(
+            meddocan.load_test(archive),
+            analyzer,
+            versions=versions,
+            configuration=presidio_baseline.configuration(),
+        )
+        presidio_report.environment["dataset_md5"] = meddocan.MD5
+        presidio_synthetic = run_presidio(
+            synthetic_documents,
+            analyzer,
+            versions=versions,
+            configuration=presidio_baseline.configuration(),
+            mapping=SYNTHETIC_MAPPING,
+            dataset=SYNTHETIC_DATASET,
+        )
     ner_report = None
     dev_document: dict[str, object] | None = None
     if ner_on:  # pragma: no cover - needs the model (make ner-model)
@@ -881,6 +1260,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if ner_report is not None and dev_document is not None:
         names.append(f"evals/results/{_save(ner_report, '-ner')}")
         names.append(f"evals/results/{save_dev_selection(dev_document)}")
+    presidio_table = None
+    if presidio_report is not None:  # pragma: no cover - needs the bench group
+        found = latest_report(RESULTS_DIR, "-ner")
+        ner_previous, ner_name = found if found else (None, None)
+        presidio_table = render_presidio_markdown(
+            presidio_report, report, ner_previous, ner_name, presidio_synthetic, synthetic
+        )
+        names.append(f"evals/results/{_save(presidio_report, '-presidio')}")
+        if presidio_synthetic is not None:
+            names.append(f"evals/results/{_save(presidio_synthetic, '-presidio-synthetic')}")
     if not args.no_doc:
         update_benchmark_doc(BENCHMARK_DOC, table)
         update_benchmark_doc(
@@ -890,9 +1279,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             update_benchmark_doc(
                 BENCHMARK_DOC, render_ner_markdown(ner_report, report), NER_START, NER_END
             )
+        if presidio_table is not None:  # pragma: no cover - needs the bench group
+            update_benchmark_doc(BENCHMARK_DOC, presidio_table, PRESIDIO_START, PRESIDIO_END)
     print(table)
     if ner_report is not None:
         print(render_ner_markdown(ner_report, report))
+    if presidio_table is not None:  # pragma: no cover - needs the bench group
+        print(presidio_table)
     print("Results: " + ", ".join(names))
     return 0
 
