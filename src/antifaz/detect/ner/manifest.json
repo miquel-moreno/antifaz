@@ -1,7 +1,49 @@
 {
   "format": 1,
   "model": "urchade/gliner_multi_pii-v1",
-  "revision": null,
+  "revision": "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d",
   "license": "Apache-2.0",
-  "files": {}
+  "sources": [
+    {
+      "repo": "urchade/gliner_multi_pii-v1",
+      "revision": "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d",
+      "license": "Apache-2.0",
+      "files": {
+        "gliner_config.json": "gliner_config.json",
+        "pytorch_model.bin": "pytorch_model.bin"
+      }
+    },
+    {
+      "repo": "microsoft/mdeberta-v3-base",
+      "revision": "a0484667b22365f84929a935b5e50a51f71f159d",
+      "license": "MIT",
+      "files": {
+        "mdeberta-v3-base/config.json": "config.json",
+        "mdeberta-v3-base/spm.model": "spm.model",
+        "mdeberta-v3-base/tokenizer_config.json": "tokenizer_config.json"
+      }
+    }
+  ],
+  "files": {
+    "gliner_config.json": {
+      "size": 478,
+      "sha256": "2088bee85f50849dea2ab4cf411ab5cf3aaaf7c8a45c23412035978b2bc02801"
+    },
+    "pytorch_model.bin": {
+      "size": 1155900362,
+      "sha256": "3003753fba99e40645cf088c7367a2c6211fc174897dc64f1f9c147c29d18d2d"
+    },
+    "mdeberta-v3-base/config.json": {
+      "size": 579,
+      "sha256": "bcffcd343dc5efa5ef2d5a58d2b405eed108f01cc45b48d0a907b333ec41801f"
+    },
+    "mdeberta-v3-base/spm.model": {
+      "size": 4305025,
+      "sha256": "13c8d666d62a7bc4ac8f040aab68e942c861f93303156cc28f5c7e885d86d6e3"
+    },
+    "mdeberta-v3-base/tokenizer_config.json": {
+      "size": 52,
+      "sha256": "3f3978e0c036f2c2588cac34a6047cbb0af0b0dc1814254e291028529805496d"
+    }
+  }
 }

@@ -12,14 +12,18 @@ import pytest
 from evals.datasets import meddocan
 from evals.datasets.meddocan import (
     MEDDOCAN_TO_ANTIFAZ,
+    MEDDOCAN_TO_ANTIFAZ_NER,
     TEST_PREFIX,
     Document,
     download,
+    load_dev,
     load_test,
     parse_brat,
     verify,
 )
 from evals.metrics import Annotation
+
+from antifaz.detect.types import EntityType
 
 A = Annotation
 
@@ -212,6 +216,14 @@ def test_load_test_returns_the_test_documents_sorted_by_name(tmp_path: Path) -> 
     ]
 
 
+def test_load_dev_reads_only_the_dev_split(tmp_path: Path) -> None:
+    zip_path = tmp_path / "meddocan.zip"
+    _build_zip(zip_path)
+    docs = load_dev(zip_path)
+    assert [doc.name for doc in docs] == ["doc-y"]
+    assert docs[0].text.startswith("otro split")
+
+
 def test_load_test_keeps_windows_line_endings(tmp_path: Path) -> None:
     zip_path = tmp_path / "meddocan.zip"
     _build_zip(zip_path)
@@ -234,7 +246,23 @@ def test_every_meddocan_type_has_a_mapping() -> None:
 
 
 def test_mapping_has_no_types_outside_meddocan() -> None:
-    assert set(MEDDOCAN_TO_ANTIFAZ) == set(MEDDOCAN_LABELS)
+    # The corpus writes one guideline type differently (seen in the dev split): both are kept.
+    assert set(MEDDOCAN_TO_ANTIFAZ) == {*MEDDOCAN_LABELS, "ID_EMPLEO_PERSONAL_SANITARIO"}
+
+
+def test_with_the_ner_names_map_to_person_and_nothing_else_changes() -> None:
+    changed = {
+        label: entity
+        for label, entity in MEDDOCAN_TO_ANTIFAZ_NER.items()
+        if MEDDOCAN_TO_ANTIFAZ[label] != entity
+    }
+    assert changed == {
+        "NOMBRE_SUJETO_ASISTENCIA": EntityType.PERSON,
+        "NOMBRE_PERSONAL_SANITARIO": EntityType.PERSON,
+    }
+    # Relatives are mostly words like "madre" in MEDDOCAN, not names (docs/benchmark.md).
+    assert MEDDOCAN_TO_ANTIFAZ_NER["FAMILIARES_SUJETO_ASISTENCIA"] is None
+    assert MEDDOCAN_TO_ANTIFAZ_NER["CALLE"] is EntityType.ADDRESS
 
 
 # --- download --------------------------------------------------------------------------

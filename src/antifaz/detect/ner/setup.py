@@ -2,7 +2,7 @@
 
 With ANTIFAZ_NER_ENABLED=true the gateway never starts "without NER" in silence: the model
 directory must be set, hold exactly the files of the manifest (sizes and SHA-256) and the
-backend must be installed (the `antifaz[ner]` extra, issue 6b). Otherwise UnsafeConfigError,
+backend must be installed (the `antifaz[ner]` extra). Otherwise UnsafeConfigError,
 naming the variable and the reason (a model file name at most, never a key or a text).
 """
 
@@ -23,8 +23,11 @@ from antifaz.detect.ner.manifest import (
 )
 from antifaz.detect.ner.pool import NerPool
 
-# The GLiNER backend arrives with the model in issue 6b.
 GLINER_FACTORY = "antifaz.detect.ner.gliner:create"
+# Third-party packages a backend needs besides its own module (the `ner` extra for GLiNER).
+BACKEND_REQUIRES: dict[str, tuple[str, ...]] = {
+    GLINER_FACTORY: ("gliner", "torch", "transformers"),
+}
 
 
 def _verified(directory: Path, manifest_path: Path) -> Manifest:
@@ -64,14 +67,19 @@ def ner_from_settings(
             "model and point ANTIFAZ_NER_MODEL_DIR to it, or turn the NER off"
         )
     manifest = _verified(settings.ner_model_dir, manifest_path)
-    if not _installed(split_factory(factory)[0]):
+    required = (split_factory(factory)[0], *BACKEND_REQUIRES.get(factory, ()))
+    if not all(_installed(module) for module in required):
         raise UnsafeConfigError(
             "ANTIFAZ_NER_ENABLED is true but the NER backend is not installed "
             "(install the antifaz[ner] extra)"
         )
     pool = NerPool(
         factory,
-        {"model_dir": str(settings.ner_model_dir), **(options or {})},
+        {
+            "model_dir": str(settings.ner_model_dir),
+            "threads": settings.ner_torch_threads,
+            **(options or {}),
+        },
         workers=settings.ner_workers,
         timeout=settings.ner_timeout_seconds,
         verify={

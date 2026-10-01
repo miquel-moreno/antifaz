@@ -80,9 +80,11 @@ def create(
     sleep_seconds: float = 30.0,
     model_dir: str | None = None,
     load_delay_file: str | None = None,
+    threads: int = 0,
 ) -> FakeBackend:
     """Factory used by the worker processes (and by tests in the same process). `model_dir`
-    is what the real backend gets from the settings; the fake does not need it. If the file
+    and `threads` are what the real backend gets from the settings; the fake does not need
+    them. If the file
     `load_delay_file` exists, loading waits the seconds written in it (a slow model load)."""
     if load_delay_file and os.path.exists(load_delay_file):
         with open(load_delay_file, encoding="utf-8") as file:

@@ -1,7 +1,8 @@
 """MEDDOCAN (CC-BY-4.0): Spanish clinical cases with personal data annotated in brat.
 
-Only the test split is used. The zip is downloaded once to CACHE_DIR (git-ignored) and
-checked by size and MD5 before use.
+The test split is what the bench reports. The dev split of the same zip is used only to choose
+the NER threshold (evals/run.py --ner), so the test split is measured once with it. The zip is
+downloaded once to CACHE_DIR (git-ignored) and checked by size and MD5 before use.
 """
 
 import hashlib
@@ -21,6 +22,7 @@ SIZE = 11738792
 SHA256 = "d0e4708b58689bc1440ede6f89e017e58d667827d927827622d73810cd68eac3"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "evals" / "datasets" / ".cache"
 TEST_PREFIX = "meddocan/test/brat/"
+DEV_PREFIX = "meddocan/dev/brat/"
 
 E = EntityType
 
@@ -55,9 +57,22 @@ MEDDOCAN_TO_ANTIFAZ: dict[str, EntityType | None] = {
     "URL_WEB": None,
     "DIREC_PROT_INTERNET": None,
     "OTRO_NUMERO_IDENTIF": None,
+    # How the corpus writes ID_EMPLEO_PERSONA in its dev split (checked on 2026-09-30).
+    "ID_EMPLEO_PERSONAL_SANITARIO": None,
     # 29th type of the MEDDOCAN guidelines (biometric identifiers); it does not occur in the
     # test split (checked on 2026-09-29), but it is kept so every label of the corpus is mapped.
     "IDENTIF_BIOMETRICOS": None,
+}
+
+
+# With the NER (ADR-0016): names of patients and of health staff are PERSON. Relatives
+# (FAMILIARES_SUJETO_ASISTENCIA) stay unmapped: in the dev split only 9 of 173 start with a
+# capital letter; most are words like "madre" or "hermano", which the NER is not asked to find.
+# They still count for leaks. CALLE was already ADDRESS (the pattern; now also the NER).
+MEDDOCAN_TO_ANTIFAZ_NER: dict[str, EntityType | None] = {
+    **MEDDOCAN_TO_ANTIFAZ,
+    "NOMBRE_SUJETO_ASISTENCIA": E.PERSON,
+    "NOMBRE_PERSONAL_SANITARIO": E.PERSON,
 }
 
 
@@ -115,20 +130,31 @@ def verify(path: Path, md5: str = MD5, size: int = SIZE, sha256: str | None = No
         raise ValueError(f"{path.name}: unexpected SHA-256; delete it and run again")
 
 
-def load_test(zip_path: Path) -> list[Document]:
-    """Documents of the test split (every .txt under TEST_PREFIX with its .ann), sorted by
-    name. Files are read as bytes and decoded as UTF-8: "\\r\\n" is kept as is so the brat
-    offsets stay valid."""
+def load_split(zip_path: Path, prefix: str) -> list[Document]:
+    """Documents of one split (every .txt under `prefix` with its .ann), sorted by name.
+    Files are read as bytes and decoded as UTF-8: CRLF line ends are kept as they are so the
+    brat offsets stay valid."""
     documents = []
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
-        for name in sorted(n for n in names if n.startswith(TEST_PREFIX) and n.endswith(".txt")):
+        for name in sorted(n for n in names if n.startswith(prefix) and n.endswith(".txt")):
             text = archive.read(name).decode("utf-8")
             ann_name = name[: -len(".txt")] + ".ann"
             ann = archive.read(ann_name).decode("utf-8") if ann_name in names else ""
-            stem = name[len(TEST_PREFIX) : -len(".txt")]
+            stem = name[len(prefix) : -len(".txt")]
             documents.append(Document(stem, text, parse_brat(text, ann)))
     return documents
+
+
+def load_test(zip_path: Path) -> list[Document]:
+    """The test split: what the bench reports."""
+    return load_split(zip_path, TEST_PREFIX)
+
+
+def load_dev(zip_path: Path) -> list[Document]:
+    """The dev split: only to choose settings (the NER threshold), never reported as the
+    result."""
+    return load_split(zip_path, DEV_PREFIX)
 
 
 def download(

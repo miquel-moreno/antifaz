@@ -4,6 +4,7 @@ import pytest
 from evals.metrics import (
     Annotation,
     Counts,
+    any_gold_counts,
     latency_ms,
     leaks,
     leaks_per_100,
@@ -118,6 +119,50 @@ def test_matching_does_not_depend_on_input_order() -> None:
     predicted = [A(25, 28, "X"), A(2, 5, "X"), A(6, 8, "X")]
     assert overlap_counts(gold, predicted) == {"X": Counts(tp=2, fp=1)}
     assert overlap_counts(gold[::-1], predicted[::-1]) == {"X": Counts(tp=2, fp=1)}
+
+
+# --- any_gold_counts: precision against any annotated personal data -------------------
+
+
+def test_a_prediction_over_gold_of_another_label_is_a_hit() -> None:
+    gold = [A(0, 10, "FAMILIARES_SUJETO_ASISTENCIA")]
+    assert any_gold_counts(gold, [A(2, 8, "PERSON")]) == {"PERSON": Counts(tp=1)}
+
+
+def test_a_prediction_over_no_gold_at_all_is_a_false_positive() -> None:
+    gold = [A(0, 10, "HOSPITAL")]
+    assert any_gold_counts(gold, [A(20, 30, "PERSON")]) == {"PERSON": Counts(fp=1)}
+
+
+def test_touching_ranges_are_not_a_hit_against_any_gold() -> None:
+    gold = [A(10, 20, "TERRITORIO")]
+    result = any_gold_counts(gold, [A(0, 10, "ADDRESS"), A(20, 25, "ADDRESS")])
+    assert result == {"ADDRESS": Counts(fp=2)}
+
+
+def test_every_prediction_over_the_same_gold_is_a_hit_and_there_are_no_false_negatives() -> None:
+    # Not one-to-one: it only asks "did this mask personal data?". Gold without a
+    # prediction is not counted (recall is measured by type elsewhere).
+    gold = [A(0, 20, "CALLE"), A(40, 50, "INSTITUCION")]
+    predicted = [A(0, 5, "ADDRESS"), A(6, 12, "ADDRESS"), A(30, 35, "PERSON")]
+    assert any_gold_counts(gold, predicted) == {
+        "ADDRESS": Counts(tp=2),
+        "PERSON": Counts(fp=1),
+    }
+
+
+def test_precision_against_any_gold_is_never_below_the_by_type_one() -> None:
+    gold = [A(0, 10, "PERSON"), A(20, 30, "HOSPITAL")]
+    predicted = [A(0, 10, "PERSON"), A(22, 28, "PERSON"), A(40, 45, "PERSON")]
+    by_type = overlap_counts(gold, predicted)["PERSON"]
+    any_gold = any_gold_counts(gold, predicted)["PERSON"]
+    assert by_type.precision == pytest.approx(1 / 3)
+    assert any_gold.precision == pytest.approx(2 / 3)
+    assert any_gold.fn == 0
+
+
+def test_any_gold_counts_of_no_predictions_is_empty() -> None:
+    assert any_gold_counts([A(0, 5, "X")], []) == {}
 
 
 # --- leaks -----------------------------------------------------------------------------

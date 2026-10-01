@@ -17,6 +17,18 @@ dependencies = [
     "python-stdnum>=2.2",
 ]
 
+[project.optional-dependencies]
+# Names and addresses with GLiNER (ADR-0003, ADR-0016). CPU only: torch comes from the PyTorch
+# CPU index (see [tool.uv.sources]), never the CUDA wheels. The model itself is downloaded apart,
+# pinned by commit and SHA-256 (`make ner-model`).
+ner = [
+    "gliner>=0.2.29",
+    # transformers needs it to read the SentencePiece tokenizer of mDeBERTa (spm.model).
+    "protobuf>=5.0",
+    "torch>=2.6",
+    "transformers>=4.51.3",
+]
+
 [project.scripts]
 antifaz = "antifaz.cli:main"
 
@@ -32,6 +44,15 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
 ]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+# Only torch comes from here (explicit = true): every other package still comes from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -62,6 +83,12 @@ strict = true
 python_version = "3.12"
 mypy_path = "src"
 plugins = ["pydantic.mypy"]
+
+# The `ner` extra is not installed in CI, and gliner ships no type hints: the backend
+# (detect/ner/gliner.py) type-checks the same with or without them.
+[[tool.mypy.overrides]]
+module = ["gliner", "gliner.*", "torch", "torch.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

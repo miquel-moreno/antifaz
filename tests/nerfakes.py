@@ -7,6 +7,7 @@ NER in the process pool (ADR-0016).
 
 from collections.abc import Mapping, Sequence
 
+from antifaz.detect.ner.backend import NerBackend
 from antifaz.detect.ner.cache import SpanCache
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.fake import FakeBackend
@@ -24,7 +25,7 @@ FAKE_FACTORY = "antifaz.detect.ner.fake:create"
 class InProcess:
     """A predictor that calls the backend directly and records what it was asked."""
 
-    def __init__(self, backend: FakeBackend) -> None:
+    def __init__(self, backend: NerBackend) -> None:
         self.backend = backend
         self.calls = 0
         self.texts: list[str] = []
@@ -38,8 +39,12 @@ class InProcess:
         self.closed = True
 
     def predict(
-        self, texts: Sequence[str], labels: Sequence[str], threshold: float
-    ) -> list[list[list[object]]]:
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None = None,  # the Predictor protocol; no timeout here, never passed
+    ) -> object:
         self.calls += 1
         self.texts.extend(texts)
         return self.backend.predict(list(texts), list(labels), threshold)
@@ -50,4 +55,4 @@ def fake_detector(
 ) -> tuple[NerDetector, InProcess]:
     predictor = InProcess(FakeBackend(names, triggers=False))
     options.setdefault("cache", SpanCache(100))
-    return NerDetector(predictor, **options), predictor  # type: ignore[arg-type]
+    return NerDetector(predictor, **options), predictor  # type: ignore[arg-type]  # **options is dict[str, object]

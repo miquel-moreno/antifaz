@@ -1,0 +1,277 @@
+{
+ "dataset": "MEDDOCAN test (Zenodo 10.5281/zenodo.4279323)",
+ "documents": 250,
+ "by_source_label": {
+  "CALLE": {
+   "type": "ADDRESS",
+   "n": 413,
+   "precision": null,
+   "recall": 0.8184019370460048,
+   "f1": null,
+   "leaks": 249,
+   "leaks_per_100": 60.29055690072639
+  },
+  "CENTRO_SALUD": {
+   "type": null,
+   "n": 6,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 6,
+   "leaks_per_100": 100.0
+  },
+  "CORREO_ELECTRONICO": {
+   "type": "EMAIL",
+   "n": 249,
+   "precision": null,
+   "recall": 0.9919678714859438,
+   "f1": null,
+   "leaks": 2,
+   "leaks_per_100": 0.8032128514056225
+  },
+  "EDAD_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 518,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 518,
+   "leaks_per_100": 100.0
+  },
+  "FAMILIARES_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 81,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 81,
+   "leaks_per_100": 100.0
+  },
+  "FECHAS": {
+   "type": null,
+   "n": 611,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 362,
+   "leaks_per_100": 59.247135842880525
+  },
+  "HOSPITAL": {
+   "type": null,
+   "n": 130,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 130,
+   "leaks_per_100": 100.0
+  },
+  "ID_ASEGURAMIENTO": {
+   "type": "ES_NSS",
+   "n": 198,
+   "precision": null,
+   "recall": 0.010101010101010102,
+   "f1": null,
+   "leaks": 195,
+   "leaks_per_100": 98.48484848484848
+  },
+  "ID_CONTACTO_ASISTENCIAL": {
+   "type": null,
+   "n": 39,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 37,
+   "leaks_per_100": 94.87179487179488
+  },
+  "ID_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 283,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 282,
+   "leaks_per_100": 99.64664310954063
+  },
+  "ID_TITULACION_PERSONAL_SANITARIO": {
+   "type": null,
+   "n": 234,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 234,
+   "leaks_per_100": 100.0
+  },
+  "INSTITUCION": {
+   "type": null,
+   "n": 67,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 67,
+   "leaks_per_100": 100.0
+  },
+  "NOMBRE_PERSONAL_SANITARIO": {
+   "type": null,
+   "n": 501,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 501,
+   "leaks_per_100": 100.0
+  },
+  "NOMBRE_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 502,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 502,
+   "leaks_per_100": 100.0
+  },
+  "NUMERO_FAX": {
+   "type": "PHONE",
+   "n": 7,
+   "precision": null,
+   "recall": 0.8571428571428571,
+   "f1": null,
+   "leaks": 1,
+   "leaks_per_100": 14.285714285714286
+  },
+  "NUMERO_TELEFONO": {
+   "type": "PHONE",
+   "n": 26,
+   "precision": null,
+   "recall": 0.9230769230769231,
+   "f1": null,
+   "leaks": 2,
+   "leaks_per_100": 7.6923076923076925
+  },
+  "OTROS_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 7,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 7,
+   "leaks_per_100": 100.0
+  },
+  "PAIS": {
+   "type": null,
+   "n": 363,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 363,
+   "leaks_per_100": 100.0
+  },
+  "PROFESION": {
+   "type": null,
+   "n": 9,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 9,
+   "leaks_per_100": 100.0
+  },
+  "SEXO_SUJETO_ASISTENCIA": {
+   "type": null,
+   "n": 461,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 461,
+   "leaks_per_100": 100.0
+  },
+  "TERRITORIO": {
+   "type": null,
+   "n": 956,
+   "precision": null,
+   "recall": null,
+   "f1": null,
+   "leaks": 910,
+   "leaks_per_100": 95.18828451882845
+  }
+ },
+ "by_type": {
+  "ADDRESS": {
+   "tp": 338,
+   "fp": 24,
+   "fn": 75,
+   "precision": 0.9337016574585635,
+   "recall": 0.8184019370460048,
+   "f1": 0.872258064516129,
+   "strict_precision": 0.3287292817679558,
+   "strict_recall": 0.288135593220339,
+   "strict_f1": 0.3070967741935484,
+   "any_pii_precision": 0.93646408839779,
+   "non_pii_fp": 23
+  },
+  "EMAIL": {
+   "tp": 247,
+   "fp": 2,
+   "fn": 2,
+   "precision": 0.9919678714859438,
+   "recall": 0.9919678714859438,
+   "f1": 0.9919678714859438,
+   "strict_precision": 0.9919678714859438,
+   "strict_recall": 0.9919678714859438,
+   "strict_f1": 0.9919678714859438,
+   "any_pii_precision": 0.9919678714859438,
+   "non_pii_fp": 2
+  },
+  "ES_NSS": {
+   "tp": 2,
+   "fp": 0,
+   "fn": 196,
+   "precision": 1.0,
+   "recall": 0.010101010101010102,
+   "f1": 0.02,
+   "strict_precision": 1.0,
+   "strict_recall": 0.010101010101010102,
+   "strict_f1": 0.02,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "PHONE": {
+   "tp": 30,
+   "fp": 9,
+   "fn": 3,
+   "precision": 0.7692307692307693,
+   "recall": 0.9090909090909091,
+   "f1": 0.8333333333333333,
+   "strict_precision": 0.7692307692307693,
+   "strict_recall": 0.9090909090909091,
+   "strict_f1": 0.8333333333333333,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  }
+ },
+ "overall": {
+  "total": 5661,
+  "leaked": 4919,
+  "leaks_per_100": 86.89277512806925,
+  "covered_total": 893,
+  "covered_leaked": 449,
+  "covered_leaks_per_100": 50.27995520716685
+ },
+ "latency_ms": {
+  "p50": 2.8791,
+  "p95": 5.702729999999999
+ },
+ "environment": {
+  "date": "2026-10-01",
+  "antifaz": "0.1.0",
+  "commit": "fbc7dbc",
+  "python": "3.12.12",
+  "os": "Windows-11-10.0.26200-SP0",
+  "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+  "dataset_md5": "6a09eb975580fdf56bc7041eadc9c921"
+ },
+ "unmatched_types": {
+  "DATE_OF_BIRTH": {
+   "detections": 250,
+   "overlapping_gold": 250
+  }
+ },
+ "ner": {}
+}

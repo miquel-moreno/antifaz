@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     ner_workers: int = Field(default=1, ge=1, le=64)
     ner_threshold: float = Field(default=0.5, gt=0, le=1)
     ner_cache_entries: int = Field(default=10_000, ge=0, le=1_000_000)
+    # CPU threads of torch in EACH worker process; 0 lets torch choose (all cores). With several
+    # workers, workers x threads should not pass the number of cores.
+    ner_torch_threads: int = Field(default=0, ge=0, le=256)
 
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod

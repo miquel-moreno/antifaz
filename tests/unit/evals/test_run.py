@@ -115,6 +115,27 @@ def test_evaluate_gives_strict_metrics_per_antifaz_type(report: Report) -> None:
     assert report.by_type["ADDRESS"]["strict_f1"] == pytest.approx(1.0)
 
 
+def test_evaluate_gives_precision_against_any_personal_data(report: Report) -> None:
+    # The EMAIL over "Paciente" masks text that is not personal data: a real FP both ways.
+    email = report.by_type["EMAIL"]
+    assert email["any_pii_precision"] == pytest.approx(0.5)
+    assert email["non_pii_fp"] == 1
+    assert report.by_type["ADDRESS"]["any_pii_precision"] == pytest.approx(1.0)
+    assert report.by_type["ADDRESS"]["non_pii_fp"] == 0
+
+
+def test_a_prediction_over_unmapped_personal_data_is_not_a_non_pii_false_positive() -> None:
+    def detect(text: str) -> list[Span]:
+        if text == TEXT_1:  # an EMAIL over the patient name, a label with no Antifaz type
+            return [_span(7, 27, T.EMAIL), _span(54, 66, T.EMAIL)]
+        return []
+
+    email = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ, detect=detect).by_type["EMAIL"]
+    assert email["precision"] == pytest.approx(0.5)  # by type: the name is not an email
+    assert email["any_pii_precision"] == pytest.approx(1.0)  # but it is personal data
+    assert email["non_pii_fp"] == 0
+
+
 def test_unmapped_labels_do_not_create_antifaz_types(report: Report) -> None:
     assert "NOMBRE_SUJETO_ASISTENCIA" not in report.by_type
     assert "None" not in report.by_type
@@ -235,6 +256,17 @@ def test_render_markdown_has_the_three_sections(report: Report) -> None:
     assert "## Tipos cubiertos" in lines
     assert "## Tipos aún no cubiertos" in lines
     assert "## Global" in lines
+
+
+def test_render_markdown_publishes_every_precision(report: Report) -> None:
+    markdown = render_markdown(report)
+    for header in (
+        "Precisión (mismo tipo)",
+        "Precisión estricta",
+        "Precisión (cualquier dato personal)",
+        "Tapan texto no personal",
+    ):
+        assert header in markdown
 
 
 def test_render_markdown_puts_each_label_in_its_section(report: Report) -> None:
