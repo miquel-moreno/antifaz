@@ -1,0 +1,15 @@
+# Allowlist: nothing goes into the build context except what the image needs. A new file
+# (a .env, a model, a dataset, test data...) stays out unless it is added here on purpose.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!NOTICE
+!src/
+
+# Never, even inside an allowed folder.
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*

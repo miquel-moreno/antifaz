@@ -1,0 +1,51 @@
+# Antifaz with Docker Compose: `cp .env.example .env`, fill in your keys, `docker compose up -d`.
+# The keys are read from .env when the container starts: they are never baked into the image
+# and never written in this file. Details in docs/TECNICO.md ("Docker").
+#
+# Tip: keep "$" out of the values in .env (Compose would try to expand it). Hex keys from
+# `openssl rand -hex 32` are fine.
+name: antifaz
+
+services:
+  antifaz:
+    build:
+      context: .
+    image: antifaz:local
+    env_file:
+      # ANTIFAZ_ENV_FILE lets the end-to-end tests use a throwaway file instead of your .env.
+      - path: ${ANTIFAZ_ENV_FILE:-.env}
+        required: true
+    environment:
+      # The host names clients use. "antifaz" is the service name, for other containers on
+      # the same Compose network (http://antifaz:8000). Set it in .env to change it.
+      ANTIFAZ_ALLOWED_HOSTS: ${ANTIFAZ_ALLOWED_HOSTS:-localhost,127.0.0.1,[::1],antifaz}
+    # Only this machine can reach it. To expose it to a network, put a reverse proxy with HTTPS
+    # in front (docs/TECNICO.md) instead of publishing the port on 0.0.0.0.
+    ports:
+      - "127.0.0.1:${ANTIFAZ_PORT:-8000}:8000"
+    # Hardening: nothing in the container can be changed, no Linux capabilities, no privilege
+    # escalation, and bounded memory, CPU and processes.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-m", "antifaz.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+      start_interval: 2s
+    stop_grace_period: 25s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
