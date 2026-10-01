@@ -39,4 +39,6 @@ async def request_id_middleware(
     finally:
         request_id_var.reset(token)
     response.headers[REQUEST_ID_HEADER] = request_id
+    # Every answer is JSON or SSE: a browser must never guess another type (HTML) from a body.
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response

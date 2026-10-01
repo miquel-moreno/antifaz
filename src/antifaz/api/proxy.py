@@ -8,6 +8,7 @@ destination from the client.
 
 import json
 from collections.abc import Iterator, Mapping, Sequence
+from itertools import permutations
 from typing import Any
 
 import httpx
@@ -33,6 +34,24 @@ def configured_keys(settings: Settings) -> list[str]:
     """Every key in the settings: none of them may ever reach the client (invariant 13)."""
     secrets = (settings.antifaz_api_key, settings.openai_api_key, settings.anthropic_api_key)
     return [secret.get_secret_value() for secret in secrets if secret is not None]
+
+
+# Client values joined in every order (a key split across them) up to this many values.
+_MAX_JOINED = 4
+
+
+def client_values_hold_a_key(values: Sequence[str], keys: Sequence[str]) -> bool:
+    """True if a key is in one of `values` or in any concatenation of them, in any order.
+
+    For the few short values a client may forward (query parameters, anthropic-* headers): a
+    key split across two of them would reach the provider whole. More values than _MAX_JOINED
+    count as holding a key (fails closed; no route forwards that many).
+    """
+    if len(values) > _MAX_JOINED:
+        return True
+    orders = (order for n in range(1, len(values) + 1) for order in permutations(values, n))
+    joined = ("".join(order) for order in orders)
+    return any(key in text for text in joined for key in keys)
 
 
 async def read_json(request: Request, limit: int) -> dict[str, Any]:
@@ -288,11 +307,19 @@ def restored_json(body: dict[str, Any], keys: Sequence[str], status_code: int) -
 
 
 def passthrough(upstream: httpx.Response) -> Response:
-    """The provider's answer as it is. It only saw masked text: nothing here is restored."""
+    """The provider's answer as it is (it only saw masked text: nothing here is restored),
+    always as application/json. A body that is not JSON (an HTML error page...) is a fixed
+    502: whatever the provider's content type, the client only ever gets JSON."""
+    try:
+        json.loads(upstream.content)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        is_json = False
+    else:
+        is_json = True
+    if not is_json:
+        raise BadUpstreamResponseError() from None
     return Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        media_type=upstream.headers.get("content-type", "application/json"),
+        content=upstream.content, status_code=upstream.status_code, media_type="application/json"
     )
 
 

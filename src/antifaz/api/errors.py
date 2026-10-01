@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from antifaz.errors import AntifazBlocked
 
@@ -230,7 +231,24 @@ async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content=error_body("invalid_request", message))
 
 
+# The router's own errors, with fixed messages (FastAPI's default is {"detail": ...}).
+_HTTP_ERRORS = {
+    404: ("not_found", "no such route"),
+    405: ("method_not_allowed", "method not allowed on this route"),
+}
+
+
+async def _http_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, StarletteHTTPException):  # pragma: no cover - registered only for it
+        raise exc
+    code, message = _HTTP_ERRORS.get(exc.status_code, ("http_error", "request not accepted"))
+    return JSONResponse(
+        status_code=exc.status_code, content=error_body(code, message), headers=exc.headers
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _app_error_handler)
+    app.add_exception_handler(StarletteHTTPException, _http_error_handler)
     app.add_exception_handler(AntifazBlocked, _blocked_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)

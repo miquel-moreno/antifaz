@@ -14,13 +14,21 @@ the client. Logging the query.
 
 import re
 from functools import partial
+from urllib.parse import urlencode
 
 import anyio.to_thread
 from fastapi import APIRouter, Request, Response
 
 from antifaz.api.anthropic import anthropic_headers
 from antifaz.api.errors import InvalidQueryError, NotConfiguredError, error_responses
-from antifaz.api.proxy import answer_json, configured_keys, passthrough, restored_json, send_get
+from antifaz.api.proxy import (
+    answer_json,
+    client_values_hold_a_key,
+    configured_keys,
+    passthrough,
+    restored_json,
+    send_get,
+)
 from antifaz.config import Settings
 from antifaz.errors import UnmaskableField
 from antifaz.mask import mask
@@ -69,13 +77,16 @@ def _valid(name: str, value: str) -> bool:
 
 
 def _query(request: Request, allowed: frozenset[str], keys: list[str]) -> list[tuple[str, str]]:
-    """The query as checked pairs: only allowed names, each once, with a valid value."""
+    """The query as checked pairs: only allowed names, each once, with a valid value, and
+    no configured key in a value, in the values joined (a key split in two) or in the query
+    string that is sent."""
     pairs = request.query_params.multi_items()
     names = [name for name, _ in pairs]
     if (
         len(set(names)) != len(names)
         or not all(name in allowed and _valid(name, value) for name, value in pairs)
-        or any(key in value for _, value in pairs for key in keys)
+        or client_values_hold_a_key([value for _, value in pairs], keys)
+        or any(key in urlencode(pairs) for key in keys)
     ):
         raise InvalidQueryError()
     return pairs

@@ -6,9 +6,10 @@ headers; nothing else reaches the provider, and a model list that carries a key 
 All values are synthetic.
 """
 
+import base64
 import json
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 
 import httpx
 import pytest
@@ -413,3 +414,165 @@ def test_a_repeated_anthropic_header_is_refused_on_messages_too(
 
     _refused(response, "invalid_header")
     assert upstream.requests == []
+
+
+# --- Review fixes (issue 29) -------------------------------------------------------------
+
+MESSAGES_BODY = {"model": "m", "max_tokens": 8, "messages": [{"role": "user", "content": "hola"}]}
+
+
+@pytest.mark.parametrize("key", [GATEWAY_KEY, PROVIDER_KEY])
+@pytest.mark.parametrize("name", ["anthropic-version", "anthropic-beta"])
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/v1/models"), ("POST", "/v1/messages"), ("POST", "/v1/messages/count_tokens")],
+)
+def test_a_key_in_an_anthropic_header_is_refused(
+    client: TestClient, upstream: FakeUpstream, key: str, name: str, method: str, path: str
+) -> None:
+    headers = {**ANTHROPIC, name: key}
+    body = MESSAGES_BODY if method == "POST" else None
+
+    response = client.request(method, path, json=body, headers=headers)
+
+    _refused(response, "invalid_header")
+    assert key not in response.text
+    assert upstream.requests == []
+
+
+def test_a_key_split_between_the_two_anthropic_headers_is_refused(
+    client: TestClient, upstream: FakeUpstream
+) -> None:
+    headers = {
+        "x-api-key": GATEWAY_KEY,
+        "anthropic-version": GATEWAY_KEY[:16],
+        "anthropic-beta": GATEWAY_KEY[16:],
+    }
+
+    _refused(client.get("/v1/models", headers=headers), "invalid_header")
+    assert upstream.requests == []
+
+
+@pytest.mark.parametrize("key", [GATEWAY_KEY, PROVIDER_KEY])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_key_split_across_query_values_is_refused(
+    client: TestClient, upstream: FakeUpstream, key: str, reverse: bool
+) -> None:
+    first, second = key[:10], key[10:]
+    params = (
+        [("before_id", second), ("after_id", first)]
+        if reverse
+        else [
+            ("after_id", first),
+            ("before_id", second),
+        ]
+    )
+
+    response = client.get("/v1/models", params=params, headers=ANTHROPIC)
+
+    _refused(response)
+    assert upstream.requests == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"), [("POST", "/v1/models"), ("GET", "/antifaz/scan"), ("PUT", "/v1/messages")]
+)
+def test_a_wrong_method_answers_405_in_the_error_format(
+    client: TestClient, method: str, path: str
+) -> None:
+    response = client.request(method, path, headers=ANTHROPIC, json={})
+
+    assert response.status_code == 405
+    assert response.json() == {
+        "error": {"code": "method_not_allowed", "message": "method not allowed on this route"}
+    }
+    assert "allow" in response.headers
+
+
+def test_an_unknown_path_with_the_key_answers_404_in_the_error_format(client: TestClient) -> None:
+    response = client.get(f"/v1/{DNI}", headers=OPENAI)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": {"code": "not_found", "message": "no such route"}}
+    assert DNI not in response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "auth"),
+    [("GET", "/v1/models", OPENAI), ("POST", "/v1/messages", ANTHROPIC)],
+)
+def test_a_provider_error_in_json_is_returned_as_json(
+    upstream: FakeUpstream, method: str, path: str, auth: dict[str, str]
+) -> None:
+    error = {"error": {"message": "<script>x</script>"}}
+    upstream.handler = lambda request: httpx.Response(
+        429, content=json.dumps(error).encode(), headers={"content-type": "text/html"}
+    )
+    for client in gateway_client(upstream):
+        body = MESSAGES_BODY if method == "POST" else None
+        response = client.request(method, path, json=body, headers=auth)
+
+        assert response.status_code == 429
+        assert response.headers["content-type"] == "application/json"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.json() == error
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "auth"),
+    [("GET", "/v1/models", OPENAI), ("POST", "/v1/messages", ANTHROPIC)],
+)
+def test_a_provider_error_that_is_not_json_gives_a_fixed_502(
+    upstream: FakeUpstream, method: str, path: str, auth: dict[str, str]
+) -> None:
+    upstream.handler = lambda request: httpx.Response(
+        503, content=b"<html><script>x</script></html>", headers={"content-type": "text/html"}
+    )
+    for client in gateway_client(upstream):
+        body = MESSAGES_BODY if method == "POST" else None
+        response = client.request(method, path, json=body, headers=auth)
+
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "bad_upstream_response"
+        assert "script" not in response.text
+
+
+def test_every_response_says_nosniff(client: TestClient) -> None:
+    for response in (
+        client.get("/healthz"),
+        client.get("/v1/models", headers=OPENAI),
+        client.post("/antifaz/scan", json={"text": "x"}, headers=OPENAI),
+        client.get("/v1/models"),
+    ):
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def _utf16(key: str) -> str:
+    return key.encode("utf-16-le").hex()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="limitation: only the whole key, raw or JSON-escaped, is detected in provider "
+    "answers; a base64, UTF-16 or partial echo passes (docs/TECNICO.md, Limitaciones)",
+)
+@pytest.mark.parametrize(
+    "echo",
+    [
+        lambda key: base64.b64encode(key.encode()).decode(),
+        _utf16,
+        lambda key: key[:-1],
+    ],
+    ids=["base64", "utf16-hex", "partial"],
+)
+def test_an_encoded_or_partial_key_echo_is_not_detected(
+    upstream: FakeUpstream, echo: Callable[[str], str]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"message": f"bad key {echo(PROVIDER_KEY)}"}})
+
+    upstream.handler = handler
+    for client in gateway_client(upstream):
+        response = client.get("/v1/models", headers=OPENAI)
+
+        assert echo(PROVIDER_KEY) not in response.text

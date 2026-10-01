@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request, Response
 from antifaz.api.errors import PROXY_ERRORS, InvalidHeaderError, NotConfiguredError, json_body
 from antifaz.api.proxy import (
     answer_json,
+    client_values_hold_a_key,
     configured_keys,
     is_event_stream,
     passthrough,
@@ -50,7 +51,8 @@ def anthropic_headers(request: Request, settings: Settings) -> dict[str, str]:
     """The provider key from settings plus the checked anthropic-version and anthropic-beta.
 
     A repeated header is refused: the gateway and the provider could read different copies.
-    Raises NotConfiguredError without the Anthropic key.
+    So is a value holding a configured key, also split between the two headers (it would reach
+    the provider). Raises NotConfiguredError without the Anthropic key.
     """
     if settings.anthropic_api_key is None:
         raise NotConfiguredError()
@@ -63,6 +65,9 @@ def anthropic_headers(request: Request, settings: Settings) -> dict[str, str]:
         if len(values) > 1 or len(value) > _MAX_HEADER_LENGTH or not _HEADER_VALUE.fullmatch(value):
             raise InvalidHeaderError()
         headers[name] = value
+    forwarded = [headers[name] for name in FORWARDED_HEADERS if name in headers]
+    if client_values_hold_a_key(forwarded, configured_keys(settings)):
+        raise InvalidHeaderError()
     return headers
 
 

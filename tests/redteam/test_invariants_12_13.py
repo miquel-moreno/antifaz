@@ -47,11 +47,18 @@ def _aliases(path: str) -> list[str]:
 
 # Every route that needs the key, by what it sends to a provider. A new route must be put in
 # one of these on purpose (test_every_route_is_classified), so none escapes the checks below.
-BODY_PROXY_ROUTES = frozenset({"/v1/chat/completions", "/v1/messages", "/v1/messages/count_tokens"})
+# Classified by (path, method): a new method on an existing path must be classified too.
+BODY_PROXY_ROUTES = frozenset(
+    {
+        ("/v1/chat/completions", "POST"),
+        ("/v1/messages", "POST"),
+        ("/v1/messages/count_tokens", "POST"),
+    }
+)
 # Sends no body: only allowlisted query parameters, which pass through the detector.
-QUERY_PROXY_ROUTES = frozenset({"/v1/models"})
+QUERY_PROXY_ROUTES = frozenset({("/v1/models", "GET")})
 # Never calls a provider.
-LOCAL_ROUTES = frozenset({"/antifaz/scan"})
+LOCAL_ROUTES = frozenset({("/antifaz/scan", "POST")})
 
 
 def _keyed_routes(client: TestClient) -> list[tuple[str, set[str]]]:
@@ -67,8 +74,12 @@ def _keyed_routes(client: TestClient) -> list[tuple[str, set[str]]]:
     return routes
 
 
-def _proxy_routes(client: TestClient) -> list[tuple[str, set[str]]]:
-    return [(path, methods) for path, methods in _keyed_routes(client) if path in BODY_PROXY_ROUTES]
+def _keyed_pairs(client: TestClient) -> set[tuple[str, str]]:
+    return {(path, method) for path, methods in _keyed_routes(client) for method in methods}
+
+
+def _proxy_routes(client: TestClient) -> list[tuple[str, str]]:
+    return sorted(_keyed_pairs(client) & BODY_PROXY_ROUTES)
 
 
 # --- Invariant 12 ---------------------------------------------------------------------------
@@ -92,11 +103,14 @@ def test_registered_routes_are_the_expected_ones() -> None:
 
 
 def test_every_route_is_classified(gateway: TestClient) -> None:
-    keyed = {path for path, _ in _keyed_routes(gateway)}
+    keyed = _keyed_pairs(gateway)
     classes = (BODY_PROXY_ROUTES, QUERY_PROXY_ROUTES, LOCAL_ROUTES)
 
-    assert set().union(*classes) == keyed
-    assert sum(len(c) for c in classes) == len(keyed)  # each route in exactly one class
+    assert set().union(*classes) == keyed  # every (path, method) is classified, none extra
+    assert sum(len(c) for c in classes) == len(keyed)  # each pair in exactly one class
+    # The query and local routes take exactly these methods, nothing else.
+    assert {pair for pair in keyed if pair[0] == "/v1/models"} == {("/v1/models", "GET")}
+    assert {pair for pair in keyed if pair[0] == "/antifaz/scan"} == {("/antifaz/scan", "POST")}
 
 
 @pytest.mark.parametrize("path", _routes())
@@ -143,15 +157,14 @@ def test_every_proxy_route_runs_the_guard_on_the_sent_bytes(
         real_check(payload, vault)
 
     monkeypatch.setattr(guard, "check", spy)
-    for path, methods in _proxy_routes(gateway):
-        for method in methods:
-            checked.clear()
-            upstream_any.requests.clear()
-            response = gateway.request(method, path, json=GATEWAY_BODY, headers=AUTH)
+    for path, method in _proxy_routes(gateway):
+        checked.clear()
+        upstream_any.requests.clear()
+        response = gateway.request(method, path, json=GATEWAY_BODY, headers=AUTH)
 
-            assert response.status_code == 200, path
-            assert len(checked) == 1, path
-            assert [r.content for r in upstream_any.requests] == checked, path
+        assert response.status_code == 200, path
+        assert len(checked) == 1, path
+        assert [r.content for r in upstream_any.requests] == checked, path
 
 
 def test_when_the_guard_blocks_no_proxy_route_sends_anything(
@@ -161,12 +174,11 @@ def test_when_the_guard_blocks_no_proxy_route_sends_anything(
         raise EgressBlocked()
 
     monkeypatch.setattr(guard, "check", block)
-    for path, methods in _proxy_routes(gateway):
-        for method in methods:
-            response = gateway.request(method, path, json=GATEWAY_BODY, headers=AUTH)
+    for path, method in _proxy_routes(gateway):
+        response = gateway.request(method, path, json=GATEWAY_BODY, headers=AUTH)
 
-            assert response.status_code == 400, path
-            assert response.json()["error"]["code"] == "antifaz_blocked"
+        assert response.status_code == 400, path
+        assert response.json()["error"]["code"] == "antifaz_blocked"
     assert upstream_any.requests == []
 
 
@@ -174,13 +186,14 @@ def test_the_query_route_sends_no_body_and_blocks_personal_data_in_its_parameter
     gateway: TestClient, upstream_any: FakeUpstream
 ) -> None:
     headers = {**AUTH, "anthropic-version": "2023-06-01"}
-    for path in QUERY_PROXY_ROUTES:
+    for path, method in sorted(QUERY_PROXY_ROUTES):
         upstream_any.requests.clear()
-        assert gateway.get(path, params={"after_id": "claude-x"}, headers=headers).is_success
+        ok = gateway.request(method, path, params={"after_id": "claude-x"}, headers=headers)
+        assert ok.is_success, path
         assert [r.content for r in upstream_any.requests] == [b""], path
 
         upstream_any.requests.clear()
-        response = gateway.get(path, params={"after_id": DNI}, headers=headers)
+        response = gateway.request(method, path, params={"after_id": DNI}, headers=headers)
 
         assert response.status_code == 400, path
         assert response.json()["error"]["code"] == "antifaz_blocked"
@@ -190,13 +203,10 @@ def test_the_query_route_sends_no_body_and_blocks_personal_data_in_its_parameter
 def test_local_routes_never_call_a_provider(
     gateway: TestClient, upstream_any: FakeUpstream
 ) -> None:
-    for path, methods in _keyed_routes(gateway):
-        if path not in LOCAL_ROUTES:
-            continue
-        for method in methods:
-            response = gateway.request(method, path, json={"text": f"DNI {DNI}"}, headers=AUTH)
+    for path, method in sorted(LOCAL_ROUTES):
+        response = gateway.request(method, path, json={"text": f"DNI {DNI}"}, headers=AUTH)
 
-            assert response.status_code == 200, path
+        assert response.status_code == 200, path
     assert upstream_any.requests == []
 
 
@@ -284,6 +294,27 @@ SCENARIOS: list[Scenario] = [
         {
             "json": {**GATEWAY_BODY, "messages": [{"role": "user", "content": f"{DNI} {DNI}"}]},
             "headers": CANARY_AUTH,
+        },
+    ),
+    (
+        "400 key in anthropic-version",
+        both_echo,
+        "POST",
+        "",
+        {"json": GATEWAY_BODY, "headers": {**CANARY_AUTH, "anthropic-version": GATEWAY_CANARY}},
+    ),
+    (
+        "400 key in anthropic-beta",
+        both_echo,
+        "POST",
+        "",
+        {
+            "json": GATEWAY_BODY,
+            "headers": {
+                **CANARY_AUTH,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": GATEWAY_CANARY,
+            },
         },
     ),
     (
@@ -445,6 +476,24 @@ GET_SCENARIOS: list[tuple[str, Callable[[httpx.Request], httpx.Response], dict[s
         "403 origin",
         both_echo,
         {"headers": {**ANTHROPIC_CANARY, "Origin": "https://evil.example"}},
+    ),
+    (
+        "400 key in anthropic-version",
+        both_echo,
+        {"headers": {**CANARY_AUTH, "anthropic-version": GATEWAY_CANARY}},
+    ),
+    (
+        "400 key in anthropic-beta",
+        both_echo,
+        {"headers": {**ANTHROPIC_CANARY, "anthropic-beta": GATEWAY_CANARY}},
+    ),
+    (
+        "400 key split across two cursors",
+        both_echo,
+        {
+            "params": {"after_id": GATEWAY_CANARY[:20], "before_id": GATEWAY_CANARY[20:]},
+            "headers": ANTHROPIC_CANARY,
+        },
     ),
     ("502 connect", raiser(httpx.ConnectError), {}),
     ("504 timeout", raiser(httpx.ReadTimeout), {}),
