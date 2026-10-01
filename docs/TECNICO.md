@@ -338,7 +338,7 @@ El modelo de nombres (GLiNER, fijado por su commit en `detect/ner/manifest.json`
 - En la partición dev de MEDDOCAN (2026-10-01), la precisión de PERSON contra cualquier dato personal anotado fue del 67,5–70,9 % según el umbral (~70 %): **cerca del 30 % de las detecciones de nombres tapan texto que no es un dato personal** (416–510 detecciones). Por tipo es aún menor (63–69 %). ADDRESS sí llega (~96 %).
 - Por eso el umbral publicado es el de respaldo (el más preciso) y el resultado lleva `floor_met: false`. Las cifras de test están en `docs/benchmark.md`.
 - **Actívalo solo si te vale que tape de más**: protege más nombres, pero el modelo de IA recibe más marcadores donde había palabras normales y puede responder peor.
-- Coste en el PC de desarrollo (Ryzen 7 5700U, solo CPU), de `evals/results/2026-10-01-0.1.0-ner.json`: **590 MB de RAM (RSS) por proceso** del pool y, por documento de MEDDOCAN (unos 3.000 caracteres), **p50 2,4 s / p95 4,8 s** con la caché fría (con la caché caliente, 2,9 ms / 6,0 ms). Arrancar el pool (comprobar dos veces el SHA-256 de 1,16 GB y cargar el modelo) tardó **48–57 s**, medido a mano dos veces (2026-09-30 y 2026-10-01); los resultados futuros guardarán `load_seconds`.
+- Coste en el PC de desarrollo (Ryzen 7 5700U, solo CPU), de `evals/results/2026-10-01-0.1.0-ner.json`: **unos 740 MB de RAM (RSS) por proceso** del pool (590 MB en una ejecución anterior: varía con lo que el proceso haya procesado) y, por documento de MEDDOCAN (unos 3.000 caracteres), **p50 1,9 s / p95 3,8 s** con la caché fría (con la caché caliente, 2,9 ms / 5,6 ms). Arrancar el pool (comprobar dos veces el SHA-256 de 1,16 GB y cargar el modelo) tardó **51 s** (`load_seconds`).
 
 **Cómo activarlo.**
 
