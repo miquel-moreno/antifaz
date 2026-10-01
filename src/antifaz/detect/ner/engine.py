@@ -25,6 +25,7 @@ from antifaz.detect.ner.chunker import (
     chunk,
     merge,
 )
+from antifaz.detect.ner.view import VIEW_VERSION, ner_view
 from antifaz.detect.types import Confidence, EntityType, Layer, Span
 from antifaz.errors import DetectorFailed
 
@@ -97,7 +98,7 @@ class NerDetector:
         self._batch = batch_chunks
         self._max_chunks = max_chunks
         self._timeout: float | None = timeout
-        self._chunker = f"{CHUNKER_VERSION}:{window}:{overlap}"
+        self._chunker = f"{CHUNKER_VERSION}:{window}:{overlap}:{VIEW_VERSION}"
 
     def start(self) -> None:
         self._predictor.start()
@@ -163,7 +164,8 @@ class NerDetector:
                 if cached is not None:
                     found[text] = cached
                     continue
-            chunks = chunk(text, self._window, self._overlap)
+            # The model reads the view without blobs or long glued numbers (view.py).
+            chunks = chunk(ner_view(text), self._window, self._overlap)
             if chunks:
                 pending.append((text, chunks))
             else:

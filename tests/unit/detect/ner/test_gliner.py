@@ -140,7 +140,9 @@ def test_a_long_window_is_cut_to_fit_and_offsets_come_back_to_the_text() -> None
     filler = " ".join("1234567890" * 4 for _ in range(60))
     text = f"{CARMEN} tiene {filler} y {JORDI} al final."
     model = Recorder({CARMEN: "person", JORDI: "person"})
-    gliner = GlinerBackend(split_words, count_tokens, model, max_tokens=120, overlap=8)
+    gliner = GlinerBackend(
+        split_words, count_tokens, model, max_tokens=120, overlap=8, pieces_per_text=100
+    )
 
     (entities,) = gliner.predict([text], ["person", "address"], 0.5)
 
@@ -160,7 +162,9 @@ def test_a_name_seen_in_two_pieces_is_one_entity() -> None:
     text = f"{words} {JORDI} {words}"
     model = Recorder({JORDI: "person"})
     # Every word costs 1-3 tokens: pieces of 30 tokens sharing 8 words.
-    gliner = GlinerBackend(split_words, count_tokens, model, max_tokens=37, overlap=8)
+    gliner = GlinerBackend(
+        split_words, count_tokens, model, max_tokens=37, overlap=8, pieces_per_text=100
+    )
 
     (entities,) = gliner.predict([text], ["person", "address"], 0.5)
 
@@ -210,3 +214,34 @@ def test_overlapping_entities_of_two_pieces_are_left_for_the_engine_to_join() ->
     )
 
     assert entities == [[0, 5, "person", 0.9], [3, 9, "person", 0.6]]
+
+
+def test_a_call_that_needs_too_many_model_pieces_fails_fast_without_the_model() -> None:
+    """Text the NER view did not hide but that costs far more model tokens than words (e.g.
+    random CJK or emoji) is refused before the model runs: the worker raises a fixed error
+    and stays alive, instead of running into the time limit and being killed."""
+    model = Recorder({})
+    gliner = GlinerBackend(split_words, count_tokens, model, max_tokens=40, overlap=2)
+    heavy = " ".join("x" * 30 for _ in range(60))  # 11 tokens per word: many 40-token pieces
+
+    with pytest.raises(backend.TooManyPiecesError):
+        gliner.predict([heavy], ["person"], 0.5)
+    assert model.read == []
+
+
+def test_ordinary_texts_stay_within_the_piece_budget() -> None:
+    model = Recorder({JORDI: "person"})
+    gliner = GlinerBackend(split_words, count_tokens, model, max_tokens=40, overlap=2)
+    texts = [f"Hola {JORDI}, ¿qué tal?"] * 3 + ["", "  "]
+
+    assert len(gliner.predict(texts, ["person"], 0.5)) == 5
+    assert backend.PIECES_PER_TEXT >= 2
+
+
+def test_pieces_never_share_more_than_half_the_budget() -> None:
+    """The overlap is OVERLAP_WORDS words, but never more than half the budget in tokens:
+    otherwise a piece made of a few long words would barely move forward."""
+    ranges = pieces([10] * 20, budget=40, overlap=8)
+    for before, after in pairwise(ranges):
+        assert sum(10 for _ in range(after.start, before.stop)) <= 20
+    assert ranges[1].start == 2  # 2 words of 10 tokens shared (20 = budget // 2), not 8

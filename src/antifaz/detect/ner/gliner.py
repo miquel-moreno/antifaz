@@ -39,12 +39,22 @@ MAX_MODEL_TOKENS = 384
 # Words shared by two pieces of one window (an entity shorter than this is whole in one).
 OVERLAP_WORDS = 32
 BATCH_SIZE = 8
+# Model pieces a call may need per text (window) on average. Ordinary text is one piece per
+# window; text that costs far more model tokens than words (random CJK, emoji, symbol runs the
+# NER view does not hide) is refused before the model runs (TooManyPiecesError): the worker
+# answers a fixed error and stays alive, instead of running into the time limit and being
+# killed (a reload takes minutes, and every request is blocked meanwhile).
+PIECES_PER_TEXT = 4
 
 Words = list[tuple[int, int]]  # (start, end) of each model word in the text
 
 
 class WordTooLongError(ValueError):
     """One word needs more model tokens than a call can hold: it cannot be read."""
+
+
+class TooManyPiecesError(ValueError):
+    """The texts of a call would need more than PIECES_PER_TEXT model pieces each on average."""
 
 
 def model_config(model_dir: Path) -> dict[str, Any]:
@@ -56,7 +66,9 @@ def model_config(model_dir: Path) -> dict[str, Any]:
 
 def pieces(counts: Sequence[int], budget: int, overlap: int = OVERLAP_WORDS) -> list[range]:
     """Consecutive word ranges covering every word, each with at most `budget` model tokens,
-    the next one starting up to `overlap` words (and half the budget) before the previous end."""
+    the next one starting up to `overlap` words before the previous end. The shared words never
+    hold more than half the budget in tokens: with a few long words, a full overlap would leave
+    each piece only a word or two of new text."""
     if budget < 1:
         raise WordTooLongError("the labels alone fill the model input")
     if any(count > budget for count in counts):
@@ -93,8 +105,10 @@ class GlinerBackend:
         *,
         max_tokens: int = MAX_MODEL_TOKENS,
         overlap: int = OVERLAP_WORDS,
+        pieces_per_text: int = PIECES_PER_TEXT,
     ) -> None:
         self._split_words = split_words
+        self._pieces_per_text = pieces_per_text
         self._count_tokens = count_tokens  # (fixed tokens, tokens of each word)
         self._infer = infer
         self._max_tokens = max_tokens
@@ -120,6 +134,8 @@ class GlinerBackend:
     ) -> list[list[list[object]]]:
         windows = [self.windows(text, labels) for text in texts]
         flat = [piece.text for chunks in windows for piece in chunks]
+        if len(flat) > self._pieces_per_text * max(1, len(texts)):
+            raise TooManyPiecesError("the texts cost too many model tokens for their words")
         raw = iter(self._infer(flat, labels, threshold) if flat else [])
         out: list[list[list[object]]] = []
         for chunks in windows:

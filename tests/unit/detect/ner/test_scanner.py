@@ -52,8 +52,10 @@ def test_the_ner_reads_the_normalised_view_and_spans_cover_the_original() -> Non
 
 
 def test_a_ner_span_containing_a_dni_keeps_the_dni_as_a_dni() -> None:
-    ner, _ = fake_detector({f"Carmen {SENTINEL_DNI}": "person"})
     text = f"Soy Carmen {SENTINEL_DNI}."
+    # A model answer covering "Carmen 12345678Z" (fixed: the NER view hides digits glued to a
+    # letter from the model, so the dictionary fake could not find it).
+    ner = NerDetector(_Fixed([[4, 4 + len(f"Carmen {SENTINEL_DNI}"), "person", 0.9]]))
     assert _values(text, Scanner(ner)(text)) == [
         ("Carmen ", EntityType.PERSON),
         (SENTINEL_DNI, EntityType.ES_DNI),

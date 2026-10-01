@@ -179,8 +179,13 @@ def test_our_windows_of_plain_spanish_fit_the_model_in_one_piece(model: GlinerBa
     assert WINDOW_TOKENS == 200
 
 
-def test_a_name_after_many_model_tokens_is_still_found(model: GlinerBackend) -> None:
-    """Without re-cutting, a name after 190 long numbers (2,330 subwords) was not seen."""
+def test_a_name_after_many_model_tokens_is_still_found(
+    model: GlinerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without re-cutting, a name after 190 long numbers (2,330 subwords) was not seen. (In the
+    gateway the NER view hides such numbers and the piece budget refuses the rest; here the
+    backend is called directly, with the budget lifted, to test the re-cutting itself.)"""
+    monkeypatch.setattr(model, "_pieces_per_text", 1000)
     rng = random.Random(1)  # noqa: S311 - fixed seed for test data, not security
     numbers = " ".join("".join(rng.choice("0123456789") for _ in range(40)) for _ in range(190))
     text = f"{numbers} El paciente Jordi Inventat Puig ingresó ayer."
@@ -252,3 +257,57 @@ def test_scoring_once_matches_running_each_threshold_with_the_real_model(
         every = Scanner(NerDetector(InProcess(model), threshold=threshold))  # type: ignore[arg-type]
         for text in texts:
             assert once(text) == every(text), threshold
+
+
+def test_a_name_glued_to_a_long_number_is_found(model: GlinerBackend) -> None:
+    """The NER view turns the digits into spaces, so the model sees the name as words."""
+    from antifaz.detect.ner.engine import NerDetector
+    from antifaz.detect.scan import Scanner
+    from tests.nerfakes import InProcess
+
+    text = "Ref 1234567890Jordi Inventat Puig pidió cita para mañana."
+    spans = Scanner(NerDetector(InProcess(model)))(text)  # type: ignore[arg-type]  # the real backend is a NerBackend, InProcess is typed for the fake
+
+    assert any(text[s.start : s.end] == "Jordi Inventat Puig" for s in spans), spans
+
+
+@pytest.mark.xfail(strict=True, reason="'Apellidos, Nombre' without context: a known limitation")
+def test_surname_comma_name_without_context_is_found(model: GlinerBackend) -> None:
+    found = _found(model, "Inventat Puig, Jordi")
+    assert any("Inventat Puig" in value for value in found.get("person", []))
+    assert any("Jordi" in value for value in found.get("person", []))
+
+
+def test_blobs_and_heavy_text_never_kill_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 4 KB base64 blob is hidden from the model (NER view) and random CJK is refused
+    before the model runs (piece budget): the worker is never killed, and a normal request
+    right after is answered and masked."""
+    import base64
+
+    from antifaz.detect.ner.setup import ner_from_settings
+
+    pytest.importorskip("gliner")
+    upstream = FakeUpstream(openai_tests.echo)
+    settings = openai_tests._settings(
+        ner_enabled=True, ner_model_dir=_model_dir(), ner_timeout_seconds=10, ner_workers=1
+    )
+    ner = ner_from_settings(settings)
+    assert ner is not None
+    rng = random.Random(7)  # noqa: S311 - fixed seed for test data, not security
+    blob = base64.b64encode(rng.randbytes(3000)).decode()
+    cjk = "".join(chr(rng.randrange(0x4E00, 0x9FFF)) for _ in range(4000))
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    with TestClient(create_app(settings, http_client=http, ner=ner)) as client:
+        pids = ner._predictor.worker_pids()  # type: ignore[attr-defined]  # NerPool, for the test
+
+        def ask(text: str) -> httpx.Response:
+            body = {"model": "m", "messages": [{"role": "user", "content": text}]}
+            return client.post("/v1/chat/completions", json=body, headers=OPENAI_AUTH)
+
+        assert ask(f"Adjunto: {blob}").status_code == 200
+        assert ask(cjk).status_code == 400  # refused fast, the worker stays
+        normal = ask("Soy Jordi Inventat Puig, de la Calle Ficticia 12.")
+        assert ner._predictor.worker_pids() == pids  # type: ignore[attr-defined]  # same worker
+    assert normal.status_code == 200
+    sent = json.dumps(json.loads(upstream.requests[-1].content), ensure_ascii=False)
+    assert "Jordi" not in sent and "[[PERSON_1]]" in sent
