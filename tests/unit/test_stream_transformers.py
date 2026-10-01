@@ -6,10 +6,11 @@ from typing import Any
 import pytest
 
 from antifaz import mask
+from antifaz.api.streaming import KeyEchoed, KeyWatch
 from antifaz.providers.anthropic_stream import AnthropicMessagesStream
 from antifaz.providers.json_walk import restore_strings
 from antifaz.providers.openai_stream import OpenAIChatStream
-from antifaz.providers.sse import MAX_LINE_CHARS, SSEParser
+from antifaz.providers.sse import MAX_LINE_CHARS, MalformedStream, SSEParser
 from antifaz.providers.streaming import MAX_ACCUMULATED_CHARS, StreamCut
 from antifaz.restore import StreamLimitExceeded
 from antifaz.vault import Vault
@@ -446,3 +447,108 @@ def test_anthropic_input_json_of_other_blocks_passes_untouched(
     assert delta in out
     assert DNI not in out
     assert stream.unknown == 1
+
+
+# --- Malformed indexes: the stream ends (fail closed) -----------------------------------------
+
+BAD_INDEXES = [0.0, "0", True, -1, None, [0]]
+
+
+@pytest.mark.parametrize("index", BAD_INDEXES)
+def test_openai_choice_with_a_malformed_index_is_a_malformed_stream(index: object) -> None:
+    chunk = {"object": "chat.completion.chunk", "choices": [{"index": index, "delta": {}}]}
+    stream = OpenAIChatStream(_vault())
+    with pytest.raises(MalformedStream):
+        _run(stream, f"data: {json.dumps(chunk)}\n\n", end=False)
+
+
+@pytest.mark.parametrize("choice", [{"delta": {"content": "x"}}, "x", 0])
+def test_openai_choice_without_index_is_a_malformed_stream(choice: object) -> None:
+    chunk = {"object": "chat.completion.chunk", "choices": [choice]}
+    stream = OpenAIChatStream(_vault())
+    with pytest.raises(MalformedStream):
+        _run(stream, f"data: {json.dumps(chunk)}\n\n", end=False)
+
+
+@pytest.mark.parametrize("index", BAD_INDEXES)
+def test_openai_tool_call_with_a_malformed_index_is_a_malformed_stream(index: object) -> None:
+    call = {"index": index, "function": {"arguments": "{}"}}
+    stream = OpenAIChatStream(_vault())
+    with pytest.raises(MalformedStream):
+        _run(stream, _chunk({"tool_calls": [call]}), end=False)
+
+
+@pytest.mark.parametrize("index", BAD_INDEXES)
+@pytest.mark.parametrize("kind", ["content_block_start", "content_block_delta", "ping"])
+def test_anthropic_event_with_a_malformed_index_is_a_malformed_stream(
+    kind: str, index: object
+) -> None:
+    payload = {"type": kind, "index": index, "delta": {"type": "text_delta", "text": "x"}}
+    stream = AnthropicMessagesStream(_vault())
+    with pytest.raises(MalformedStream):
+        _run(stream, anthropic_event(payload), end=False)
+
+
+@pytest.mark.parametrize(
+    "kind", ["content_block_start", "content_block_delta", "content_block_stop"]
+)
+def test_anthropic_content_block_without_index_is_a_malformed_stream(kind: str) -> None:
+    payload = {"type": kind, "delta": {"type": "text_delta", "text": "x"}}
+    stream = AnthropicMessagesStream(_vault())
+    with pytest.raises(MalformedStream):
+        _run(stream, anthropic_event(payload), end=False)
+
+
+# --- KeyWatch (invariant 13 in a stream) --------------------------------------------------------
+
+KEY = "sk-test-not-a-real-key-0123456789"  # fake
+
+
+def _openai_event(*choices: dict[str, Any], **extra: Any) -> str:
+    chunk = {"object": "chat.completion.chunk", "choices": list(choices), **extra}
+    return f"data: {json.dumps(chunk)}\n\n"
+
+
+def test_keywatch_catches_a_key_split_between_two_deltas_of_one_choice() -> None:
+    watch = KeyWatch([KEY])
+    watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[:10]}}))
+    with pytest.raises(KeyEchoed):
+        watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[10:]}}))
+
+
+def test_keywatch_too_many_fields_ends_the_stream_instead_of_forgetting() -> None:
+    watch = KeyWatch([KEY])
+    watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[:10]}}))
+    filler = {f"x{i}": "a" for i in range(5000)}
+    with pytest.raises(StreamLimitExceeded):
+        watch.check_output(_openai_event({"index": 1, "delta": {}}, relleno=filler))
+
+
+def test_keywatch_a_few_thousand_fields_in_total_still_pass() -> None:
+    watch = KeyWatch([KEY])
+    for start in range(0, 3000, 1000):
+        filler = {f"x{i}": "a" for i in range(start, start + 1000)}
+        watch.check_output(_openai_event({"index": 0, "delta": {}}, relleno=filler))
+
+
+def test_keywatch_keeps_one_tail_per_field_name_across_paths() -> None:
+    """The same field name in another path (another choice, an odd nesting) still joins."""
+    watch = KeyWatch([KEY])
+    watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[:10]}}))
+    with pytest.raises(KeyEchoed):
+        watch.check_output(f"data: {json.dumps({'otro': [{'content': KEY[10:]}]})}\n\n")
+
+
+@pytest.mark.parametrize("name", ["text", "partial_json", "arguments", "refusal", "thinking"])
+def test_keywatch_name_tail_works_for_any_string_field(name: str) -> None:
+    watch = KeyWatch([KEY])
+    watch.check_output(f"data: {json.dumps({'a': {name: KEY[:7]}})}\n\n")
+    with pytest.raises(KeyEchoed):
+        watch.check_output(f"data: {json.dumps({'b': [{name: KEY[7:]}]})}\n\n")
+
+
+def test_keywatch_unrelated_text_is_not_a_key() -> None:
+    watch = KeyWatch([KEY])
+    watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[:10]}}))
+    watch.check_output(_openai_event({"index": 1, "delta": {"content": "hola"}}))
+    watch.check_output(_openai_event({"index": 0, "delta": {"content": "adios"}}))

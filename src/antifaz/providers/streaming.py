@@ -62,7 +62,8 @@ def dumps(node: object) -> str:
 
 
 def is_index(value: object) -> TypeGuard[int]:
-    return isinstance(value, int) and not isinstance(value, bool)
+    """A plain non-negative int (not a bool, a float like 0.0 or a string like "0")."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 class TextFields[K: Hashable]:
