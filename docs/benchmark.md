@@ -269,3 +269,9 @@ tocan ningún dato anotado, son falsos positivos.
 | Fugas por cada 100 (tipos cubiertos) | 14.5 |
 | Latencia p50 / p95 por documento | 1947.30 ms / 3822.07 ms |
 <!-- bench-ner:end -->
+
+<!-- bench-presidio:start -->
+## Comparación con Presidio
+
+Se genera con `make bench PRESIDIO=1` (grupo de dependencias `bench`, que no se distribuye); el detalle irá en `evals/results/<fecha>-<versión>-presidio.json`. Todavía no se ha ejecutado.
+<!-- bench-presidio:end -->

@@ -21,6 +21,7 @@ help:
 	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
 	@echo "           make bench NER=1: also with the NER model (needs make ner-model)"
 	@echo "           make bench DEV=1: only the NER threshold table on MEDDOCAN dev"
+	@echo "           make bench PRESIDIO=1: also Presidio on the shared types (bench group, ~51 MB once)"
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
 
 install:
@@ -65,9 +66,11 @@ licenses:
 	uv run python -m scripts.check_licenses
 
 # NER=1: also the NER (threshold chosen on MEDDOCAN dev, then test once). DEV=1: only the dev
-# threshold table (evals/results/<date>-<version>-ner-dev.json).
+# threshold table (evals/results/<date>-<version>-ner-dev.json). PRESIDIO=1: also Presidio, from
+# the `bench` dependency group (never shipped); it reads the NER results already saved, so it
+# does not go with NER=1 (the group and the extra are never installed together).
 bench:
-	uv run $(if $(NER)$(DEV),--extra ner,) python -m evals.run $(if $(NER),--ner,) $(if $(DEV),--dev-only,)
+	uv run $(if $(NER)$(DEV),--extra ner,) $(if $(PRESIDIO),--group bench,) python -m evals.run $(if $(NER),--ner,) $(if $(DEV),--dev-only,) $(if $(PRESIDIO),--presidio,)
 
 # The optional NER: its extra (CPU-only torch) and the model pinned in detect/ner/manifest.json,
 # checked by size and SHA-256. Note: a plain `uv sync` (make install) removes the extra again.

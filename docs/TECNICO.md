@@ -361,6 +361,16 @@ Un `uv sync` sin `--extra ner` (por ejemplo `make install`) desinstala el extra.
 - **Presupuesto por llamada**: si una llamada necesita más de 4 trozos por ventana de media (texto que cuesta muchas más subpalabras que palabras: CJK o emoji al azar), el backend la rechaza **antes** de ejecutar el modelo. El proceso responde un error fijo y sigue vivo (no cuenta para el cortacircuitos); la petición se bloquea con 400. Un texto normal es un trozo por ventana. Una petición legítima muy grande puede seguir pasando el tiempo máximo (el fallo seguro de siempre).
 - Las detecciones de los trozos vuelven sin unir; el motor las une después de filtrar por su umbral. Así la respuesta a un umbral es la de uno más bajo filtrada por puntuación, y el benchmark ejecuta el modelo una sola vez por ventana para todos los umbrales candidatos (`ScoreCache`, probado igual que ejecutar cada umbral).
 
+## Comparación con Presidio en Antifaz-Bench (issue 13)
+
+`make bench PRESIDIO=1` mide también Presidio (`evals/presidio_baseline.py`) con el mismo `evaluate()` sobre la partición de test de MEDDOCAN, y lo compara con Antifaz solo en los tipos que cubren los dos y que MEDDOCAN anota (EMAIL, PHONE y PERSON). Las cifras de Antifaz con NER se leen del último `evals/results/*-ner.json`; el NER no se vuelve a ejecutar.
+
+- **Dependencias:** presidio-analyzer 2.2.364, spaCy 3.8.16 y el modelo `xx_ent_wiki_sm` 3.8.0 (MIT) van en el grupo `bench` de `pyproject.toml`: no se distribuyen, ni `uv sync` ni la CI los instalan, y un test comprueba que `uv export --no-dev` no los lista. El modelo viene de su release de GitHub, fijado por SHA-256 en `uv.lock`. El grupo y el extra `ner` se resuelven por separado (`[tool.uv] conflicts`) porque Presidio pide `numpy < 2.5`.
+- **Español explícito:** motor NLP, registro y analizador solo en `es`, con los reconocedores puestos a mano (email, teléfono con región ES, IBAN, tarjeta con contexto en español, IP, NIF, NIE, pasaporte español y el NER de spaCy). Al arrancar se comprueba que todo es español y que hay reconocedor para cada tipo; si no, falla en vez de seguir en inglés sin avisar (la configuración por defecto de Presidio es inglesa).
+- **Tipos:** ES_NIF de Presidio se compara con ES_DNI de Antifaz; LOCATION y ORGANIZATION no tienen equivalente y solo cuentan para las fugas.
+- **Sin red:** el email de Presidio usa tldextract, que por defecto descarga la lista de sufijos públicos; aquí usa la copia que trae el paquete.
+- Los tests usan un analizador falso: Presidio no está instalado en la CI.
+
 ## La puerta cerrada por defecto (issue 20)
 
 Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
