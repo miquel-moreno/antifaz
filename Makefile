@@ -14,7 +14,7 @@ help:
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
 	@echo "e2e        End-to-end: builds the image, runs Compose with a fake provider (needs Docker)"
-	@echo "secrets    Scan the repository for secrets (gitleaks)"
+	@echo "secrets    Scan the git history for secrets (gitleaks, redacted)"
 	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
@@ -59,8 +59,10 @@ contract:
 e2e:
 	uv run pytest tests/e2e --no-cov --e2e -p no:cacheprovider
 
+# Only the git history, never the working tree (gitleaks dir or --no-git would read .env),
+# and always --redact so a finding never prints the secret.
 secrets:
-	gitleaks detect --source . --no-banner
+	gitleaks detect --source . --no-banner --redact
 
 workflows:
 	$(ZIZMOR) .
