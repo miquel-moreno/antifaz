@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract secrets check audit licenses bench workflows ner-model
+.PHONY: help install dev lint format typecheck test contract secrets check audit licenses bench workflows ner-model openapi
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -18,6 +18,7 @@ help:
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
 	@echo "licenses   Licenses of the runtime dependencies"
+	@echo "openapi    Regenerate docs/openapi.json from the app (a test checks it is up to date)"
 	@echo "bench      Antifaz-Bench on MEDDOCAN (downloads 11.7 MB once; no LLM, no cost)"
 	@echo "           make bench NER=1: also with the NER model (needs make ner-model)"
 	@echo "           make bench DEV=1: only the NER threshold table on MEDDOCAN dev"
@@ -64,6 +65,10 @@ audit:
 
 licenses:
 	uv run python -m scripts.check_licenses
+
+# The gateway serves no /docs or /openapi.json (ADR-0015): the schema is a static file.
+openapi:
+	uv run python -m scripts.export_openapi
 
 # NER=1: also the NER (threshold chosen on MEDDOCAN dev, then test once). DEV=1: only the dev
 # threshold table (evals/results/<date>-<version>-ner-dev.json). PRESIDIO=1: also Presidio, from
