@@ -21,7 +21,9 @@ updates:
     commit-message:
       prefix: "ci(deps)"
 
-  # Base images of the Dockerfile, pinned by digest (python and uv).
+  # Base images of the Dockerfile, pinned by digest (python and uv): a new digest of the same
+  # tag (Debian security rebuilds) is proposed as a PR. No `docker-compose` entry: the compose
+  # files only use antifaz:local, built from this Dockerfile, so there is nothing to update.
   - package-ecosystem: docker
     directory: /
     schedule:

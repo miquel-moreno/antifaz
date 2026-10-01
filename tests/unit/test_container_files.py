@@ -14,6 +14,10 @@ REPO = Path(__file__).resolve().parents[2]
 DOCKERFILE = (REPO / "Dockerfile").read_text(encoding="utf-8")
 DOCKERIGNORE = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
 COMPOSE: dict[str, Any] = yaml.safe_load((REPO / "docker-compose.yml").read_text(encoding="utf-8"))
+CI: dict[str, Any] = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+DEPENDABOT: dict[str, Any] = yaml.safe_load(
+    (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
+)
 SERVICE: dict[str, Any] = COMPOSE["services"]["antifaz"]
 
 
@@ -45,7 +49,8 @@ def test_the_image_has_a_healthcheck_without_curl() -> None:
     assert "antifaz.healthcheck" in healthcheck
     assert "curl" not in healthcheck
     # Nothing is installed with the system package manager (no curl, wget or shells added).
-    assert not any("apt-get" in line or "apk " in line for line in _instructions("RUN"))
+    for line in _instructions("RUN"):
+        assert "apt-get install" not in line and "apk " not in line, line
 
 
 def test_the_server_starts_from_the_factory_without_proxy_headers() -> None:
@@ -63,6 +68,18 @@ def test_the_final_stage_removes_pip_and_ensurepip() -> None:
     for leftover in ("site-packages/pip", "site-packages/setuptools", "site-packages/wheel"):
         assert leftover in joined, leftover
     assert "ensurepip" in joined and "/usr/local/bin/pip" in joined
+
+
+def test_the_final_stage_applies_debian_security_updates_without_installing() -> None:
+    final = re.sub(r"\\\n\s*", " ", DOCKERFILE.rsplit("AS runtime", 1)[1])
+    runs = re.findall(r"^RUN\s+(.+)$", final, re.MULTILINE)
+    (upgrade,) = [line for line in runs if "apt-get upgrade" in line]
+    assert "apt-get update" in upgrade and "-y --no-install-recommends" in upgrade
+    assert "rm -rf /var/lib/apt/lists/*" in upgrade
+    assert "apt-get install" not in upgrade and "dist-upgrade" not in upgrade
+    # Before pip is removed, and before the switch to the non-root user.
+    assert final.index("apt-get upgrade") < final.index("site-packages/pip")
+    assert final.index("apt-get upgrade") < final.index("USER ")
 
 
 def test_the_image_installs_no_dev_dependencies_and_no_extras() -> None:
@@ -116,3 +133,51 @@ def test_the_example_env_file_allows_the_service_name_as_host() -> None:
     (line,) = [x for x in example.splitlines() if x.startswith("ANTIFAZ_ALLOWED_HOSTS=")]
     hosts = line.removeprefix("ANTIFAZ_ALLOWED_HOSTS=").split(",")
     assert "antifaz" in hosts and "localhost" in hosts
+
+
+def _image_steps() -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = CI["jobs"]["image"]["steps"]
+    return steps
+
+
+def _grype_steps() -> list[dict[str, Any]]:
+    return [s for s in _image_steps() if str(s.get("uses", "")).startswith("anchore/scan-action@")]
+
+
+def test_grype_gate_fails_only_on_high_or_critical_with_a_fix() -> None:
+    gates = [s for s in _grype_steps() if s["with"].get("fail-build") is True]
+    assert len(gates) == 1
+    (gate,) = gates
+    assert gate["with"]["severity-cutoff"] == "high"
+    assert gate["with"]["only-fixed"] is True
+    assert gate["with"]["config"] == ".github/grype-gate.yaml"
+    assert (REPO / ".github/grype-gate.yaml").is_file()
+
+
+def test_grype_full_report_lists_everything_and_never_fails() -> None:
+    reports = [s for s in _grype_steps() if s["with"].get("fail-build") is False]
+    assert len(reports) == 1
+    (report,) = reports
+    assert report["with"]["only-fixed"] is False
+    assert "config" not in report["with"]  # the gate's ignore rules do not hide anything here
+    assert report["id"] == "grype-report"
+    assert report["with"]["output-file"] == "grype-report.txt"
+
+
+def test_grype_full_report_is_uploaded_even_when_the_gate_fails() -> None:
+    steps = _image_steps()
+    (upload,) = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", upload["uses"])
+    assert "always()" in upload["if"] and "steps.grype-report.outcome" in upload["if"]
+    assert upload["with"]["path"] == "grype-report.txt"
+    assert upload["with"]["retention-days"] == 30
+    # After the gate, so a failing gate still uploads the report.
+    gate = next(s for s in _grype_steps() if s["with"].get("fail-build") is True)
+    assert steps.index(upload) > steps.index(gate)
+
+
+def test_dependabot_updates_the_base_image_digests_with_a_cooldown() -> None:
+    (docker,) = [u for u in DEPENDABOT["updates"] if u["package-ecosystem"] == "docker"]
+    assert docker["directory"] == "/"
+    assert docker["schedule"]["interval"] == "weekly"
+    assert docker["cooldown"]["default-days"] == 7

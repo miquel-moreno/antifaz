@@ -54,6 +54,14 @@ RUN groupadd --system --gid 10001 antifaz \
     && useradd --system --uid 10001 --gid 10001 --no-create-home \
        --home-dir /nonexistent --shell /usr/sbin/nologin antifaz
 
+# Debian security updates published after the base image was built (e.g. openssl, pcre2).
+# Only upgrades of what is already installed: nothing new is added. The base stays pinned by
+# digest and Dependabot proposes new digests; this covers the days in between.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # The base image ships pip (and ensurepip to reinstall it): the gateway needs neither, and an
 # installer is one more tool for an attacker and more packages to scan. Removed, not shipped.
 RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \

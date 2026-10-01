@@ -132,11 +132,36 @@ jobs:
           artifact-name: antifaz-image.cdx.json
           upload-artifact-retention: 30
           upload-release-assets: false
-      - name: Vulnerability scan of the image (Grype, fails on high or critical)
+      # Full report: every vulnerability Grype finds, fixed or not. Never fails; it is
+      # uploaded below on every run so nothing is hidden by the gate.
+      - name: Vulnerability report of the image (Grype, full, never fails)
+        id: grype-report
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: antifaz:local
+          grype-version: v0.118.0
+          fail-build: false
+          only-fixed: false
+          output-format: table
+          output-file: grype-report.txt
+      # Gate: fails on high or critical only when a fix exists (an upgrade can remove it).
+      # .github/grype-gate.yaml lists the few ignored findings, each with its reason.
+      - name: Vulnerability gate of the image (Grype, high or critical with a fix)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: antifaz:local
           grype-version: v0.118.0
           fail-build: true
           severity-cutoff: high
+          only-fixed: true
+          config: .github/grype-gate.yaml
           output-format: table
+      # Uploaded even when the gate fails, as long as the report was written.
+      - name: Upload the full vulnerability report
+        if: always() && steps.grype-report.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grype-report
+          path: grype-report.txt
+          retention-days: 30
+          if-no-files-found: error
