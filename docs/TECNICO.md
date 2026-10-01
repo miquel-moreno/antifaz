@@ -592,6 +592,8 @@ Antifaz no envía nada a ningún sitio salvo a los proveedores configurados en `
 - Una llamada a herramienta sin `index` en OpenAI pasa sin tocar (sus argumentos no se pueden unir) y se cuenta como desconocida. En Anthropic, `input_json_delta` solo se restaura en bloques `tool_use`; en otros (herramientas del servidor…) pasa sin tocar y se cuenta.
 - Argumentos o `input` que no son JSON válido (cortados, texto suelto): cada valor se inserta escapado como dentro de una cadena JSON (comillas y barras con `\`). Así lo que era JSON sigue siéndolo y un marcador dentro de una cadena no la rompe; en texto suelto el valor sale con esos escapes.
 - Si un proveedor manda una clave partida en varios eventos, el stream se corta al completarse, pero el trozo ya enviado llega al cliente (no es la clave entera).
+- Un proveedor compatible con OpenAI que omite `choices[].index` (o lo manda como `0.0`, `"0"` o negativo) **corta el stream** con el error fijo de stream mal formado: falla cerrado, porque un SDK uniría ese trozo con otro que la pasarela no puede seguir. Lo mismo en Anthropic con un `index` así o un `content_block_*` sin él.
+- Un stream con más de 4.096 rutas de texto distintas (o nombres de campo distintos), por ejemplo con `n` alto y `top_logprobs`, se corta con `stream_limit_exceeded`: la vigilancia de claves partidas no olvida nada para no dejar pasar una.
 - El tamaño total de un stream no tiene tope (sí cada línea, cada evento, lo retenido y lo acumulado).
 - En Anthropic se bloquean las `citations`, los documentos y las herramientas del servidor (búsqueda web…): fallar cerrado es a propósito.
 - Las claves de los objetos JSON no se enmascaran: si contienen un dato, se bloquea la petición.

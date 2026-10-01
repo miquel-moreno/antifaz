@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from antifaz import mask
-from antifaz.api.streaming import KeyEchoed, KeyWatch
+from antifaz.api.streaming import KeyEchoed, KeyWatch, StreamCounters, relay
 from antifaz.providers.anthropic_stream import AnthropicMessagesStream
 from antifaz.providers.json_walk import restore_strings
 from antifaz.providers.openai_stream import OpenAIChatStream
@@ -22,6 +22,7 @@ from tests.integration.fakes import (
     openai_sse,
     openai_text,
     sse_payloads,
+    sse_response,
 )
 
 DNI = "12345678Z"  # synthetic, checksum-valid
@@ -552,3 +553,35 @@ def test_keywatch_unrelated_text_is_not_a_key() -> None:
     watch.check_output(_openai_event({"index": 0, "delta": {"content": KEY[:10]}}))
     watch.check_output(_openai_event({"index": 1, "delta": {"content": "hola"}}))
     watch.check_output(_openai_event({"index": 0, "delta": {"content": "adios"}}))
+
+
+class _HeldKeyTransformer:
+    """Fails on the first event; the text it still holds completes a key."""
+
+    unknown = 0
+
+    def event(self, event: Any) -> str:
+        raise MalformedStream()
+
+    def end(self) -> str:
+        return ""
+
+    def abort(self, code: str, message: str, *, safe_text: bool = True) -> str:
+        error = f"data: {json.dumps({'error': {'code': code, 'message': message}})}\n\n"
+        held = f"data: {json.dumps({'content': KEY})}\n\n" if safe_text else ""
+        return held + error
+
+
+async def test_relay_checks_the_error_event_and_drops_held_text_that_holds_a_key() -> None:
+    """The last event (held text + error) is checked too: if it holds a key, only the fixed
+    key error goes out."""
+    upstream, _ = sse_response("data: {}\n\n")
+    counters = StreamCounters()
+    out = b"".join(
+        [piece async for piece in relay(upstream, _HeldKeyTransformer(), [KEY], counters)]
+    )
+    text = out.decode("utf-8")
+    assert KEY not in text
+    assert "contained a key and was dropped" in text
+    assert "bad_upstream_response" in text
+    assert counters.failed_streams == 1

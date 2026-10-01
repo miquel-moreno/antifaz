@@ -51,6 +51,12 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 - Un valor que el cliente reenvía (la consulta, `anthropic-version`, `anthropic-beta`) que contiene una clave configurada, entera o partida entre varios valores en cualquier orden → 400.
 - Los errores del proveedor se devuelven tal cual **solo si son JSON**, siempre como `application/json`; otro cuerpo (una página HTML) → 502 fijo. Todas las respuestas llevan `X-Content-Type-Options: nosniff`.
 
+**Enmienda del 2026-10-02 (red team final de v0.1.0) · Propuesta.**
+
+- En streaming, un evento cuyo `index` (de una choice de OpenAI, de un tool call o de un evento de Anthropic) no es un entero normal no negativo, una choice de OpenAI sin `index` o un `content_block_*` sin `index` cortan el stream con el error fijo de stream mal formado.
+- Esto incluye los **eventos desconocidos de Anthropic que traen un campo `index`**: se comprueba que esté bien formado. Es una excepción a ADR-0006 ("los eventos desconocidos pasan sin tocar"), justificada por la invariante 13: un SDK podría unir ese evento con un bloque por un índice escrito como `0.0` o `"0"`, y la vigilancia de claves partidas no lo seguiría. El evento no se modifica: o pasa tal cual o corta el stream.
+- La vigilancia de claves guarda, además del final por ruta, un final por nombre de campo en cualquier ruta, y corta el stream (`stream_limit_exceeded`) en vez de olvidar finales cuando pasaría de 4.096 rutas o nombres.
+
 ## Alternativas descartadas
 
 - **Parser JSON incremental** para emitir los argumentos de herramientas restaurados trozo a trozo: más código delicado en la pieza más sensible y difícil de probar. Acumular por índice es simple y siempre da JSON válido.
