@@ -331,6 +331,15 @@ Decisión en [ADR-0016](adr/0016-ner-en-procesos-aparte.md) (propuesta). Esta pa
 
 **Tests.** El backend falso (`detect/ner/fake.py`) no se puede elegir con la configuración: no hay variable para el backend y la pasarela usa siempre el de GLiNER; solo el código (los tests) puede pasar otra ruta de fábrica. Busca nombres de un diccionario y, con palabras clave, se cuelga, muere, lanza una excepción con el texto, escribe el texto en stdout, stderr y el log o responde mal. Con él: el proceso colgado se mata al llegar al tiempo máximo y la siguiente petición funciona; `os._exit` bloquea; ni el log (`caplog`) ni la salida de los procesos hijos (`capfd`) llevan el nombre ni el DNI centinela (invariante 8); con la guardia apagada, el proveedor falso no recibe ningún nombre (invariante 2); `restore(mask(x)) == x` con el NER (Hypothesis); la guardia nunca bloquea lo que produjo el enmascarador con la propagación (Hypothesis). Los tests del modelo real llevan el marcador `ner_model` y se saltan si no hay `ANTIFAZ_NER_MODEL_DIR`.
 
+## NER con el modelo real (issue 6, PR 6b): opcional y apagado por defecto
+
+El modelo de nombres (GLiNER, fijado por su commit en `detect/ner/manifest.json`) se instala con `make ner-model` y se mide con `make bench NER=1`. **Sigue apagado por defecto** (`ANTIFAZ_NER_ENABLED=false`) porque **no cumple el suelo de precisión del 85 % en nombres** que se fijó para elegir el umbral (ADR-0011 y su enmienda del 2026-10-01):
+
+- En la partición dev de MEDDOCAN (2026-10-01), la precisión de PERSON contra cualquier dato personal anotado fue del 67,5–70,9 % según el umbral (~70 %): **cerca del 30 % de las detecciones de nombres tapan texto que no es un dato personal** (416–510 detecciones). Por tipo es aún menor (63–69 %). ADDRESS sí llega (~96 %).
+- Por eso el umbral publicado es el de respaldo (el más preciso) y el resultado lleva `floor_met: false`. Las cifras de test están en `docs/benchmark.md`.
+- **Actívalo solo si te vale que tape de más**: protege más nombres, pero el modelo de IA recibe más marcadores donde había palabras normales y puede responder peor.
+- Coste medido en el PC de desarrollo (Ryzen 7 5700U, CPU, 2026-10-01): unos **640 MB de RAM por proceso** del pool, unos **3 s por documento** de MEDDOCAN y unos **48 s de carga** del modelo al arrancar.
+
 ## La puerta cerrada por defecto (issue 20)
 
 Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
@@ -418,7 +427,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - Si el proveedor devuelve la clave recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), ese fragmento llega al cliente: solo se detecta la clave completa.
 - La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
-- Los nombres de persona no se detectan hasta el issue 6b (el modelo NER): hoy pasan en claro. La infraestructura (pool, caché, ventanas, manifiesto) ya está (6a), probada con un backend falso.
+- Los nombres de persona solo se detectan con el NER, que está apagado por defecto: sin él pasan en claro. Con él, cerca del 30 % de las detecciones de nombres tapan texto que no es personal (no cumple el suelo del 85 %; ver "NER con el modelo real").
 - NER: una petición tan grande que no cabe en el tiempo máximo, o con más de 1.024 ventanas, se bloquea (el fallo seguro). Un nombre detectado se enmascara en toda la petición, también donde es una palabra corriente ("Mar") o, si tiene 6 o más letras, dentro de otra palabra ("Marina" en "submarina"): falsos positivos aceptados (ADR-0016).
 - NER: cada cadena del JSON se lee por separado. Un nombre partido entre dos campos ("Carmen" en uno y "Prueba López" en otro) no lo ve entero ningún trozo, y cada parte puede salir en claro si el modelo no la reconoce sola (test `xfail` estricto en `tests/redteam/test_ner.py`).
 - NER: solo se propaga el valor entero que encontró el modelo. Si ve "Carmen Prueba López" en un mensaje y en otro solo aparece "Carmen", ese "Carmen" suelto no se tapa por propagación; solo si el modelo lo detecta allí (test `xfail` estricto). Buscar las partes de un nombre enmascararía palabras corrientes por toda la petición.

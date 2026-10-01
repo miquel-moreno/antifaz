@@ -161,7 +161,7 @@ tocan ningún dato anotado, son falsos positivos.
 
 ## Resultados con NER (MEDDOCAN)
 
-Generados por `make bench NER=1` (antes, `make ner-model`); el detalle está en `evals/results/<fecha>-<versión>-ner.json`.
+Generados por `make bench NER=1` (antes, `make ner-model`); el detalle está en `evals/results/<fecha>-<versión>-ner.json`. El umbral se elige en la partición dev con un suelo de precisión del 85 % en PERSON y ADDRESS, medido contra cualquier dato personal anotado (ADR-0011, enmienda del 2026-10-01). Se publican siempre las dos precisiones (contra cualquier dato personal y del mismo tipo) y la estricta. Si ningún umbral cumple el suelo, se usa el más preciso, el resultado lo dice (`floor_met: false`) y el NER queda como opcional y apagado por defecto.
 
 <!-- bench-ner:start -->
 <!-- bench-ner:end -->

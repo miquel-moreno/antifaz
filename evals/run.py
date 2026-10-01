@@ -63,7 +63,14 @@ SELECTION_RULE = (
     "(covered types) whose precision against any annotated personal data (a prediction is "
     "correct if it overlaps a gold span of ANY MEDDOCAN label) is at least 85 % for both "
     "PERSON and ADDRESS; a tie goes to the higher threshold. By-type (overlap) and strict "
-    "precision are published too."
+    "precision are published too. Fallback, floor not met: the most precise threshold (highest "
+    "precision against any personal data of the weakest floor type; a tie goes to the higher "
+    "threshold), test is measured once with it and the result says floor_met: false (NER not "
+    "recommended by default)."
+)
+FLOOR_NOT_MET = (
+    "El NER no cumple el suelo de precisión del 85 % en nombres; se publica como opcional y "
+    "desactivado por defecto."
 )
 SELECTION_RULE_CHANGED = (
     "floor measured against any annotated personal data, decided 2026-10-01 after the first "
@@ -386,6 +393,7 @@ class NerBench:
     threshold: float
     selection: list[dict[str, object]]  # one row per candidate threshold, dev split
     warm_latency_ms: dict[str, float]  # the same test documents again: every text cached
+    floor_met: bool = True  # False: no threshold kept the floor, `threshold` is the fallback
 
 
 class NoThresholdError(ValueError):
@@ -523,6 +531,28 @@ def choose_threshold(rows: Sequence[Mapping[str, object]], floor: float = PRECIS
     return _number(best, "threshold")
 
 
+def select_threshold(
+    rows: Sequence[Mapping[str, object]], floor: float = PRECISION_FLOOR
+) -> tuple[float, bool]:
+    """(threshold, floor_met). With the floor met, choose_threshold. If not, the fallback of
+    SELECTION_RULE: the threshold whose weakest floor type (PERSON on MEDDOCAN dev) has the
+    highest precision against any personal data; a tie goes to the higher threshold."""
+    try:
+        return choose_threshold(rows, floor), True
+    except NoThresholdError:
+        pass
+    if not rows:
+        raise NoThresholdError("no candidate thresholds")
+    best = max(
+        rows,
+        key=lambda r: (
+            min(_number(r, f"{e}_any_pii_precision") for e in FLOOR_TYPES),
+            _number(r, "threshold"),
+        ),
+    )
+    return _number(best, "threshold"), False
+
+
 def dev_selection(
     dev: Sequence[Document],
     predictor: Predictor,
@@ -565,11 +595,12 @@ def run_ner_bench(
     floor: float = PRECISION_FLOOR,
     model_id: str = "unknown",
 ) -> NerBench:
-    """Choose the threshold on `dev`, then measure `test` once with it (cold, then warm)."""
+    """Choose the threshold on `dev`, then measure `test` once with it (cold, then warm). With
+    the floor not met, test is still measured once with the fallback threshold."""
     rows = dev_selection(dev, predictor, thresholds, model_id=model_id, floor=floor)
-    chosen = choose_threshold(rows, floor)
+    chosen, floor_met = select_threshold(rows, floor)
     report, warm = measure_test(test, predictor, chosen, model_id)
-    return NerBench(report, chosen, rows, warm)
+    return NerBench(report, chosen, rows, warm, floor_met)
 
 
 def rss_mb(pid: int) -> float | None:
@@ -661,10 +692,25 @@ def render_ner_markdown(report: Report, base: Report) -> str:
     ]
     names = ("NOMBRE_SUJETO_ASISTENCIA", "NOMBRE_PERSONAL_SANITARIO")
     rss = ner.get("worker_rss_mb")
+    if ner.get("floor_met") is False:
+        chosen = [
+            "",
+            f"**{FLOOR_NOT_MET}**",
+            "",
+            f"Ningún umbral llega al suelo: se usa el más preciso, **{ner.get('threshold')}** "
+            "(el de mayor precisión contra cualquier dato personal en el tipo más débil; en "
+            "empate, el más alto). Con él se mide la partición de test una sola vez. Activa el "
+            "NER solo si te vale que tape de más texto que no es personal.",
+        ]
+    else:
+        chosen = [
+            "",
+            f"**Umbral elegido: {ner.get('threshold')}** (cumple el suelo). Con él se mide la "
+            "partición de test una sola vez.",
+        ]
+    person = report.by_type.get("PERSON", {})
     lines += [
-        "",
-        f"**Umbral elegido: {ner.get('threshold')}.** Con él se mide la partición de test una "
-        "sola vez.",
+        *chosen,
         "",
         "## Con NER: antes y después (test)",
         "",
@@ -676,6 +722,11 @@ def render_ner_markdown(report: Report, base: Report) -> str:
         f"{_leaks(base, names)} | {_leaks(report, names)} |",
         f"| Fugas por cada 100 en CALLE | {_leaks(base, ('CALLE',))} "
         f"| {_leaks(report, ('CALLE',))} |",
+        f"| Precisión de PERSON: cualquier dato personal / mismo tipo / estricta | — | "
+        f"{_pct(person.get('any_pii_precision'))} / {_pct(person.get('precision'))} / "
+        f"{_pct(person.get('strict_precision'))} |",
+        f"| Detecciones de PERSON que tapan texto no personal | — | "
+        f"{person.get('non_pii_fp', '—')} |",
         f"| Latencia p50 / p95 por documento | {base.latency_ms['p50']:.2f} ms / "
         f"{base.latency_ms['p95']:.2f} ms | {report.latency_ms['p50']:.0f} ms / "
         f"{report.latency_ms['p95']:.0f} ms (caché fría) |",
@@ -781,16 +832,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "rows": rows,
             }
             print(render_selection(rows))
-            try:
-                chosen = choose_threshold(rows)
-            except NoThresholdError as error:
-                name = save_dev_selection(dev_document)
-                print(f"{error}\nDev table: evals/results/{name}", file=sys.stderr)
-                return 3
+            chosen, floor_met = select_threshold(rows)
+            dev_document["chosen_threshold"] = chosen
+            dev_document["floor_met"] = floor_met
+            if not floor_met:
+                print(FLOOR_NOT_MET, file=sys.stderr)
+                print(f"Fallback threshold (most precise): {chosen}", file=sys.stderr)
             if args.dev_only:
-                print(f"Chosen threshold on dev: {chosen}")
+                print(f"Chosen threshold on dev: {chosen} (floor met: {floor_met})")
                 print(f"Dev table: evals/results/{save_dev_selection(dev_document)}")
-                return 0
+                return 0 if floor_met else 3
             ner_report, warm = measure_test(
                 meddocan.load_test(archive), pool, chosen, manifest.digest
             )
@@ -800,6 +851,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ner_report.environment["dataset_md5"] = meddocan.MD5
         ner_report.ner = {
             "threshold": chosen,
+            "floor_met": floor_met,
             "precision_floor": PRECISION_FLOOR,
             "selection_rule": SELECTION_RULE,
             "selection_rule_changed": SELECTION_RULE_CHANGED,

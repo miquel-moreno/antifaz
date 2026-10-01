@@ -10,6 +10,7 @@ import pytest
 from evals.datasets.meddocan import MEDDOCAN_TO_ANTIFAZ_NER, Document
 from evals.metrics import Annotation
 from evals.run import (
+    FLOOR_NOT_MET,
     NER_END,
     NER_START,
     SELECTION_RULE,
@@ -22,6 +23,7 @@ from evals.run import (
     render_ner_markdown,
     rss_mb,
     run_ner_bench,
+    select_threshold,
     selection_row,
     to_json,
 )
@@ -126,6 +128,44 @@ def test_the_selection_rule_and_its_late_change_are_declared() -> None:
         assert text in SELECTION_RULE_CHANGED
 
 
+def test_select_threshold_uses_the_rule_when_the_floor_is_met() -> None:
+    rows = [_row(0.3, 10.0, 0.70, 0.95), _row(0.4, 12.0, 0.90, 0.95)]
+    assert select_threshold(rows, floor=0.85) == (0.4, True)
+
+
+def test_floor_not_met_falls_back_to_the_most_precise_threshold() -> None:
+    # The dev case of run 2: ADDRESS passes, PERSON never does. Leaks do not matter here.
+    rows = [
+        _row(0.3, 12.3, 0.675, 0.959),
+        _row(0.4, 12.5, 0.687, 0.959),
+        _row(0.5, 13.0, 0.695, 0.962),
+        _row(0.6, 13.8, 0.709, 0.963),
+    ]
+    assert select_threshold(rows, floor=0.85) == (0.6, False)
+
+
+def test_the_fallback_looks_at_the_weakest_floor_type_and_a_tie_goes_higher() -> None:
+    rows = [
+        _row(0.3, 1.0, 0.70, 0.95),
+        _row(0.4, 1.0, 0.80, 0.60),  # better PERSON, but ADDRESS is now the weak one
+        _row(0.5, 1.0, 0.70, 0.90),
+    ]
+    assert select_threshold(rows, floor=0.85) == (0.5, False)
+
+
+def test_the_selection_rule_declares_the_fallback() -> None:
+    assert "floor not met" in SELECTION_RULE
+    assert "NER not recommended by default" in SELECTION_RULE
+
+
+def test_run_ner_bench_measures_test_even_when_the_floor_is_not_met() -> None:
+    predictor = _predictor()
+    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4), floor=1.01)  # type: ignore[arg-type]
+    assert result.floor_met is False
+    assert result.threshold in (0.3, 0.4)
+    assert result.report.documents == len(DOCS)
+
+
 def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
     predictor = _predictor()
 
@@ -136,6 +176,7 @@ def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
     # annotated street, so not against any personal data; it leaks the same as 0.4, and the
     # tie goes to the higher threshold. 0.4 finds both names.
     assert result.threshold == 0.4
+    assert result.floor_met is True
     # dev scored once for every threshold; test measured once (the warm pass hits the cache)
     assert predictor.calls == 2
     person = result.report.by_type["PERSON"]
@@ -230,6 +271,7 @@ def test_the_ner_section_compares_with_and_without_ner_without_any_value() -> No
         "model": "example/model",
         "revision": "0" * 40,
         "manifest_sha256": "f" * 64,
+        "floor_met": True,
     }
 
     markdown = render_ner_markdown(result.report, base)
@@ -238,10 +280,30 @@ def test_the_ner_section_compares_with_and_without_ner_without_any_value() -> No
     assert "## Con NER" in markdown
     assert "cualquier dato personal" in markdown and "mismo tipo" in markdown
     assert "2026-10-01" in markdown  # the late change of the rule is declared
+    assert FLOOR_NOT_MET not in markdown
     assert "| 0.4 |" in markdown and "1234" in markdown
     for value in (NAME, DOCTOR, "Inventada"):
         assert value not in output
     assert json.loads(to_json(result.report))["ner"]["threshold"] == 0.4
+
+
+def test_the_ner_section_says_clearly_when_the_floor_is_not_met() -> None:
+    from evals.run import evaluate
+
+    base = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER)
+    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 1.01)  # type: ignore[arg-type]
+    result.report.ner = {
+        "threshold": result.threshold,
+        "floor_met": result.floor_met,
+        "selection": result.selection,
+    }
+    markdown = render_ner_markdown(result.report, base)
+    assert FLOOR_NOT_MET in markdown
+    assert FLOOR_NOT_MET == (
+        "El NER no cumple el suelo de precisión del 85 % en nombres; se publica como "
+        "opcional y desactivado por defecto."
+    )
+    assert json.loads(to_json(result.report))["ner"]["floor_met"] is False
 
 
 def test_the_benchmark_doc_has_the_ner_markers() -> None:
@@ -254,3 +316,8 @@ def test_rss_of_this_process_is_measured_with_os_tools() -> None:
 
     value = rss_mb(os.getpid())
     assert value is None or value > 1
+
+
+def test_select_threshold_without_rows_is_an_error() -> None:
+    with pytest.raises(NoThresholdError):
+        select_threshold([], floor=0.85)
