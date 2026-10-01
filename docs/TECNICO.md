@@ -10,6 +10,7 @@ make check     # lint + tipos + tests (también los de contrato) + gitleaks + zi
 make contract  # solo los tests de contrato: SDK oficiales contra Antifaz, sin red
 make audit     # vulnerabilidades conocidas en las dependencias (uv audit, experimental)
 make licenses  # licencias de lo que se distribuye
+make openapi   # regenera docs/openapi.json desde la app (un test comprueba que está al día)
 make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
 ```
 
@@ -371,6 +372,40 @@ Un `uv sync` sin `--extra ner` (por ejemplo `make install`) desinstala el extra.
 - **Sin red:** el email de Presidio usa tldextract, que por defecto descarga la lista de sufijos públicos; aquí usa la copia que trae el paquete.
 - Los tests usan un analizador falso: Presidio no está instalado en la CI.
 
+## Lista de modelos, `/antifaz/scan` y `openapi.json` (issue 29)
+
+**`GET /v1/models`** devuelve la lista de modelos del proveedor configurado, detrás de la puerta (pide la clave como todas las rutas). El SDK de OpenAI pide `GET {base}/models` y el de Anthropic `GET /v1/models` con `anthropic-version`: es la misma ruta, así que **esa cabecera decide el proveedor**:
+
+| La petición trae `anthropic-version` | Va a | Con | Parámetros de consulta permitidos |
+|---|---|---|---|
+| Sí | `ANTIFAZ_ANTHROPIC_BASE_URL` + `/v1/models` | `x-api-key` de `.env` + `anthropic-version` y `anthropic-beta` comprobados | `limit` (1–1000), `after_id`, `before_id` (letras, dígitos, `. _ : -`, hasta 200) |
+| No | `ANTIFAZ_OPENAI_BASE_URL` + `/models` | `Authorization: Bearer` de `.env` | ninguno |
+
+- Si el proveedor elegido no tiene clave → 503 `not_configured` (el otro sigue funcionando). `anthropic-beta` sola no cambia de proveedor.
+- Consulta con **lista de permitidos**: un nombre que no está en la lista, repetido, en mayúsculas, vacío o con otros caracteres (`/`, `&` codificado, `%0d%0a`, espacios, `@`…) → 400 `invalid_query`, y no sale nada. La consulta que se envía se **reconstruye** con los valores ya comprobados. Un valor que contiene una clave configurada también → 400.
+- Los valores de la consulta pasan por el **detector** (en el mismo hilo limitado que el proxy, con el NER si está activo): un id no se puede enmascarar, así que un dato personal (un DNI como `after_id`) → 400 `antifaz_blocked`. No se envía cuerpo, así que no hay bytes que revisar con la guardia de salida.
+- Cabeceras: `anthropic-version` y `anthropic-beta` con la misma regla que en `/v1/messages` (letras, dígitos, `. _ - ,`, hasta 200); repetidas → 400 `invalid_header` (desde este issue, también en `/v1/messages`). Ninguna otra cabecera del cliente llega al proveedor.
+- Respuesta: si es un error del proveedor (4xx/5xx), su cuerpo tal cual; si es de éxito, tiene que ser un objeto JSON (si no → 502 `bad_upstream_response`). En los dos casos se descarta con 502 si repite una clave configurada, también escrita con escapes JSON (invariante 13). Una redirección → 502 `upstream_redirect`. No se reenvía ninguna cabecera del proveedor.
+- Es un `GET`: la puerta no le pide `Content-Type`. `HEAD`, `POST` u otros métodos → 405 (con clave).
+
+**`POST /antifaz/scan`** dice **dónde** hay datos personales en un texto, nunca cuáles son:
+
+```bash
+curl http://localhost:8000/antifaz/scan -H "Authorization: Bearer $ANTIFAZ_API_KEY" -H "Content-Type: application/json" \
+  -d '{"text": "Mi DNI es 12345678Z"}'
+# {"entities":[{"type":"ES_DNI","start":10,"end":19}]}
+```
+
+- Cuerpo: un objeto JSON con **solo** `text` (una cadena). Cualquier otra clave (`texts`, `image_url`, `source`, `file_id`…), un `text` que no sea cadena o un cuerpo que no sea un objeto → 400 `invalid_request`. Se lee con las reglas del proxy: tope `ANTIFAZ_MAX_BODY_BYTES` (413), UTF-8, sin claves repetidas, sin `NaN`.
+- Usa **el mismo detector que el proxy** (`find_spans` en `mask/`, con el NER si está activo y la propagación de los nombres que encuentra), en el mismo hilo limitado. Si el detector falla o devuelve posiciones imposibles → 400 `antifaz_blocked` con mensaje fijo.
+- La respuesta solo lleva `type`, `start` y `end` (`[start, end)`) por detección, también de los tipos que la política deja pasar (dice qué encontró; enmascarar lo decide la política). Las posiciones son **caracteres Unicode** (índices de Python): en JavaScript, un emoji cuenta como 2.
+- No llama a ningún proveedor ni escribe el texto en ningún log.
+- **Riesgo aceptado**: quien tiene la clave puede usarla para probar el detector (qué encuentra y qué se le escapa). Es lo mismo que puede hacer con la librería o con `antifaz scan`, que ya tiene.
+
+**`docs/openapi.json`**: la pasarela sigue sin servir `/docs`, `/redoc` ni `/openapi.json` (ADR-0015; un test lo comprueba también con la clave). El esquema se publica como archivo estático, generado desde la propia app con `make openapi` (`scripts/export_openapi.py`, con una clave aleatoria que se tira: el esquema no lleva ninguna configuración). Un test compara el archivo del repo con el generado, así que nunca se queda atrás: si cambias una ruta, ejecuta `make openapi` y súbelo.
+
+**Tests.** Las dos rutas entran solas en el test de la invariante 12 (recorre las rutas registradas). Además, cada ruta con clave tiene que estar en una de tres clases: envía un cuerpo al proveedor (pasa por la guardia), solo envía una consulta (que pasa por el detector) o no llama a ningún proveedor; una ruta nueva sin clasificar hace fallar el test. La invariante 13 tiene escenarios canario propios para las dos (consulta con la clave, cabeceras, errores y respuestas del proveedor con la clave, detector roto). Los ataques están en `tests/redteam/test_models_and_scan.py` y la prueba con los SDK oficiales (`models.list()`) en `tests/contract/`.
+
 ## La puerta cerrada por defecto (issue 20)
 
 Decisión en [ADR-0015](adr/0015-puerta-cerrada-por-defecto.md) (propuesta). Todo pasa por un solo middleware (`api/gate.py`) antes de llegar a ninguna ruta, así que una ruta nueva queda protegida sin hacer nada.
@@ -400,7 +435,7 @@ La app ya no se crea al importar el módulo: `uvicorn --factory antifaz.api.app:
 6. Al leer el cuerpo, un objeto con **claves repetidas** → 400. Si solo cambian en mayúsculas o anchura (`content` y `Content`) también, cuando es una clave que Antifaz lee (`READ_KEYS` en `providers/json_walk.py`), porque unos programas las leen como la misma y otros no. Un esquema con `Name` y `name` pasa.
 7. Las claves de adjunto (`source`, `data`, `image_url`, `file`…) bloquean también en mayúsculas (`SOURCE`, `Data`).
 
-Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora); sin `/docs`, `/redoc` ni `/openapi.json`; sin redirecciones de barra final (`/v1/messages/` → 404); los WebSocket se cierran siempre; el log de cada petición solo escribe la ruta si es una ruta registrada (si no, `-`), para que una clave o un DNI pegados en la URL no acaben en el log; y si el proveedor devuelve en su respuesta alguna de las claves configuradas (tal cual o con escapes JSON como `\u0061`), se descarta con un 502 fijo.
+Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora); sin `/docs`, `/redoc` ni `/openapi.json` (el esquema está en [`docs/openapi.json`](openapi.json)); sin redirecciones de barra final (`/v1/messages/` → 404); los WebSocket se cierran siempre; el log de cada petición solo escribe la ruta si es una ruta registrada (si no, `-`), para que una clave o un DNI pegados en la URL no acaben en el log; y si el proveedor devuelve en su respuesta alguna de las claves configuradas (tal cual o con escapes JSON como `\u0061`), se descarta con un 502 fijo.
 
 **Detrás de Docker o de un proxy inverso** (nginx, Traefik, Caddy):
 
@@ -441,6 +476,8 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 
 ## Limitaciones
 
+- `POST /antifaz/scan` devuelve posiciones en caracteres Unicode (índices de Python), no en unidades UTF-16 como JavaScript ni en bytes.
+- `GET /v1/models` elige el proveedor por la cabecera `anthropic-version`: un cliente de OpenAI que la mande por error recibe la lista de Anthropic.
 - El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). Hay una prueba real con OpenAI y sus respuestas grabadas (2026-09-30); la prueba real con Claude Code y Anthropic está pendiente (sin crédito de Anthropic), y sus tests de contrato usan respuestas escritas a mano.
 - En streaming, los argumentos de las herramientas llegan **de golpe al final de su bloque** (o de la `choice` en OpenAI), no poco a poco: así siempre son JSON válido.
 - En streaming, un marcador de esta petición con más de ~60 espacios o tabuladores dentro de `[[ ... ]]` sale sin restaurar (como marcador): es el tope de seguridad de lo retenido. Más de 4 MiB de argumentos de herramientas cortan el stream con `stream_limit_exceeded`; el texto ya restaurado de otras choices se envía antes del error.
