@@ -3,9 +3,11 @@
 Every file comes over https from `https://huggingface.co/<repo>/resolve/<commit>/<file>`, a
 fixed commit (never a branch), and is checked by size and SHA-256 against the manifest before
 it gets its final name. A download is written to "<file>.part" next to its place and renamed
-only once it matches: a failed or interrupted download leaves nothing behind. A file already
-in place with the right hash is not downloaded again; one with other content is an error (it
-is never overwritten silently).
+only once it matches: a failed or interrupted download (an error, Ctrl+C) deletes it. Only a
+hard kill of the process (power cut, `kill -9`) can leave a ".part" file; the gateway then
+refuses the directory (a file that is not in the manifest) and a new run overwrites it. A file
+already in place with the right hash is not downloaded again; one with other content is an
+error (it is never overwritten silently).
 
 The gateway never downloads anything: this command is the only way the model arrives
 (ADR-0016). Destination: --dest, else ANTIFAZ_NER_MODEL_DIR, else models/gliner_multi_pii-v1.

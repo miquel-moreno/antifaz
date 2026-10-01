@@ -226,3 +226,21 @@ def test_the_destination_comes_from_the_settings_or_the_default(
     monkeypatch.setenv("ANTIFAZ_NER_MODEL_DIR", str(tmp_path / "elsewhere"))
     assert dl.destination(None) == tmp_path / "elsewhere"
     assert dl.destination(str(tmp_path / "given")) == tmp_path / "given"
+
+
+def test_a_part_file_left_by_a_hard_kill_is_refused_and_overwritten(tmp_path: Path) -> None:
+    """Only a hard kill leaves a .part file: the gateway refuses the directory, and the next
+    download overwrites it."""
+    from antifaz.detect.ner.manifest import ModelMismatchError
+
+    manifest_path = _manifest(tmp_path)
+    dest = tmp_path / "model"
+    served = {"weights.bin": WEIGHTS, "config.json": CONFIG}
+    dl.download_all(manifest_path, dest, _opener(served, []))
+    (dest / "weights.bin").unlink()
+    (dest / "weights.bin.part").write_bytes(WEIGHTS[:10])
+
+    with pytest.raises(ModelMismatchError, match="not in the manifest"):
+        verify_model_dir(dest, load_manifest(manifest_path))
+    dl.download_all(manifest_path, dest, _opener(served, []))
+    verify_model_dir(dest, load_manifest(manifest_path))

@@ -24,6 +24,7 @@ from antifaz.detect.ner import gliner as backend
 from antifaz.detect.ner.chunker import WINDOW_TOKENS, chunk
 from antifaz.detect.ner.gliner import MAX_MODEL_TOKENS, GlinerBackend
 from antifaz.detect.ner.manifest import load_manifest, verify_model_dir
+from antifaz.detect.ner.worker import OFFLINE_ENV
 from tests.conftest import SENTINEL_DNI
 from tests.integration import test_proxy_openai as openai_tests
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream
@@ -60,12 +61,12 @@ def loaded() -> Iterator[tuple[GlinerBackend, list[str]]]:
     pytest.importorskip("gliner")
     verify_model_dir(_model_dir(), load_manifest())
     with pytest.MonkeyPatch.context() as monkeypatch:
-        for name in backend.OFFLINE_ENV:
+        for name in OFFLINE_ENV:
             monkeypatch.delenv(name, raising=False)  # create() must set them itself
         attempts = _block_network(monkeypatch)
         model = backend.create(str(_model_dir()), threads=4)
         model.predict(["La doctora Carmen Prueba López atendió al paciente."], LABELS, 0.5)
-        offline = {name: os.environ.get(name) for name in backend.OFFLINE_ENV}
+        offline = {name: os.environ.get(name) for name in OFFLINE_ENV}
     # The network comes back for the other tests (the event loop of TestClient uses loopback).
     assert set(offline.values()) == {"1"}
     yield model, attempts
@@ -251,10 +252,10 @@ def test_scoring_once_matches_running_each_threshold_with_the_real_model(
         "Remitente: Marc Inventat Soler. Plaza Imaginaria 3, 2º 1ª, 08001 Barcelona. "
         "Su madre, Ana, y su hermano Pau llamaron al Hospital Inventado.",
     ]
-    scored = ScoreCache(InProcess(model), 0.3)  # type: ignore[arg-type]
+    scored = ScoreCache(InProcess(model), 0.3)
     for threshold in (0.3, 0.4, 0.5, 0.6):
         once = Scanner(NerDetector(scored, threshold=threshold))
-        every = Scanner(NerDetector(InProcess(model), threshold=threshold))  # type: ignore[arg-type]
+        every = Scanner(NerDetector(InProcess(model), threshold=threshold))
         for text in texts:
             assert once(text) == every(text), threshold
 
@@ -266,7 +267,7 @@ def test_a_name_glued_to_a_long_number_is_found(model: GlinerBackend) -> None:
     from tests.nerfakes import InProcess
 
     text = "Ref 1234567890Jordi Inventat Puig pidió cita para mañana."
-    spans = Scanner(NerDetector(InProcess(model)))(text)  # type: ignore[arg-type]  # the real backend is a NerBackend, InProcess is typed for the fake
+    spans = Scanner(NerDetector(InProcess(model)))(text)
 
     assert any(text[s.start : s.end] == "Jordi Inventat Puig" for s in spans), spans
 
@@ -284,6 +285,7 @@ def test_blobs_and_heavy_text_never_kill_the_worker(monkeypatch: pytest.MonkeyPa
     right after is answered and masked."""
     import base64
 
+    from antifaz.detect.ner.pool import NerPool
     from antifaz.detect.ner.setup import ner_from_settings
 
     pytest.importorskip("gliner")
@@ -298,16 +300,18 @@ def test_blobs_and_heavy_text_never_kill_the_worker(monkeypatch: pytest.MonkeyPa
     cjk = "".join(chr(rng.randrange(0x4E00, 0x9FFF)) for _ in range(4000))
     http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
     with TestClient(create_app(settings, http_client=http, ner=ner)) as client:
-        pids = ner._predictor.worker_pids()  # type: ignore[attr-defined]  # NerPool, for the test
+        pool = ner._predictor
+        assert isinstance(pool, NerPool)
+        pids = pool.worker_pids()
 
-        def ask(text: str) -> httpx.Response:
+        def ask(text: str) -> Any:
             body = {"model": "m", "messages": [{"role": "user", "content": text}]}
             return client.post("/v1/chat/completions", json=body, headers=OPENAI_AUTH)
 
         assert ask(f"Adjunto: {blob}").status_code == 200
         assert ask(cjk).status_code == 400  # refused fast, the worker stays
         normal = ask("Soy Jordi Inventat Puig, de la Calle Ficticia 12.")
-        assert ner._predictor.worker_pids() == pids  # type: ignore[attr-defined]  # same worker
+        assert pool.worker_pids() == pids  # the same worker: never killed
     assert normal.status_code == 200
     sent = json.dumps(json.loads(upstream.requests[-1].content), ensure_ascii=False)
     assert "Jordi" not in sent and "[[PERSON_1]]" in sent

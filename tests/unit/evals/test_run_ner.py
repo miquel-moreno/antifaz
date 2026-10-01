@@ -160,7 +160,7 @@ def test_the_selection_rule_declares_the_fallback() -> None:
 
 def test_run_ner_bench_measures_test_even_when_the_floor_is_not_met() -> None:
     predictor = _predictor()
-    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4), floor=1.01)  # type: ignore[arg-type]
+    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4), floor=1.01)
     assert result.floor_met is False
     assert result.threshold in (0.3, 0.4)
     assert result.report.documents == len(DOCS)
@@ -169,7 +169,7 @@ def test_run_ner_bench_measures_test_even_when_the_floor_is_not_met() -> None:
 def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
     predictor = _predictor()
 
-    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4, 0.5), floor=0.5)  # type: ignore[arg-type]
+    result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4, 0.5), floor=0.5)
 
     assert [row["threshold"] for row in result.selection] == [0.3, 0.4, 0.5]
     # 0.3 also calls "Inventada" a person: a false positive by type, but it is inside the
@@ -235,17 +235,17 @@ def _scored_backend() -> FakeBackend:
 def test_scoring_once_gives_the_same_spans_as_running_every_threshold() -> None:
     thresholds = (0.3, 0.4, 0.5, 0.6)
     backend = _scored_backend()
-    cache = ScoreCache(InProcess(backend), min(thresholds))  # type: ignore[arg-type]
+    cache = ScoreCache(InProcess(backend), min(thresholds))
     for threshold in thresholds:
         once = Scanner(NerDetector(cache, threshold=threshold))
-        every = Scanner(NerDetector(InProcess(_scored_backend()), threshold=threshold))  # type: ignore[arg-type]
+        every = Scanner(NerDetector(InProcess(_scored_backend()), threshold=threshold))
         for document in DOCS:
             assert once(document.text) == every(document.text), threshold
-    assert backend.calls == 1  # every window scored once
+    assert getattr(backend, "calls", 0) == 1  # every window scored once
 
 
 def test_the_score_cache_refuses_a_threshold_below_its_own() -> None:
-    cache = ScoreCache(InProcess(_scored_backend()), 0.3)  # type: ignore[arg-type]
+    cache = ScoreCache(InProcess(_scored_backend()), 0.3)
     with pytest.raises(ValueError, match="threshold"):
         cache.predict(["x"], ["person"], 0.2)
 
@@ -253,7 +253,7 @@ def test_the_score_cache_refuses_a_threshold_below_its_own() -> None:
 def test_dev_selection_scores_each_window_once_and_keeps_every_row() -> None:
     backend = _scored_backend()
     predictor = InProcess(backend)
-    rows = dev_selection(DOCS, predictor, (0.3, 0.4, 0.5, 0.6), model_id="m")  # type: ignore[arg-type]
+    rows = dev_selection(DOCS, predictor, (0.3, 0.4, 0.5, 0.6), model_id="m")
     assert [row["threshold"] for row in rows] == [0.3, 0.4, 0.5, 0.6]
     assert predictor.calls == 1
 
@@ -262,7 +262,7 @@ def test_the_ner_section_compares_with_and_without_ner_without_any_value() -> No
     from evals.run import evaluate
 
     base = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER)
-    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 0.5)  # type: ignore[arg-type]
+    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 0.5)
     result.report.ner = {
         "threshold": result.threshold,
         "selection": result.selection,
@@ -291,7 +291,7 @@ def test_the_ner_section_says_clearly_when_the_floor_is_not_met() -> None:
     from evals.run import evaluate
 
     base = evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER)
-    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 1.01)  # type: ignore[arg-type]
+    result = run_ner_bench(DOCS, DOCS, _predictor(), (0.4, 0.5), 1.01)
     result.report.ner = {
         "threshold": result.threshold,
         "floor_met": result.floor_met,

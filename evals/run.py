@@ -627,7 +627,7 @@ def rss_mb(pid: int) -> float | None:
 
 
 def _pct_value(value: object) -> str:
-    return f"{100 * float(value):.1f} %"  # type: ignore[arg-type]
+    return f"{100 * value:.1f} %" if isinstance(value, int | float) else "—"
 
 
 def _leaks(report: Report, labels: Sequence[str]) -> str:
@@ -733,7 +733,7 @@ def render_ner_markdown(report: Report, base: Report) -> str:
         f"| Latencia p50 / p95 con la caché caliente | — | {float(warm.get('p50', 0)):.2f} ms / "
         f"{float(warm.get('p95', 0)):.2f} ms |",
         f"| Memoria del proceso del NER (RSS) | — | "
-        f"{'—' if rss is None else f'{float(rss):.0f} MB'} |",  # type: ignore[arg-type]
+        f"{f'{rss:.0f} MB' if isinstance(rss, int | float) else '—'} |",
         "",
         f"Modelo `{ner.get('model')}` en el commit `{str(ner.get('revision'))[:12]}`, "
         f"manifiesto SHA-256 `{str(ner.get('manifest_sha256'))[:12]}`.",
