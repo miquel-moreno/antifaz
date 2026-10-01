@@ -17,6 +17,7 @@ from evals.metrics import Annotation
 from evals.run import (
     PRESIDIO_END,
     PRESIDIO_START,
+    SYNTHETIC_MAPPING,
     Report,
     evaluate,
     latest_report,
@@ -88,6 +89,7 @@ PRESIDIO_OUTPUT = {
     TEXT_2: [
         FakeResult("PERSON", 41, 46),  # "Marta": partial, "Ficticia" leaks
         FakeResult("ES_NIF", 4, 13, 0.5),  # the fax read as a NIF: a type MEDDOCAN never has
+        FakeResult("LOCATION", 17, 34),  # the street: no leak, though Presidio has no ADDRESS
     ],
 }
 
@@ -143,6 +145,30 @@ def test_presidio_types_map_to_antifaz_types_explicitly() -> None:
         "PERSON": T.PERSON,
         "LOCATION": None,
         "ORGANIZATION": None,
+        "DATE_TIME": None,
+        "URL": None,
+        "CRYPTO": None,
+        "MAC_ADDRESS": None,
+    }
+
+
+def test_every_default_recognizer_for_spanish_or_any_language_is_registered() -> None:
+    """Presidio 2.2.364's default_recognizers.yaml: the recognizers enabled by default with no
+    language (they work in any) or with Spanish, plus the Spanish passport and the NER."""
+    assert set(pb.RECOGNIZERS) == {
+        "CreditCardRecognizer",
+        "CryptoRecognizer",
+        "DateRecognizer",
+        "EmailRecognizer",
+        "IbanRecognizer",
+        "IpRecognizer",
+        "MacAddressRecognizer",
+        "PhoneRecognizer",
+        "UrlRecognizer",
+        "EsNifRecognizer",
+        "EsNieRecognizer",
+        "EsPassportRecognizer",
+        "SpacyRecognizer",
     }
 
 
@@ -152,8 +178,8 @@ def test_results_become_annotations_with_antifaz_types_and_unmapped_ones_keep_th
 
 
 def test_an_unknown_presidio_type_is_an_error_not_a_silent_label() -> None:
-    with pytest.raises(pb.PresidioSetupError, match="DATE_TIME"):
-        pb.to_annotations([FakeResult("DATE_TIME", 0, 4)])
+    with pytest.raises(pb.PresidioSetupError, match="US_SSN"):
+        pb.to_annotations([FakeResult("US_SSN", 0, 4)])
 
 
 def test_the_detector_always_asks_presidio_in_spanish() -> None:
@@ -255,7 +281,7 @@ def test_evaluate_accepts_annotations_from_a_tool_without_antifaz_types() -> Non
     report = _presidio_report()
     assert report.by_type["EMAIL"]["recall"] == 1.0
     assert report.by_type["PERSON"]["tp"] == 2
-    assert report.unmatched_types["LOCATION"] == {"detections": 1, "overlapping_gold": 0}
+    assert report.unmatched_types["LOCATION"] == {"detections": 2, "overlapping_gold": 1}
     assert report.unmatched_types["ES_DNI"] == {"detections": 1, "overlapping_gold": 1}
 
 
@@ -269,9 +295,22 @@ def test_the_presidio_report_records_versions_and_configuration() -> None:
 
 
 def test_shared_types_are_the_ones_both_cover_and_the_dataset_annotates() -> None:
-    assert shared_types(MEDDOCAN_TO_ANTIFAZ_NER) == ["EMAIL", "PHONE", "PERSON"]
-    # ES_NSS and ADDRESS: only Antifaz has them, so they are not compared.
-    assert "ES_NSS" not in shared_types(MEDDOCAN_TO_ANTIFAZ_NER)
+    assert shared_types(DOCS, MEDDOCAN_TO_ANTIFAZ_NER) == ["EMAIL", "PHONE", "PERSON"]
+    # ADDRESS (CALLE): only Antifaz has it, so it is not compared.
+    assert "ADDRESS" not in shared_types(DOCS, MEDDOCAN_TO_ANTIFAZ_NER)
+    # Only what the documents really annotate: no names here, so no PERSON.
+    assert shared_types(DOCS[1:2], MEDDOCAN_TO_ANTIFAZ_NER) == ["PHONE", "PERSON"]
+    assert shared_types(DOCS[:1], MEDDOCAN_TO_ANTIFAZ) == ["EMAIL", "PHONE"]
+
+
+def test_labels_of_types_presidio_lacks_are_not_given_an_antifaz_type_for_presidio() -> None:
+    report = _presidio_report()
+    assert report.by_source_label["CALLE"]["type"] is None
+    assert report.by_source_label["CORREO_ELECTRONICO"]["type"] == "EMAIL"
+    assert "ADDRESS" not in report.by_type
+    # Covered leaks only count what Presidio covers: EMAIL, PHONE and PERSON (1 of 5 leaks).
+    assert report.overall["covered_total"] == 5
+    assert report.overall["covered_leaked"] == 1
 
 
 def test_the_comparison_has_every_shared_type_and_tool_without_any_value() -> None:
@@ -322,6 +361,82 @@ def test_types_without_data_in_the_dataset_are_listed_as_not_applicable() -> Non
     assert "No aplica" in markdown or "no aplica" in markdown
     for entity in ("IBAN", "CREDIT_CARD", "IP", "ES_DNI", "ES_NIE", "ES_PASSPORT"):
         assert f"| {entity} |" in markdown
+
+
+def test_global_leaks_of_the_three_tools_are_published_and_compared_plainly() -> None:
+    markdown = render_presidio_markdown(_presidio_report(), _base(), _ner(), "x-ner.json")
+    start = markdown.index("### Todos los datos anotados")
+    section = markdown[start : markdown.index("\n### ", start + 1)]
+    rows = {
+        line.split("|")[1].strip(): line for line in section.splitlines() if line.startswith("| ")
+    }
+    # 6 personal values: Antifaz without NER leaks 2 (both names), with NER 0, Presidio 1.
+    assert "33.3" in rows["Antifaz sin NER"]
+    assert "0.0" in rows["Antifaz con NER"]
+    assert "16.7" in rows["Presidio"]
+    assert "Presidio deja menos fugas en total que Antifaz sin NER" in markdown
+    assert "más que Antifaz con NER" in markdown
+    assert "LOCATION" in markdown and "TERRITORIO" in markdown
+
+
+def test_the_labels_outside_the_shared_types_are_shown_per_tool() -> None:
+    markdown = render_presidio_markdown(_presidio_report(), _base(), _ner(), "x-ner.json")
+    calle = [line for line in markdown.splitlines() if line.startswith("| CALLE |")]
+    # CALLE: Antifaz covers it as ADDRESS (0 leaks) and Presidio with LOCATION (0 leaks).
+    assert calle == ["| CALLE | 1 | 0.0 | 0.0 | 0.0 |"]
+
+
+def test_the_limits_mention_other_ner_engines_presidio_supports() -> None:
+    markdown = render_presidio_markdown(_presidio_report(), _base(), _ner(), "x-ner.json")
+    assert (
+        "Presidio admite otros motores de NER (transformers, GLiNER) con modelos en español con "
+        "licencia permisiva que aquí no se han medido." in markdown
+    )
+
+
+SYNTHETIC_TEXT = "IBAN ES7620770024003102575766 y DNI 12345678Z del cliente.\n"
+SYNTHETIC_DOCS = [
+    Document("sint-1", SYNTHETIC_TEXT, (A(5, 29, "IBAN"), A(36, 45, "ES_DNI"))),
+]
+
+
+def _synthetic_reports() -> tuple[Report, Report]:
+    analyzer = FakeAnalyzer({SYNTHETIC_TEXT: [FakeResult("IBAN_CODE", 5, 29)]})
+    presidio = run_presidio(
+        SYNTHETIC_DOCS,
+        analyzer,
+        versions=VERSIONS,
+        configuration=pb.configuration(),
+        mapping=SYNTHETIC_MAPPING,
+        dataset="synthetic-v1",
+    )
+    output = [_span(5, 29, T.IBAN), _span(36, 45, T.ES_DNI)]
+    base = evaluate(SYNTHETIC_DOCS, SYNTHETIC_MAPPING, lambda text: output)
+    return presidio, base
+
+
+def test_presidio_also_runs_on_the_synthetic_set_with_its_shared_types() -> None:
+    presidio, _ = _synthetic_reports()
+    assert presidio.baseline["shared_types"] == ["IBAN", "ES_DNI"]
+    assert presidio.by_type["IBAN"]["recall"] == 1.0
+    assert presidio.by_type["ES_DNI"]["recall"] == 0.0
+
+
+def test_the_synthetic_table_is_separate_and_states_its_bias() -> None:
+    synthetic, synthetic_base = _synthetic_reports()
+    markdown = render_presidio_markdown(
+        _presidio_report(), _base(), _ner(), "x-ner.json", synthetic, synthetic_base
+    )
+    section = markdown[markdown.index("### Conjunto sintético") :]
+    assert "**Conjunto escrito por el mismo equipo que Antifaz: favorece a Antifaz.**" in section
+    assert "| IBAN | Presidio | 1 | 100.0 %" in section
+    assert "| ES_DNI | Presidio | 1 | 0.0 %" in section
+    assert "12345678Z" not in markdown and "ES7620770024003102575766" not in markdown
+
+
+def test_without_the_synthetic_reports_there_is_no_synthetic_table() -> None:
+    markdown = render_presidio_markdown(_presidio_report(), _base(), _ner(), "x-ner.json")
+    assert "### Conjunto sintético" not in markdown
 
 
 def test_the_comparison_has_no_adjectives() -> None:

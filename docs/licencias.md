@@ -71,7 +71,7 @@ Aunque no se distribuyen, `scripts/check_licenses.py` también los comprueba (na
 |---|---|---|---|
 | presidio-analyzer | 2.2.364 | MIT | directa (grupo `bench`) |
 | spacy | 3.8.16 | MIT | directa (grupo `bench`) |
-| xx-ent-wiki-sm | 3.8.0 | MIT | directa (grupo `bench`): el modelo multilingüe de spaCy, descargado de su release de GitHub y fijado por SHA-256 en `uv.lock`. Entrenado con WikiNER (CC BY 4.0, Nothman et al.) |
+| xx-ent-wiki-sm | 3.8.0 | MIT | directa (grupo `bench`): el modelo multilingüe de spaCy, descargado de su release de GitHub y fijado por SHA-256 en `uv.lock`. Entrenado con [WikiNER](https://figshare.com/articles/Learning_multilingual_named_entity_recognition_from_Wikipedia/5462500) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); Nothman, Ringland, Radford, Murphy y Curran, 2013); fuente: [release del modelo](https://github.com/explosion/spacy-models/releases/tag/xx_ent_wiki_sm-3.8.0) |
 | phonenumbers | 9.0.40 | Apache-2.0 | presidio-analyzer |
 | tldextract | 5.3.2 | BSD-3-Clause | presidio-analyzer |
 | requests-file | 3.0.1 | Apache-2.0 | tldextract |

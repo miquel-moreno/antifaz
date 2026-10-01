@@ -10,11 +10,12 @@ The setup aims at Presidio's best reasonable Spanish configuration, not a strawm
   analyzer for "es" only. Presidio's default registry is English and, asked in another language,
   it can end up with no recognizer for it without saying so (Presidio discussion #1533): here
   check_spanish() fails at start if any piece is not Spanish or a recognizer is missing.
-- recognizers: the generic ones Presidio has for the types Antifaz also covers (email, phone with
-  region ES, IBAN, credit card with the Spanish context words of Presidio's own default
-  configuration, IP), the three Spanish ones (NIF, NIE and passport; the passport one comes
-  disabled in Presidio's defaults and is enabled here) and the NER of the NLP engine (PERSON,
-  LOCATION, ORGANIZATION).
+- recognizers: every one Presidio 2.2.364 enables by default (default_recognizers.yaml) that
+  works in any language or in Spanish: credit card (with the Spanish context words of that same
+  file), crypto wallet, date, email, IBAN, IP, MAC address, phone (region ES) and URL; the
+  Spanish NIF and NIE; the Spanish passport, which comes disabled there and is enabled here; and
+  the NER of the NLP engine (PERSON, LOCATION, ORGANIZATION). Recognizers of other countries
+  and English-only ones are left out.
 - NLP engine: spaCy with xx_ent_wiki_sm 3.8.0 (MIT, multilingual, trained on WikiNER). The
   Spanish spaCy models es_core_news_* are GPL-3.0, so they are not used (ADR-0003). The NER
   settings are those of Presidio's own spacy_multilingual.yaml (PER, LOC and ORG; ORG with a
@@ -74,11 +75,15 @@ CARD_CONTEXT = (
     "instapayment",
 )
 RECOGNIZERS = (
-    "EmailRecognizer",
-    "PhoneRecognizer",
-    "IbanRecognizer",
     "CreditCardRecognizer",
+    "CryptoRecognizer",
+    "DateRecognizer",
+    "EmailRecognizer",
+    "IbanRecognizer",
     "IpRecognizer",
+    "MacAddressRecognizer",
+    "PhoneRecognizer",
+    "UrlRecognizer",
     "EsNifRecognizer",
     "EsNieRecognizer",
     "EsPassportRecognizer",
@@ -101,6 +106,11 @@ PRESIDIO_TO_ANTIFAZ: dict[str, EntityType | None] = {
     "PERSON": E.PERSON,
     "LOCATION": None,
     "ORGANIZATION": None,
+    # DATE_TIME is any date; Antifaz only looks for dates of birth (DATE_OF_BIRTH, with context).
+    "DATE_TIME": None,
+    "URL": None,
+    "CRYPTO": None,
+    "MAC_ADDRESS": None,
 }
 REQUIRED_ENTITIES = frozenset(PRESIDIO_TO_ANTIFAZ)
 # Types both tools cover. Which of them a dataset can measure depends on what it annotates.
@@ -217,13 +227,17 @@ def build_analyzer() -> Any:  # pragma: no cover - needs the bench group (make b
     from presidio_analyzer.nlp_engine import NlpEngineProvider
     from presidio_analyzer.predefined_recognizers import (
         CreditCardRecognizer,
+        CryptoRecognizer,
+        DateRecognizer,
         EmailRecognizer,
         EsNieRecognizer,
         EsNifRecognizer,
         EsPassportRecognizer,
         IbanRecognizer,
         IpRecognizer,
+        MacAddressRecognizer,
         PhoneRecognizer,
+        UrlRecognizer,
     )
 
     # Offline and reproducible: the public-suffix list shipped with this tldextract version.
@@ -233,6 +247,10 @@ def build_analyzer() -> Any:  # pragma: no cover - needs the bench group (make b
     check_model(nlp_engine.nlp[LANGUAGE].meta)
     registry = RecognizerRegistry(supported_languages=[LANGUAGE])
     for recognizer in (
+        CryptoRecognizer(supported_language=LANGUAGE),
+        DateRecognizer(supported_language=LANGUAGE),
+        MacAddressRecognizer(supported_language=LANGUAGE),
+        UrlRecognizer(supported_language=LANGUAGE),
         EmailRecognizer(supported_language=LANGUAGE),
         PhoneRecognizer(
             supported_language=LANGUAGE,

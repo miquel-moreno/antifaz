@@ -107,8 +107,8 @@ provides-extras = ["ner"]
 
 [package.metadata.requires-dev]
 bench = [
-    { name = "presidio-analyzer", specifier = "==2.2.364" },
-    { name = "spacy", specifier = "==3.8.16" },
+    { name = "presidio-analyzer", specifier = ">=2.2.364" },
+    { name = "spacy", specifier = ">=3.8.16" },
     { name = "xx-ent-wiki-sm", url = "https://github.com/explosion/spacy-models/releases/download/xx_ent_wiki_sm-3.8.0/xx_ent_wiki_sm-3.8.0-py3-none-any.whl" },
 ]
 dev = [

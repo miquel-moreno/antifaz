@@ -45,13 +45,13 @@ dev = [
     "ruff>=0.8",
 ]
 # Only for the Presidio baseline of Antifaz-Bench (`make bench PRESIDIO=1`, ADR-0011): never
-# shipped, not installed by `uv sync` nor in CI. Exact versions so the comparison can be
-# repeated. The spaCy model is the multilingual xx_ent_wiki_sm (MIT), never the GPL-3.0
+# shipped, not installed by `uv sync` nor in CI. Lower bounds only: the exact versions, the
+# ones each result records, are in uv.lock. The spaCy model is the multilingual xx_ent_wiki_sm (MIT), never the GPL-3.0
 # es_core_news_* (ADR-0003); it comes from its GitHub release, pinned by uv.lock's SHA-256.
 bench = [
-    "presidio-analyzer==2.2.364",
-    "spacy==3.8.16",
-    "xx-ent-wiki-sm==3.8.0",
+    "presidio-analyzer>=2.2.364",
+    "spacy>=3.8.16",
+    "xx-ent-wiki-sm>=3.8.0",
 ]
 
 [tool.uv]
