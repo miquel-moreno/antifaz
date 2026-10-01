@@ -20,3 +20,13 @@ updates:
       default-days: 7
     commit-message:
       prefix: "ci(deps)"
+
+  # Base images of the Dockerfile, pinned by digest (python and uv).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build(deps)"

@@ -100,3 +100,42 @@ jobs:
         run: uvx "zizmor==${ZIZMOR_VERSION}" --persona auditor --format plain .
         env:
           GH_TOKEN: ${{ github.token }}
+
+  image:
+    name: Image (build, end-to-end, SBOM, scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      # Built locally and loaded into Docker; never pushed (publishing is a separate workflow).
+      - name: Build the image
+        run: docker buildx build --load --tag antifaz:local .
+      # Compose with a fake provider and throwaway keys; never calls a real provider.
+      - name: End-to-end tests
+        run: make e2e
+      - name: SBOM of the image (CycloneDX, uploaded as an artifact)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: antifaz:local
+          syft-version: v1.51.1
+          format: cyclonedx-json
+          artifact-name: antifaz-image.cdx.json
+          upload-release-assets: false
+      - name: Vulnerability scan of the image (Grype, fails on high or critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: antifaz:local
+          grype-version: v0.118.0
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
