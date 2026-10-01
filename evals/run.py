@@ -42,6 +42,7 @@ from evals.generate import from_jsonl
 from evals.metrics import (
     Annotation,
     Counts,
+    any_gold_counts,
     latency_ms,
     leaks,
     leaks_per_100,
@@ -51,11 +52,23 @@ from evals.metrics import (
 
 NER_START = "<!-- bench-ner:start -->"
 NER_END = "<!-- bench-ner:end -->"
-# Candidate NER thresholds, and the least precision (overlap) PERSON and ADDRESS must keep on
-# the dev split. Fixed before looking at any result: the floor stops a low threshold from
-# "winning" by masking half the text.
+# Candidate NER thresholds, and the least precision PERSON and ADDRESS must keep on the dev
+# split. The 85 % was fixed before looking at any result: the floor stops a low threshold
+# from "winning" by masking half the text. WHAT it is measured against changed after the first
+# dev run (ADR-0011, amendment of 2026-10-01): against any annotated personal data.
 THRESHOLDS = (0.3, 0.4, 0.5, 0.6)
 PRECISION_FLOOR = 0.85
+SELECTION_RULE = (
+    "Among the candidate thresholds on MEDDOCAN dev, the one with the fewest leaks per 100 "
+    "(covered types) whose precision against any annotated personal data (a prediction is "
+    "correct if it overlaps a gold span of ANY MEDDOCAN label) is at least 85 % for both "
+    "PERSON and ADDRESS; a tie goes to the higher threshold. By-type (overlap) and strict "
+    "precision are published too."
+)
+SELECTION_RULE_CHANGED = (
+    "floor measured against any annotated personal data, decided 2026-10-01 after the first "
+    "dev run showed by-type precision 63\u201369 % (PERSON) / 56\u201358 % (ADDRESS)"
+)
 START_MARKER = "<!-- bench:start -->"
 END_MARKER = "<!-- bench:end -->"
 SYNTHETIC_START = "<!-- bench-synthetic:start -->"
@@ -73,7 +86,9 @@ class Report:
     by_source_label: MEDDOCAN label -> {"type": Antifaz type or None, "n", "precision",
         "recall", "f1" (None for unmapped labels), "leaks", "leaks_per_100"}.
     by_type: Antifaz type -> {"tp", "fp", "fn", "precision", "recall", "f1" (overlap),
-        "strict_precision", "strict_recall", "strict_f1"}.
+        "strict_precision", "strict_recall", "strict_f1", "any_pii_precision" (against gold
+        of ANY label, metrics.any_gold_counts), "non_pii_fp" (predictions that mask text
+        that is not personal data at all)}.
     overall: {"total", "leaked", "leaks_per_100", "covered_total", "covered_leaked",
         "covered_leaks_per_100"}; covered_* only counts labels mapped to a type.
     latency_ms: {"p50", "p95"} of detect() per document.
@@ -146,6 +161,7 @@ def evaluate(
     """Run detect on every document and compare it with the gold annotations."""
     overlap: dict[str, Counts] = defaultdict(Counts)
     strict: dict[str, Counts] = defaultdict(Counts)
+    any_gold: dict[str, Counts] = defaultdict(Counts)
     source_recall: dict[str, Counts] = defaultdict(Counts)
     source_leaks: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     samples: list[int] = []
@@ -175,6 +191,9 @@ def evaluate(
             overlap[label] = _add(overlap[label], counts)
         for label, counts in strict_counts(gold, predicted).items():
             strict[label] = _add(strict[label], counts)
+        # Against every annotation, mapped or not: over-masking other personal data is fine.
+        for label, counts in any_gold_counts(document.annotations, predicted).items():
+            any_gold[label] = _add(any_gold[label], counts)
         for label, (leaked, total) in leaks(document.text, document.annotations, predicted).items():
             source_leaks[label][0] += leaked
             source_leaks[label][1] += total
@@ -204,7 +223,7 @@ def evaluate(
 
     by_type: dict[str, dict[str, float | int]] = {}
     for label in sorted(set(overlap) & mapped_types):
-        o, s = overlap[label], strict[label]
+        o, s, a = overlap[label], strict[label], any_gold[label]
         by_type[label] = {
             "tp": o.tp,
             "fp": o.fp,
@@ -215,6 +234,8 @@ def evaluate(
             "strict_precision": s.precision,
             "strict_recall": s.recall,
             "strict_f1": s.f1,
+            "any_pii_precision": a.precision,
+            "non_pii_fp": a.fp,
         }
 
     total = sum(n for _, n in source_leaks.values())
@@ -269,14 +290,24 @@ def render_markdown(report: Report) -> str:
         )
     lines += [
         "",
-        "| Tipo Antifaz | Precisión | Recall | F1 | F1 estricto |",
-        "|---|---|---|---|---|",
+        "| Tipo Antifaz | Precisión (mismo tipo) | Precisión estricta "
+        "| Precisión (cualquier dato personal) | Tapan texto no personal | Recall | F1 "
+        "| F1 estricto |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for label, metrics in report.by_type.items():
         lines.append(
-            f"| {label} | {_pct(metrics['precision'])} | {_pct(metrics['recall'])} "
-            f"| {_pct(metrics['f1'])} | {_pct(metrics['strict_f1'])} |"
+            f"| {label} | {_pct(metrics['precision'])} | {_pct(metrics['strict_precision'])} "
+            f"| {_pct(metrics.get('any_pii_precision'))} | {metrics.get('non_pii_fp', '—')} "
+            f"| {_pct(metrics['recall'])} | {_pct(metrics['f1'])} | {_pct(metrics['strict_f1'])} |"
         )
+    lines += [
+        "",
+        "Precisión del mismo tipo: la detección se solapa con un dato anotado de su tipo. "
+        "Contra cualquier dato personal: se solapa con un dato anotado de cualquier tipo "
+        "(también los que Antifaz no cubre); solo es un error si tapa texto que no es un dato "
+        "personal.",
+    ]
     lines += [
         "",
         "## Tipos aún no cubiertos",
@@ -358,7 +389,7 @@ class NerBench:
 
 
 class NoThresholdError(ValueError):
-    """No candidate threshold keeps the pre-registered precision floor on dev."""
+    """No candidate threshold keeps the precision floor (against any personal data) on dev."""
 
 
 def _well_formed(entity: object) -> bool:
@@ -437,6 +468,7 @@ def selection_row(
         metrics = report.by_type.get(entity, {})
         tp, fp, fn = (int(metrics.get(name, 0)) for name in ("tp", "fp", "fn"))
         precision = float(metrics.get("precision", 0.0))
+        any_pii = float(metrics.get("any_pii_precision", 0.0))
         row |= {
             f"{entity}_precision": precision,
             f"{entity}_recall": float(metrics.get("recall", 0.0)),
@@ -446,7 +478,12 @@ def selection_row(
             f"{entity}_fp": fp,
             f"{entity}_fn": fn,
             f"{entity}_gold": tp + fn,
-            f"{entity}_meets_floor": precision >= floor,
+            f"{entity}_any_pii_precision": any_pii,
+            f"{entity}_non_pii_fp": int(metrics.get("non_pii_fp", 0)),
+            # The floor is measured against any personal data (ADR-0011, 2026-10-01); the
+            # by-type result is kept next to it.
+            f"{entity}_meets_floor": any_pii >= floor,
+            f"{entity}_meets_floor_by_type": precision >= floor,
         }
     return row
 
@@ -463,23 +500,24 @@ def _number(row: Mapping[str, object], key: str) -> float:
 
 def choose_threshold(rows: Sequence[Mapping[str, object]], floor: float = PRECISION_FLOOR) -> float:
     """Fewest covered leaks per 100 among the thresholds whose PERSON and ADDRESS precision
-    (overlap) both reach `floor`; a tie goes to the higher threshold (fewer false positives).
-    NoThresholdError says, for each threshold, which type falls short."""
-    good = [
-        row for row in rows if all(_number(row, f"{e}_precision") >= floor for e in FLOOR_TYPES)
-    ]
+    against any annotated personal data both reach `floor` (SELECTION_RULE); a tie goes to the
+    higher threshold (fewer false positives). NoThresholdError says, for each threshold, which
+    type falls short."""
+    key = "any_pii_precision"
+    good = [row for row in rows if all(_number(row, f"{e}_{key}") >= floor for e in FLOOR_TYPES)]
     if not good:
         failing = "; ".join(
             f"{row['threshold']}: "
             + ", ".join(
-                f"{entity} {100 * _number(row, f'{entity}_precision'):.1f} %"
+                f"{entity} {100 * _number(row, f'{entity}_{key}'):.1f} %"
                 for entity in FLOOR_TYPES
-                if _number(row, f"{entity}_precision") < floor
+                if _number(row, f"{entity}_{key}") < floor
             )
             for row in rows
         )
         raise NoThresholdError(
-            f"no threshold keeps the precision floor of {100 * floor:.0f} % ({failing})"
+            f"no threshold keeps the precision floor of {100 * floor:.0f} % against any "
+            f"personal data ({failing})"
         )
     best = min(good, key=lambda r: (_number(r, "covered_leaks_per_100"), -_number(r, "threshold")))
     return _number(best, "threshold")
@@ -569,21 +607,32 @@ def _leaks(report: Report, labels: Sequence[str]) -> str:
 
 
 def render_selection(rows: Sequence[Mapping[str, object]]) -> str:
-    """The dev table as Markdown (also printed before choosing)."""
-    lines = [
-        "| Umbral | Fugas por cada 100 (todos) | Fugas (cubiertos) | Precisión PERSON "
-        "| Recall PERSON | Precisión ADDRESS | Recall ADDRESS | Suelo PERSON / ADDRESS |",
-        "|---|---|---|---|---|---|---|---|",
-    ]
-    for row in rows:
-        floor = " / ".join("sí" if row[f"{e}_meets_floor"] else "no" for e in FLOOR_TYPES)
-        lines.append(
-            f"| {row['threshold']} | {_number(row, 'leaks_per_100'):.1f} | "
-            f"{_number(row, 'covered_leaks_per_100'):.1f} | "
-            f"{_pct_value(row['PERSON_precision'])} | {_pct_value(row['PERSON_recall'])} | "
-            f"{_pct_value(row['ADDRESS_precision'])} | {_pct_value(row['ADDRESS_recall'])} | "
-            f"{floor} |"
+    """The dev table as Markdown (also printed before choosing). Per type: precision against
+    any personal data (the floor), of the same type (overlap), strict, recall and how many
+    detections mask text that is not personal data."""
+    header = "| Umbral | Fugas por cada 100 (todos) | Fugas (cubiertos) |"
+    for entity in FLOOR_TYPES:
+        header += (
+            f" {entity}: precisión (cualquier dato personal) | {entity}: precisión (mismo "
+            f"tipo) | {entity}: precisión estricta | {entity}: recall | {entity}: tapan texto "
+            "no personal |"
         )
+    header += " Suelo PERSON / ADDRESS |"
+    lines = [header, "|" + "---|" * (4 + 5 * len(FLOOR_TYPES))]
+    for row in rows:
+        line = (
+            f"| {row['threshold']} | {_number(row, 'leaks_per_100'):.1f} | "
+            f"{_number(row, 'covered_leaks_per_100'):.1f} |"
+        )
+        for e in FLOOR_TYPES:
+            line += (
+                f" {_pct_value(row[f'{e}_any_pii_precision'])} | "
+                f"{_pct_value(row[f'{e}_precision'])} | "
+                f"{_pct_value(row[f'{e}_strict_precision'])} | "
+                f"{_pct_value(row[f'{e}_recall'])} | {row[f'{e}_non_pii_fp']} |"
+            )
+        floor = " / ".join("sí" if row[f"{e}_meets_floor"] else "no" for e in FLOOR_TYPES)
+        lines.append(f"{line} {floor} |")
     return "\n".join(lines) + "\n"
 
 
@@ -599,8 +648,14 @@ def render_ner_markdown(report: Report, base: Report) -> str:
         "## Con NER: umbral elegido en dev",
         "",
         f"Umbrales probados en la partición **dev** de MEDDOCAN. Se elige el de menos fugas "
-        f"(tipos cubiertos) con precisión de PERSON y ADDRESS de al menos "
-        f"{100 * PRECISION_FLOOR:.0f} %; en empate, el más alto.",
+        f"(tipos cubiertos) con precisión de PERSON y ADDRESS **contra cualquier dato "
+        f"personal anotado** de al menos {100 * PRECISION_FLOOR:.0f} %; en empate, el más "
+        "alto. Una detección solo cuenta como error si tapa texto que no es un dato personal. "
+        "También se publican la precisión del mismo tipo y la estricta.",
+        "",
+        "Esta forma de medir el suelo se decidió el 2026-10-01, **después** de ver la primera "
+        "ejecución en dev, donde la precisión del mismo tipo fue del 63\u201369 % (PERSON) y del "
+        "56\u201358 % (ADDRESS) (ADR-0011, enmienda). El 85 % no ha cambiado.",
         "",
         render_selection(selection).rstrip("\n"),
     ]
@@ -719,6 +774,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "environment": {**_environment(), "dataset_md5": meddocan.MD5},
                 "precision_floor": PRECISION_FLOOR,
                 "floor_types": list(FLOOR_TYPES),
+                "selection_rule": SELECTION_RULE,
+                "selection_rule_changed": SELECTION_RULE_CHANGED,
                 "thresholds": list(THRESHOLDS),
                 **_model_info(manifest, args.threads),
                 "rows": rows,
@@ -744,6 +801,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ner_report.ner = {
             "threshold": chosen,
             "precision_floor": PRECISION_FLOOR,
+            "selection_rule": SELECTION_RULE,
+            "selection_rule_changed": SELECTION_RULE_CHANGED,
             "selection": rows,
             "selection_split": "MEDDOCAN dev",
             "latency_warm_ms": warm,

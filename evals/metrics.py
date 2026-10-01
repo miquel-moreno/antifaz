@@ -1,4 +1,4 @@
-"""Benchmark metrics: overlap and strict counts, leaks and latency.
+"""Benchmark metrics: overlap, strict and any-gold counts, leaks and latency.
 
 Every function works with positions and labels only; no text value ever leaves them.
 """
@@ -87,6 +87,22 @@ def overlap_counts(
 def strict_counts(gold: Sequence[Annotation], predicted: Sequence[Annotation]) -> dict[str, Counts]:
     """Same as overlap_counts, but a TP needs identical start and end."""
     return _count(gold, predicted, lambda g, p: (g.start, g.end) == (p.start, p.end))
+
+
+def any_gold_counts(
+    gold: Sequence[Annotation], predicted: Sequence[Annotation]
+) -> dict[str, Counts]:
+    """Precision against ANY annotated personal data, per predicted label: a prediction is
+    a TP if it overlaps >= 1 character of a gold annotation of ANY label (also labels with no
+    Antifaz type), and an FP only when it masks text that is not personal data at all. Not
+    one-to-one: several predictions over the same gold are all TP. fn is always 0 (recall is
+    measured by type with overlap_counts); only precision is meaningful. Only labels with
+    predictions are included."""
+    result: dict[str, Counts] = {}
+    for label, predictions in _by_label(predicted).items():
+        tp = sum(any(g.start < p.end and p.start < g.end for g in gold) for p in predictions)
+        result[label] = Counts(tp=tp, fp=len(predictions) - tp)
+    return result
 
 
 def leaks(

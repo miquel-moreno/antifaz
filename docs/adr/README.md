@@ -15,7 +15,7 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0008](0008-expresiones-regulares.md) | Expresiones regulares y diccionarios | Aceptada |
 | [0009](0009-spans-y-criterio-de-validadores.md) | Spans y criterio de los validadores | Aceptada |
 | [0010](0010-el-span-contenedor-gana.md) | El span que contiene a otro gana | Aceptada |
-| [0011](0011-antifaz-bench.md) | Antifaz-Bench: cómo se cuentan aciertos y fugas | Aceptada |
+| [0011](0011-antifaz-bench.md) | Antifaz-Bench: cómo se cuentan aciertos y fugas (enmienda 2026-10-01: suelo del NER contra cualquier dato personal) | Aceptada |
 | [0012](0012-escape-and-same-value.md) | Escape de `[[` y qué es "el mismo valor" | Aceptada |
 | [0013](0013-proxy.md) | El proxy: qué se enmascara, qué se envía y qué se restaura | Aceptada |
 | [0014](0014-normalizacion-previa-del-detector.md) | Normalización previa del detector | Aceptada |

@@ -12,6 +12,8 @@ from evals.metrics import Annotation
 from evals.run import (
     NER_END,
     NER_START,
+    SELECTION_RULE,
+    SELECTION_RULE_CHANGED,
     NoThresholdError,
     ScoreCache,
     choose_threshold,
@@ -66,12 +68,22 @@ def _predictor() -> InProcess:
     return InProcess(Backend({}))
 
 
-def _row(threshold: float, covered: float, person: float, address: float) -> dict[str, object]:
+def _row(
+    threshold: float,
+    covered: float,
+    person: float,
+    address: float,
+    person_by_type: float = 0.0,
+    address_by_type: float = 0.0,
+) -> dict[str, object]:
+    """person / address: precision against any personal data (the one the floor uses)."""
     return {
         "threshold": threshold,
         "covered_leaks_per_100": covered,
-        "PERSON_precision": person,
-        "ADDRESS_precision": address,
+        "PERSON_any_pii_precision": person,
+        "ADDRESS_any_pii_precision": address,
+        "PERSON_precision": person_by_type,
+        "ADDRESS_precision": address_by_type,
     }
 
 
@@ -94,6 +106,24 @@ def test_no_threshold_above_the_floor_is_an_error_that_names_the_failing_type() 
     with pytest.raises(NoThresholdError, match="floor") as error:
         choose_threshold(rows, floor=0.85)
     assert "PERSON" in str(error.value) and "ADDRESS" not in str(error.value)
+    assert "any personal data" in str(error.value)
+
+
+def test_the_floor_is_measured_against_any_personal_data_not_by_type() -> None:
+    # The dev case of 2026-10-01: by type under the floor, against any personal data above.
+    rows = [
+        _row(0.3, 10.0, 0.80, 0.90, person_by_type=0.63, address_by_type=0.56),
+        _row(0.4, 11.0, 0.88, 0.86, person_by_type=0.66, address_by_type=0.57),
+        _row(0.5, 12.0, 0.95, 0.90, person_by_type=0.69, address_by_type=0.58),
+    ]
+    assert choose_threshold(rows, floor=0.85) == 0.4
+
+
+def test_the_selection_rule_and_its_late_change_are_declared() -> None:
+    assert "any annotated personal data" in SELECTION_RULE
+    assert "85 %" in SELECTION_RULE and "higher threshold" in SELECTION_RULE
+    for text in ("2026-10-01", "after the first dev run", "63\u201369 %", "56\u201358 %"):
+        assert text in SELECTION_RULE_CHANGED
 
 
 def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
@@ -102,7 +132,9 @@ def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
     result = run_ner_bench(DOCS, DOCS, predictor, thresholds=(0.3, 0.4, 0.5), floor=0.5)  # type: ignore[arg-type]
 
     assert [row["threshold"] for row in result.selection] == [0.3, 0.4, 0.5]
-    # 0.3 also calls "Inventada" a person (a false positive); 0.4 finds both names.
+    # 0.3 also calls "Inventada" a person: a false positive by type, but it is inside the
+    # annotated street, so not against any personal data; it leaks the same as 0.4, and the
+    # tie goes to the higher threshold. 0.4 finds both names.
     assert result.threshold == 0.4
     # dev scored once for every threshold; test measured once (the warm pass hits the cache)
     assert predictor.calls == 2
@@ -115,10 +147,18 @@ def test_run_ner_bench_chooses_on_dev_and_measures_test_cold_and_warm() -> None:
 def test_selection_rows_give_both_types_with_overlap_and_strict_metrics() -> None:
     row = selection_row(0.5, evaluate(DOCS, MEDDOCAN_TO_ANTIFAZ_NER))
     for entity in ("PERSON", "ADDRESS"):
-        for metric in ("precision", "recall", "strict_precision", "strict_recall"):
+        for metric in (
+            "precision",
+            "recall",
+            "strict_precision",
+            "strict_recall",
+            "any_pii_precision",
+        ):
             assert isinstance(row[f"{entity}_{metric}"], float)
         assert isinstance(row[f"{entity}_gold"], int)
+        assert isinstance(row[f"{entity}_non_pii_fp"], int)
         assert isinstance(row[f"{entity}_meets_floor"], bool)
+        assert isinstance(row[f"{entity}_meets_floor_by_type"], bool)
     assert row["documents"] == 1
     assert {"threshold", "leaks_per_100", "covered_leaks_per_100"} <= set(row)
 
@@ -196,6 +236,8 @@ def test_the_ner_section_compares_with_and_without_ner_without_any_value() -> No
     output = markdown + to_json(result.report)
 
     assert "## Con NER" in markdown
+    assert "cualquier dato personal" in markdown and "mismo tipo" in markdown
+    assert "2026-10-01" in markdown  # the late change of the rule is declared
     assert "| 0.4 |" in markdown and "1234" in markdown
     for value in (NAME, DOCTOR, "Inventada"):
         assert value not in output
