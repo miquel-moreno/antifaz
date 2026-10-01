@@ -115,10 +115,10 @@ Full tables, configuration and limits: [docs/benchmark.md](docs/benchmark.md) (i
 
 ## Security
 
-- **Fail-closed**: a request is blocked if the detector fails, if a field with text is unknown, or if it carries an image, a PDF or a file.
+- **Fail-closed**: a request is blocked if the detector fails or if it carries an image, a PDF, a file or another field that cannot be masked. Text in an unknown field is masked too, not sent as it is.
 - **Egress guard**: a second check on the exact bytes about to leave; if a hidden value is still there, the request is blocked.
 - **Closed by default**: every route needs the Antifaz key, browsers are refused, provider URLs and keys are only read from `.env`, and Antifaz will not start with a weak or example key.
-- **Tested by attacking it**: 829 red-team tests pass; 13 more are known gaps, written down as expected failures. An end-to-end test runs the real Docker image against a fake provider and checks it only ever receives placeholders.
+- **Tested by attacking it**: 960 red-team tests pass; 13 more are documented known gaps, written down as expected failures. An end-to-end test runs the real Docker image against a fake provider and checks it only ever receives placeholders.
 
 Found a problem? Read [SECURITY.md](SECURITY.md): vulnerabilities are reported privately. A value that Antifaz does not detect is a public issue with **synthetic data only** ([I found a leak](https://github.com/miquel-moreno/antifaz/issues/new?template=leak.yml)).
 
