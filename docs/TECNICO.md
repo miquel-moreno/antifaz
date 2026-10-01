@@ -44,7 +44,7 @@ Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con lo
 | `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración. No usa nunca un proxy aunque haya `HTTP_PROXY`/`HTTPS_PROXY` en el entorno. Cada comprobación (cada 30 s) deja una línea `INFO` de la petición a `/healthz` en el log de Antifaz: es ruido esperado y no lleva datos |
 | `uvicorn --factory antifaz.api.app:create_app --no-access-log --no-proxy-headers --no-server-header` | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso" |
 
-Tamaño medido el 2026-10-01: **244,7 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB) y **57,6 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
+Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB; la capa de `apt-get upgrade`, 14,4 MB, porque los archivos viejos siguen en la capa de la base) y **60,9 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
 
 ### Compose
 
@@ -82,9 +82,21 @@ Los mismos puntos de la imagen y de Compose (digest, usuario, healthcheck, `.doc
 
 ### CI de la imagen
 
-Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (no se publica: eso será un workflow aparte, parte 7c), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`), que **falla con vulnerabilidades altas o críticas**. Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen (`docker buildx --attest`) llegan con la publicación (7c).
+Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (no se publica: eso será un workflow aparte, parte 7c), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen (`docker buildx --attest`) llegan con la publicación (7c).
 
-Grype solo se ejecuta en la CI, no en `make e2e` ni en local. Hoy falla con cualquier vulnerabilidad alta o crítica, **también las que Debian todavía no ha arreglado**: una de esas pone la CI en rojo sin que se pueda hacer nada en el repo. Está documentado a propósito; si pasa, se decidirá si se pasa a `only-fixed` (fallar solo con las que tienen arreglo) y se anotará aquí.
+### Escaneo de la imagen
+
+Grype solo se ejecuta en la CI, no en `make e2e` ni en local. La política:
+
+| Decisión | Por qué |
+|---|---|
+| La CI falla solo con vulnerabilidades **altas o críticas que tienen arreglo** (`only-fixed: true`) | Una vulnerabilidad que Debian no arregla («won't fix» o sin versión corregida) no se puede quitar desde el repo: con ella la CI estaría siempre en rojo y se dejaría de mirar. Las que tienen arreglo sí se pueden quitar, y esas paran el merge |
+| La etapa final hace `apt-get update && apt-get upgrade -y --no-install-recommends` y borra las listas de apt | Recoge los parches de seguridad de Debian publicados después de la imagen base (el 2026-10-01: openssl, libssl3t64 y openssl-provider-legacy 3.5.7-1~deb13u3, libpcre2-8-0 10.46-1~deb13u3). Solo actualiza lo que ya está; no instala nada nuevo. La base sigue fijada por digest |
+| Dependabot (ecosistema `docker`) propone cada digest nuevo de la imagen base | Las reconstrucciones de `python:3.12-slim` traen los parches de Debian ya incluidos. No hay entrada `docker-compose`: los archivos de Compose solo usan `antifaz:local`, que sale de este `Dockerfile` |
+| El informe completo (todas las vulnerabilidades, con o sin arreglo, en formato tabla) se sube como artefacto `grype-report` en cada ejecución, también cuando la CI falla, y se guarda 30 días | El filtro de la CI no esconde nada: lo que no rompe la CI sigue a la vista |
+| Una sola excepción, en `.github/grype-gate.yaml` (solo la usa el filtro, no el informe): CVE-2026-82049 en Python 3.12.14 | Grype la da por «arreglada» porque existe una versión corregida, pero solo en Python 3.14; no hay arreglo para 3.12. Pasar a 3.14 es otra decisión. Cada excepción lleva motivo y fecha y se revisa al cambiar la imagen base |
+
+Estado real el 2026-10-01 (CI de la rama `feat/7a-docker`, Grype v0.118.0): después del `apt-get upgrade` el informe sigue listando **13 vulnerabilidades altas sin arreglo en paquetes de sistema de Debian** (unas 50 líneas, porque cada una afecta a varios paquetes: util-linux y su familia, libc, perl, ncurses, zlib, acl y las librerías de gcc) y **una en Python 3.12** que solo está arreglada en 3.14. Ninguna está en el código de Antifaz. La pasarela no ejecuta la mayoría de esas herramientas (mount, login, perl, ncurses…): están porque vienen con Debian. Antes del lanzamiento de la v0.2 está previsto pasar a una imagen distroless, que no lleva esos paquetes.
 
 ## Arquitectura
 
@@ -542,7 +554,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 | zizmor 1.30.1 en pre-commit (sin conexión), en `make check` y en la CI (con las comprobaciones en línea), perfil `auditor` | Busca fallos de seguridad en los workflows (inyecciones, permisos, acciones sin fijar). El perfil `auditor` también saca los avisos de baja confianza: cualquier aviso rompe la CI |
 | `permissions: {}` arriba en cada workflow y permisos por job, cada uno con su comentario | Un job nuevo empieza sin permisos; solo recibe lo que pide y queda explicado por qué |
 | `concurrency` por rama; en un PR, un push nuevo cancela la ejecución anterior (en `main` nunca) | No se acumulan ejecuciones viejas y en `main` siempre termina la de cada commit |
-| Dependabot con `cooldown` de 7 días en `uv` y `github-actions` | Una versión secuestrada suele detectarse y retirarse en pocos días; las actualizaciones de seguridad no esperan |
+| Dependabot con `cooldown` de 7 días en `uv`, `github-actions` y `docker` | Una versión secuestrada suele detectarse y retirarse en pocos días; las actualizaciones de seguridad no esperan |
 | `CODEOWNERS` con líneas propias para `pyproject.toml`, `uv.lock`, `.github/` y `Dockerfile` | Son los archivos que cambian qué código se ejecuta en la CI o se distribuye |
 | Herramientas de la CI con versión exacta (uv 0.12.20, zizmor 1.30.1, acciones por SHA) | La misma entrada da siempre la misma herramienta; se actualizan a propósito |
 | Sin topes superiores (`<3`) en las dependencias de `pyproject.toml`; versiones exactas solo en `uv.lock` | Antifaz también es una librería: un tope impide a quien la instala recibir arreglos de seguridad y crea conflictos con otros paquetes. Lo reproducible es el `uv.lock`. Quitar `python-stdnum<3` no cambió ninguna versión bloqueada. `requires-python` mantiene `<3.13` porque la CI solo prueba 3.12 |
@@ -550,7 +562,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 ## Limitaciones
 
 - Docker: la imagen solo se ha probado en `linux/amd64` (en local y en la CI), no en ARM. Todavía no se publica (parte 7c).
-- Docker: el escaneo de Grype incluye los paquetes de Debian de la imagen base. Si aparece una vulnerabilidad alta o crítica sin arreglo en Debian, la CI falla hasta que haya una imagen base nueva o se decida (y anote) una excepción.
+- Docker: la imagen se basa en Debian y lleva paquetes de sistema con vulnerabilidades altas que Debian no arregla (13 el 2026-10-01, más una de Python 3.12 arreglada solo en 3.14). La CI solo falla con las que tienen arreglo; el informe completo queda como artefacto. La imagen distroless está prevista antes de la v0.2.
 - `POST /antifaz/scan` devuelve posiciones en caracteres Unicode (índices de Python), no en unidades UTF-16 como JavaScript ni en bytes.
 - `GET /v1/models` elige el proveedor por la cabecera `anthropic-version`: un cliente de OpenAI que la mande por error recibe la lista de Anthropic.
 - El proxy habla OpenAI Chat y Anthropic Messages (con y sin streaming). Hay una prueba real con OpenAI y sus respuestas grabadas (2026-09-30); la prueba real con Claude Code y Anthropic está pendiente (sin crédito de Anthropic), y sus tests de contrato usan respuestas escritas a mano.
