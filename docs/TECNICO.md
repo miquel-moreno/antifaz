@@ -338,7 +338,28 @@ El modelo de nombres (GLiNER, fijado por su commit en `detect/ner/manifest.json`
 - En la partición dev de MEDDOCAN (2026-10-01), la precisión de PERSON contra cualquier dato personal anotado fue del 67,5–70,9 % según el umbral (~70 %): **cerca del 30 % de las detecciones de nombres tapan texto que no es un dato personal** (416–510 detecciones). Por tipo es aún menor (63–69 %). ADDRESS sí llega (~96 %).
 - Por eso el umbral publicado es el de respaldo (el más preciso) y el resultado lleva `floor_met: false`. Las cifras de test están en `docs/benchmark.md`.
 - **Actívalo solo si te vale que tape de más**: protege más nombres, pero el modelo de IA recibe más marcadores donde había palabras normales y puede responder peor.
-- Coste medido en el PC de desarrollo (Ryzen 7 5700U, CPU, 2026-10-01): unos **640 MB de RAM por proceso** del pool, unos **3 s por documento** de MEDDOCAN y unos **48 s de carga** del modelo al arrancar.
+- Coste en el PC de desarrollo (Ryzen 7 5700U, solo CPU), de `evals/results/2026-10-01-0.1.0-ner.json`: **590 MB de RAM (RSS) por proceso** del pool y, por documento de MEDDOCAN (unos 3.000 caracteres), **p50 2,4 s / p95 4,8 s** con la caché fría (con la caché caliente, 2,9 ms / 6,0 ms). Arrancar el pool (comprobar dos veces el SHA-256 de 1,16 GB y cargar el modelo) tardó **48–57 s**, medido a mano dos veces (2026-09-30 y 2026-10-01); los resultados futuros guardarán `load_seconds`.
+
+**Cómo activarlo.**
+
+```bash
+make ner-model   # instala el extra ner (torch solo CPU) y descarga el modelo fijado (1,16 GB)
+# en .env:
+ANTIFAZ_NER_ENABLED=true
+ANTIFAZ_NER_MODEL_DIR=models/gliner_multi_pii-v1
+ANTIFAZ_NER_THRESHOLD=0.6          # el umbral publicado en docs/benchmark.md
+ANTIFAZ_NER_TORCH_THREADS=0        # hilos de torch por proceso; 0 = los que elija torch
+```
+
+Un `uv sync` sin `--extra ner` (por ejemplo `make install`) desinstala el extra. torch 2.14 no publica ruedas para **macOS con Intel** (x86_64): allí el extra no se instala y el NER no está disponible.
+
+**Qué lee el modelo.**
+
+- **Sin red**: Hugging Face en modo offline; el nombre del codificador (`microsoft/mdeberta-v3-base`) se cambia en memoria por la copia local del tokenizador; los pesos con `torch.load(weights_only=True)` y `strict=True`.
+- **Vista para el NER** (`detect/ner/view.py`): antes de trocear, las URL largas, los bloques base64/hex de 32 caracteres o más sin espacios y las series de 6 o más cifras pegadas a una letra se cambian por espacios de la misma longitud. Las posiciones no se mueven y los validadores y patrones siguen leyendo el texto entero. Un bloque base64 de 4 KB costaba ~12 s de CPU del modelo, pasaba el tiempo máximo, mataba el proceso y la recarga dejaba bloqueadas todas las peticiones; y "1234567890Jordi" era una sola palabra para el modelo.
+- **Ventanas recortadas al límite del modelo**: nuestras ventanas de 200 tokens pueden ser miles de subpalabras (números largos, CJK). Pasado su largo de entrenamiento el modelo deja de ver nombres sin dar error (medido: un nombre tras 190 números de 40 cifras, 2.330 subpalabras, no se veía). El backend vuelve a cortar cada ventana con el tokenizador real en trozos de 384 tokens como máximo (prompt incluido) que comparten 32 palabras (y nunca más de la mitad del presupuesto). Una palabra que no cabe en 384 tokens bloquea la petición.
+- **Presupuesto por llamada**: si una llamada necesita más de 4 trozos por ventana de media (texto que cuesta muchas más subpalabras que palabras: CJK o emoji al azar), el backend la rechaza **antes** de ejecutar el modelo. El proceso responde un error fijo y sigue vivo (no cuenta para el cortacircuitos); la petición se bloquea con 400. Un texto normal es un trozo por ventana. Una petición legítima muy grande puede seguir pasando el tiempo máximo (el fallo seguro de siempre).
+- Las detecciones de los trozos vuelven sin unir; el motor las une después de filtrar por su umbral. Así la respuesta a un umbral es la de uno más bajo filtrada por puntuación, y el benchmark ejecuta el modelo una sola vez por ventana para todos los umbrales candidatos (`ScoreCache`, probado igual que ejecutar cada umbral).
 
 ## La puerta cerrada por defecto (issue 20)
 
@@ -431,5 +452,9 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - NER: una petición tan grande que no cabe en el tiempo máximo, o con más de 1.024 ventanas, se bloquea (el fallo seguro). Un nombre detectado se enmascara en toda la petición, también donde es una palabra corriente ("Mar") o, si tiene 6 o más letras, dentro de otra palabra ("Marina" en "submarina"): falsos positivos aceptados (ADR-0016).
 - NER: cada cadena del JSON se lee por separado. Un nombre partido entre dos campos ("Carmen" en uno y "Prueba López" en otro) no lo ve entero ningún trozo, y cada parte puede salir en claro si el modelo no la reconoce sola (test `xfail` estricto en `tests/redteam/test_ner.py`).
 - NER: solo se propaga el valor entero que encontró el modelo. Si ve "Carmen Prueba López" en un mensaje y en otro solo aparece "Carmen", ese "Carmen" suelto no se tapa por propagación; solo si el modelo lo detecta allí (test `xfail` estricto). Buscar las partes de un nombre enmascararía palabras corrientes por toda la petición.
-- NER: el troceado cuenta palabras, no subpalabras del modelo; en 6b se mide con el modelo real que ninguna ventana supere su límite.
+- NER: el modelo no lee las URL largas, los bloques base64/hex de 32+ caracteres sin espacios ni las series de 6+ cifras pegadas a letras (vista para el NER): un nombre dentro de una URL (`/usuarios/jordi-inventat`) o de un bloque así no se detecta. Los validadores y patrones sí leen esos trozos (emails, IBAN, DNI…).
+- NER: un texto que cuesta muchas más subpalabras que palabras (más de 4 trozos de 384 tokens por ventana de media: CJK o emoji al azar) se bloquea con 400 sin ejecutar el modelo.
+- NER: "Apellidos, Nombre" sin contexto ("Inventat Puig, Jordi") no se detecta como nombre (test `xfail` estricto en `tests/integration/test_ner_model.py`).
+- NER: entre la comprobación del manifiesto en el proceso del pool y `torch.load` queda un instante (TOCTOU): aprovecharlo exige poder escribir en la carpeta del modelo, que debe ser de solo lectura para el usuario de la pasarela.
+- NER: al cargar el tokenizador, transformers avisa de un "incorrect regex pattern" y sugiere `fix_mistral_regex=True`. Es un aviso pensado para tokenizadores de Mistral: se comprobó que la tokenización de mDeBERTa coincide con la de sentencepiece. Los avisos no salen del proceso del pool (está silenciado).
 - Dos identificadores pegados sin separador (`12345678Z12345678Z`): el primero no se detecta (un DNI nunca toca cifras) y la guardia bloquea la petición.

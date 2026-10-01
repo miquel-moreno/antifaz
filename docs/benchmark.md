@@ -8,7 +8,7 @@ Cuánto detecta Antifaz, y cuánto se le escapa, medido con datos que no hemos e
 - **Recall (por solapamiento):** de los datos de un tipo, cuántos quedan emparejados con una detección de ese mismo tipo que los toca (cada detección se empareja con un solo dato).
 - **F1 estricto:** igual, pero exigiendo el mismo principio y fin exactos, como en la evaluación oficial de MEDDOCAN.
 - **Detecciones sin equivalente en el dataset:** tipos que Antifaz detecta y el dataset no anota con una etiqueta propia; se muestran para que sus falsos positivos no queden ocultos.
-- **Tipos aún no cubiertos:** datos que Antifaz todavía no busca (nombres, lugares, hospitales, fechas de consulta…). La mayoría llegan con el NER (issue 6). Se publican igual, y cuentan en la cifra global.
+- **Tipos aún no cubiertos:** datos que Antifaz todavía no busca (nombres, lugares, hospitales, fechas de consulta…). El NER (nombres y direcciones) existe, es opcional y viene apagado: la tabla principal es sin NER y la sección "Resultados con NER" lo mide encendido. Se publican igual, y cuentan en la cifra global.
 
 ## Datos y entorno
 
@@ -42,8 +42,8 @@ Precisión del mismo tipo: la detección se solapa con un dato anotado de su tip
 
 ## Tipos aún no cubiertos
 
-Antifaz todavía no busca estos datos (la mayoría necesitan NER, issue 6). Se miden
-igual: sus fugas cuentan en la cifra global.
+Antifaz no busca estos datos con esta configuración (el NER existe, es opcional y
+viene apagado). Se miden igual: sus fugas cuentan en la cifra global.
 
 | Tipo en el dataset | Datos | Fugas por cada 100 |
 |---|---|---|
@@ -134,8 +134,8 @@ Precisión del mismo tipo: la detección se solapa con un dato anotado de su tip
 
 ## Tipos aún no cubiertos
 
-Antifaz todavía no busca estos datos (la mayoría necesitan NER, issue 6). Se miden
-igual: sus fugas cuentan en la cifra global.
+Antifaz no busca estos datos con esta configuración (el NER existe, es opcional y
+viene apagado). Se miden igual: sus fugas cuentan en la cifra global.
 
 | Tipo en el dataset | Datos | Fugas por cada 100 |
 |---|---|---|
@@ -197,6 +197,9 @@ Ningún umbral llega al suelo: se usa el más preciso, **0.6** (el de mayor prec
 | Latencia p50 / p95 por documento | 3.39 ms / 6.59 ms | 2444 ms / 4755 ms (caché fría) |
 | Latencia p50 / p95 con la caché caliente | — | 2.92 ms / 5.97 ms |
 | Memoria del proceso del NER (RSS) | — | 590 MB |
+| Arranque del pool (SHA-256 del modelo y carga) | — | — |
+
+La caché fría no es fría del todo en un documento: antes de medir, la evaluación pasa el primero una vez sin cronometrar (calentamiento), así que 1 de las 250 medidas ya sale de la caché.
 
 Modelo `urchade/gliner_multi_pii-v1` en el commit `1fcf13e85f4e`, manifiesto SHA-256 `cbdd812389ca`.
 
@@ -224,8 +227,8 @@ Precisión del mismo tipo: la detección se solapa con un dato anotado de su tip
 
 ### Con NER · Tipos aún no cubiertos
 
-Antifaz todavía no busca estos datos (la mayoría necesitan NER, issue 6). Se miden
-igual: sus fugas cuentan en la cifra global.
+Antifaz no busca estos datos con esta configuración (el NER existe, es opcional y
+viene apagado). Se miden igual: sus fugas cuentan en la cifra global.
 
 | Tipo en el dataset | Datos | Fugas por cada 100 |
 |---|---|---|

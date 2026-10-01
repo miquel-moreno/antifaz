@@ -319,8 +319,8 @@ def render_markdown(report: Report) -> str:
         "",
         "## Tipos aún no cubiertos",
         "",
-        "Antifaz todavía no busca estos datos (la mayoría necesitan NER, issue 6). Se miden",
-        "igual: sus fugas cuentan en la cifra global.",
+        "Antifaz no busca estos datos con esta configuración (el NER existe, es opcional y",
+        "viene apagado). Se miden igual: sus fugas cuentan en la cifra global.",
         "",
         "| Tipo en el dataset | Datos | Fugas por cada 100 |",
         "|---|---|---|",
@@ -692,6 +692,7 @@ def render_ner_markdown(report: Report, base: Report) -> str:
     ]
     names = ("NOMBRE_SUJETO_ASISTENCIA", "NOMBRE_PERSONAL_SANITARIO")
     rss = ner.get("worker_rss_mb")
+    load = ner.get("load_seconds")
     if ner.get("floor_met") is False:
         chosen = [
             "",
@@ -734,6 +735,12 @@ def render_ner_markdown(report: Report, base: Report) -> str:
         f"{float(warm.get('p95', 0)):.2f} ms |",
         f"| Memoria del proceso del NER (RSS) | — | "
         f"{f'{rss:.0f} MB' if isinstance(rss, int | float) else '—'} |",
+        f"| Arranque del pool (SHA-256 del modelo y carga) | — | "
+        f"{f'{load:.0f} s' if isinstance(load, int | float) else '—'} |",
+        "",
+        "La caché fría no es fría del todo en un documento: antes de medir, la evaluación "
+        "pasa el primero una vez sin cronometrar (calentamiento), así que 1 de las "
+        f"{report.documents} medidas ya sale de la caché.",
         "",
         f"Modelo `{ner.get('model')}` en el commit `{str(ner.get('revision'))[:12]}`, "
         f"manifiesto SHA-256 `{str(ner.get('manifest_sha256'))[:12]}`.",
@@ -817,7 +824,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Set ANTIFAZ_NER_MODEL_DIR (make ner-model downloads the model).", file=sys.stderr
             )
             return 2
+        opening = time.perf_counter()
         pool, manifest = _open_ner(model_dir, args.threads)
+        # Start of the pool: both SHA-256 checks of the model files and the model load.
+        load_seconds = round(time.perf_counter() - opening, 1)
         try:
             rows = dev_selection(meddocan.load_dev(archive), pool, model_id=manifest.digest)
             dev_document = {
@@ -859,6 +869,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "selection_split": "MEDDOCAN dev",
             "latency_warm_ms": warm,
             "worker_rss_mb": rss[0] if rss else None,
+            "load_seconds": load_seconds,
             **_model_info(manifest, args.threads),
         }
     if report is None or synthetic is None:  # only --dev-only gets here without them
