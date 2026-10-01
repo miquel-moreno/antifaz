@@ -192,7 +192,9 @@ Errores:
 | El proveedor tarda más de `ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS` | 504 `upstream_timeout` |
 | No se puede conectar | 502 `upstream_unavailable` |
 | El proveedor responde con una redirección (3xx) | 502 `upstream_redirect` (no se sigue) |
-| El proveedor responde con error (4xx/5xx) | Su cuerpo **tal cual**: solo vio texto enmascarado, así que puede mostrar marcadores `[[TIPO_N]]` |
+| El proveedor responde con error (4xx/5xx) en JSON | Su cuerpo **tal cual**, como `application/json`: solo vio texto enmascarado, así que puede mostrar marcadores `[[TIPO_N]]` |
+| El proveedor responde con error que no es JSON (una página HTML) | 502 `bad_upstream_response` |
+| Ruta que no existe / método que la ruta no tiene (con clave) | 404 `not_found` / 405 `method_not_allowed`, mensaje fijo |
 
 Ningún log escribe cuerpos, cabeceras ni claves; `httpx` y `httpcore` quedan en `WARNING`. Un test (invariante 8) pasa un DNI centinela por respuestas, errores del proveedor, tiempos agotados y bloqueos de la guardia, con todos los loggers en `DEBUG`, y comprueba que no aparece ni en los logs ni en los cuerpos de error. Otro (invariante 2) quita la guardia **solo en el test** y comprueba que el proveedor falso no recibe ningún valor oculto, tampoco en argumentos ni resultados de herramientas.
 
@@ -382,11 +384,12 @@ Un `uv sync` sin `--extra ner` (por ejemplo `make install`) desinstala el extra.
 | No | `ANTIFAZ_OPENAI_BASE_URL` + `/models` | `Authorization: Bearer` de `.env` | ninguno |
 
 - Si el proveedor elegido no tiene clave → 503 `not_configured` (el otro sigue funcionando). `anthropic-beta` sola no cambia de proveedor.
-- Consulta con **lista de permitidos**: un nombre que no está en la lista, repetido, en mayúsculas, vacío o con otros caracteres (`/`, `&` codificado, `%0d%0a`, espacios, `@`…) → 400 `invalid_query`, y no sale nada. La consulta que se envía se **reconstruye** con los valores ya comprobados. Un valor que contiene una clave configurada también → 400.
+- Consulta con **lista de permitidos**: un nombre que no está en la lista, repetido, en mayúsculas, vacío o con otros caracteres (`/`, `&` codificado, `%0d%0a`, espacios, `@`…) → 400 `invalid_query`, y no sale nada. La consulta que se envía se **reconstruye** con los valores ya comprobados. Un valor que contiene una clave configurada también → 400, y lo mismo si la clave llega **partida** entre varios valores (en cualquier orden) o aparece en la consulta reconstruida.
 - Los valores de la consulta pasan por el **detector** (en el mismo hilo limitado que el proxy, con el NER si está activo): un id no se puede enmascarar, así que un dato personal (un DNI como `after_id`) → 400 `antifaz_blocked`. No se envía cuerpo, así que no hay bytes que revisar con la guardia de salida.
-- Cabeceras: `anthropic-version` y `anthropic-beta` con la misma regla que en `/v1/messages` (letras, dígitos, `. _ - ,`, hasta 200); repetidas → 400 `invalid_header` (desde este issue, también en `/v1/messages`). Ninguna otra cabecera del cliente llega al proveedor.
-- Respuesta: si es un error del proveedor (4xx/5xx), su cuerpo tal cual; si es de éxito, tiene que ser un objeto JSON (si no → 502 `bad_upstream_response`). En los dos casos se descarta con 502 si repite una clave configurada, también escrita con escapes JSON (invariante 13). Una redirección → 502 `upstream_redirect`. No se reenvía ninguna cabecera del proveedor.
-- Es un `GET`: la puerta no le pide `Content-Type`. `HEAD`, `POST` u otros métodos → 405 (con clave).
+- Cabeceras: `anthropic-version` y `anthropic-beta` con la misma regla que en `/v1/messages` (letras, dígitos, `. _ - ,`, hasta 200); repetidas, o con una clave configurada dentro (también partida entre las dos) → 400 `invalid_header` (desde este issue, también en `/v1/messages` y `count_tokens`). Ninguna otra cabecera del cliente llega al proveedor.
+- Respuesta: si es un error del proveedor (4xx/5xx), su cuerpo tal cual si es JSON (si no → 502); si es de éxito, tiene que ser un objeto JSON (si no → 502 `bad_upstream_response`). En los dos casos se descarta con 502 si repite una clave configurada, también escrita con escapes JSON (invariante 13). Una redirección → 502 `upstream_redirect`. No se reenvía ninguna cabecera del proveedor.
+- Es un `GET`: la puerta no le pide `Content-Type`. `HEAD`, `POST` u otros métodos → 405 `method_not_allowed` (con clave).
+- Todas las respuestas de la pasarela llevan `X-Content-Type-Options: nosniff`: el navegador nunca interpreta un cuerpo como HTML.
 
 **`POST /antifaz/scan`** dice **dónde** hay datos personales en un texto, nunca cuáles son:
 
@@ -404,7 +407,7 @@ curl http://localhost:8000/antifaz/scan -H "Authorization: Bearer $ANTIFAZ_API_K
 
 **`docs/openapi.json`**: la pasarela sigue sin servir `/docs`, `/redoc` ni `/openapi.json` (ADR-0015; un test lo comprueba también con la clave). El esquema se publica como archivo estático, generado desde la propia app con `make openapi` (`scripts/export_openapi.py`, con una clave aleatoria que se tira: el esquema no lleva ninguna configuración). Un test compara el archivo del repo con el generado, así que nunca se queda atrás: si cambias una ruta, ejecuta `make openapi` y súbelo.
 
-**Tests.** Las dos rutas entran solas en el test de la invariante 12 (recorre las rutas registradas). Además, cada ruta con clave tiene que estar en una de tres clases: envía un cuerpo al proveedor (pasa por la guardia), solo envía una consulta (que pasa por el detector) o no llama a ningún proveedor; una ruta nueva sin clasificar hace fallar el test. La invariante 13 tiene escenarios canario propios para las dos (consulta con la clave, cabeceras, errores y respuestas del proveedor con la clave, detector roto). Los ataques están en `tests/redteam/test_models_and_scan.py` y la prueba con los SDK oficiales (`models.list()`) en `tests/contract/`.
+**Tests.** Las dos rutas entran solas en el test de la invariante 12 (recorre las rutas registradas). Además, cada ruta con clave, por pareja (ruta, método), tiene que estar en una de tres clases: envía un cuerpo al proveedor (pasa por la guardia), solo envía una consulta (que pasa por el detector) o no llama a ningún proveedor; una ruta nueva sin clasificar hace fallar el test. La invariante 13 tiene escenarios canario propios para las dos (consulta con la clave, cabeceras, errores y respuestas del proveedor con la clave, detector roto). Los ataques están en `tests/redteam/test_models_and_scan.py` y la prueba con los SDK oficiales (`models.list()`) en `tests/contract/`.
 
 ## La puerta cerrada por defecto (issue 20)
 
@@ -492,7 +495,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - El tamaño de la respuesta del proveedor no tiene tope en v0.1.
 - `Bearer` en la cabecera `Authorization` distingue mayúsculas: `bearer` se rechaza.
 - Un objeto con dos claves que solo cambian en mayúsculas se rechaza con 400 si es una clave que Antifaz lee (`content` y `Content`); las demás (`id` e `ID` en un esquema) pasan (ADR-0015).
-- Si el proveedor devuelve la clave recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), ese fragmento llega al cliente: solo se detecta la clave completa.
+- Los errores del proveedor en JSON se devuelven tal cual. En sus respuestas solo se detecta la clave **completa**, tal cual o con escapes JSON (`\u0061`). Si la devuelve recortada (por ejemplo `sk-...abcd` en su error de clave incorrecta), en base64, en UTF-16 o de otra forma codificada, llega al cliente (test `xfail` estricto en `tests/redteam/test_models_and_scan.py`).
 - La pasarela no se puede usar desde una web pública: no hay CORS.
 - En `tools`, `functions`, `response_format` y `tool_choice` (esquemas del desarrollador) no se aplica la lista de tipos permitidos; sus textos sí se enmascaran.
 - Los nombres de persona solo se detectan con el NER, que está apagado por defecto: sin él pasan en claro. Con él, cerca del 30 % de las detecciones de nombres tapan texto que no es personal (no cumple el suelo del 85 %; ver "NER con el modelo real").
