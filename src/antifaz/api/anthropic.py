@@ -20,9 +20,10 @@ import anyio.to_thread
 import httpx
 from fastapi import APIRouter, Request, Response
 
-from antifaz.api.errors import InvalidHeaderError, NotConfiguredError
+from antifaz.api.errors import PROXY_ERRORS, InvalidHeaderError, NotConfiguredError, json_body
 from antifaz.api.proxy import (
     answer_json,
+    client_values_hold_a_key,
     configured_keys,
     is_event_stream,
     passthrough,
@@ -46,17 +47,27 @@ _HEADER_VALUE = re.compile(r"[A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*")
 _MAX_HEADER_LENGTH = 200
 
 
-def _headers(request: Request, settings: Settings) -> dict[str, str]:
-    if settings.anthropic_api_key is None:  # pragma: no cover - checked in _prepare
+def anthropic_headers(request: Request, settings: Settings) -> dict[str, str]:
+    """The provider key from settings plus the checked anthropic-version and anthropic-beta.
+
+    A repeated header is refused: the gateway and the provider could read different copies.
+    So is a value holding a configured key, also split between the two headers (it would reach
+    the provider). Raises NotConfiguredError without the Anthropic key.
+    """
+    if settings.anthropic_api_key is None:
         raise NotConfiguredError()
     headers = {"x-api-key": settings.anthropic_api_key.get_secret_value()}
     for name in FORWARDED_HEADERS:
-        value = request.headers.get(name)
-        if value is None:
+        values = request.headers.getlist(name)
+        if not values:
             continue
-        if len(value) > _MAX_HEADER_LENGTH or not _HEADER_VALUE.fullmatch(value):
+        value = values[0]
+        if len(values) > 1 or len(value) > _MAX_HEADER_LENGTH or not _HEADER_VALUE.fullmatch(value):
             raise InvalidHeaderError()
         headers[name] = value
+    forwarded = [headers[name] for name in FORWARDED_HEADERS if name in headers]
+    if client_values_hold_a_key(forwarded, configured_keys(settings)):
+        raise InvalidHeaderError()
     return headers
 
 
@@ -74,9 +85,7 @@ async def _prepare(request: Request, path: str, *, can_stream: bool) -> _Call:
     """Headers, body and mask, for `path` of the configured Anthropic URL."""
     state = request.app.state
     settings: Settings = state.settings
-    if settings.anthropic_api_key is None:
-        raise NotConfiguredError()
-    headers = _headers(request, settings)
+    headers = anthropic_headers(request, settings)
     body: dict[str, Any] = await read_json(request, settings.max_body_bytes)
     if can_stream:
         stream = stream_requested(body)
@@ -99,8 +108,13 @@ async def _send(request: Request, call: _Call) -> httpx.Response:
     )
 
 
-@router.post("/v1/messages")
+@router.post(
+    "/v1/messages",
+    responses=PROXY_ERRORS,
+    openapi_extra=json_body("An Anthropic Messages request"),
+)
 async def messages(request: Request) -> Response:
+    """Anthropic Messages with the personal data masked, and the answer restored."""
     call = await _prepare(request, "/v1/messages", can_stream=True)
     upstream = await _send(request, call)
     if upstream.status_code >= 400:
@@ -113,8 +127,13 @@ async def messages(request: Request) -> Response:
     )
 
 
-@router.post("/v1/messages/count_tokens")
+@router.post(
+    "/v1/messages/count_tokens",
+    responses=PROXY_ERRORS,
+    openapi_extra=json_body("An Anthropic Messages request, without stream"),
+)
 async def count_tokens(request: Request) -> Response:
-    # The answer only has numbers (input_tokens): returned as it is. It never streams.
+    """Anthropic token count of the masked request. It never streams."""
+    # The answer only has numbers (input_tokens): returned as it is.
     call = await _prepare(request, "/v1/messages/count_tokens", can_stream=False)
     return passthrough(await _send(request, call))

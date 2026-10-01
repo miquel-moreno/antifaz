@@ -15,7 +15,12 @@ from typing import Any
 import anyio.to_thread
 from fastapi import APIRouter, Request, Response
 
-from antifaz.api.errors import InvalidStreamOptionsError, NotConfiguredError
+from antifaz.api.errors import (
+    PROXY_ERRORS,
+    InvalidStreamOptionsError,
+    NotConfiguredError,
+    json_body,
+)
 from antifaz.api.proxy import (
     answer_json,
     configured_keys,
@@ -47,8 +52,13 @@ def _check_stream_options(body: dict[str, Any]) -> None:
         raise InvalidStreamOptionsError()
 
 
-@router.post("/v1/chat/completions")
+@router.post(
+    "/v1/chat/completions",
+    responses=PROXY_ERRORS,
+    openapi_extra=json_body("An OpenAI Chat Completions request"),
+)
 async def chat_completions(request: Request) -> Response:
+    """OpenAI Chat Completions with the personal data masked, and the answer restored."""
     state = request.app.state
     settings: Settings = state.settings
     if settings.openai_api_key is None:

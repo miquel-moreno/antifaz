@@ -44,6 +44,13 @@ La librería (`mask`, `restore`, `guard.check`) trabaja con textos. La pasarela 
 - Los errores propios llevan mensajes fijos (sin valores ni cuerpo) y se lanzan `from None`. Tiempo agotado → 504; fallo de conexión → 502.
 - Nunca se escriben en logs cuerpos, cabeceras ni claves. Los loggers de `httpx` y `httpcore` quedan en `WARNING` (invariante 8).
 
+**Enmienda del 2026-10-01 (issue 29) · Aceptada (aprobada por Miquel Moreno el 2026-10-01).**
+
+- `GET /v1/models` es la misma ruta para el SDK de OpenAI (`{base}/models`) y el de Anthropic (`/v1/models`). La cabecera `anthropic-version` elige el proveedor: con ella, Anthropic; sin ella, OpenAI. Si ese proveedor no tiene clave → 503. `anthropic-beta` sola no cambia de proveedor.
+- La consulta va por **lista de permitidos**: ninguna para OpenAI; `limit` (1–1000), `after_id` y `before_id` (letras, dígitos, `. _ : -`) para Anthropic, cada una una vez. Se reconstruye con los valores ya comprobados. Sus valores pasan por el detector: un dato personal bloquea, porque un id no se puede enmascarar. No hay cuerpo, así que no hay bytes para la guardia.
+- Un valor que el cliente reenvía (la consulta, `anthropic-version`, `anthropic-beta`) que contiene una clave configurada, entera o partida entre varios valores en cualquier orden → 400.
+- Los errores del proveedor se devuelven tal cual **solo si son JSON**, siempre como `application/json`; otro cuerpo (una página HTML) → 502 fijo. Todas las respuestas llevan `X-Content-Type-Options: nosniff`.
+
 ## Alternativas descartadas
 
 - **Parser JSON incremental** para emitir los argumentos de herramientas restaurados trozo a trozo: más código delicado en la pieza más sensible y difícil de probar. Acumular por índice es simple y siempre da JSON válido.

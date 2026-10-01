@@ -20,6 +20,7 @@ class HealthResponse(BaseModel):
 
 @router.get("/healthz", response_model_exclude_none=True)
 async def healthz(request: Request) -> HealthResponse:
+    """Public (no key): the version and, with the NER on, the state of its workers."""
     ner = getattr(request.app.state, "ner", None)
     return HealthResponse(
         status="ok", version=__version__, ner=ner.status() if ner is not None else None

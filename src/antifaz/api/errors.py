@@ -3,6 +3,8 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from antifaz.errors import AntifazBlocked
 
@@ -69,6 +71,23 @@ class InvalidHeaderError(AppError):
         super().__init__(
             "anthropic-version and anthropic-beta only accept letters, digits, . _ - ,"
         )
+
+
+class InvalidQueryError(AppError):
+    code = "invalid_query"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "query parameters: none for OpenAI; for Anthropic only limit (1-1000), after_id and "
+            "before_id (letters, digits, . _ : -), each at most once"
+        )
+
+
+class InvalidScanBodyError(AppError):
+    code = "invalid_request"
+
+    def __init__(self) -> None:
+        super().__init__('the body must be a JSON object with only "text", a string')
 
 
 class PayloadTooLargeError(AppError):
@@ -138,6 +157,44 @@ def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
 
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    """Every error of Antifaz itself: a stable code and a fixed message (OpenAPI only)."""
+
+    error: ErrorDetail
+
+
+_STATUS_TEXT = {
+    400: "Invalid request, or blocked to protect personal data (`antifaz_blocked`)",
+    401: "Missing or invalid Antifaz key",
+    403: "Request from a browser origin that is not allowed",
+    413: "Body too large",
+    415: "Content-Type is not application/json (UTF-8)",
+    502: "The provider could not be reached, redirected or answered with a key",
+    503: "The gateway has no key for this provider",
+    504: "The provider did not answer in time",
+}
+
+
+def json_body(description: str) -> dict[str, object]:
+    """`openapi_extra` for a route that reads its JSON body itself (the proxy's own rules)."""
+    schema = {"type": "object", "description": description}
+    return {"requestBody": {"required": True, "content": {"application/json": {"schema": schema}}}}
+
+
+def error_responses(*statuses: int) -> dict[int | str, dict[str, object]]:
+    """The `responses` of a route in the OpenAPI file, for its own errors."""
+    return {s: {"model": ErrorBody, "description": _STATUS_TEXT[s]} for s in statuses}
+
+
+# The errors of the routes that send a body to a provider.
+PROXY_ERRORS = error_responses(400, 401, 403, 413, 415, 502, 503, 504)
+
+
 async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):  # pragma: no cover - registered only for AppError
         raise exc
@@ -174,7 +231,24 @@ async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content=error_body("invalid_request", message))
 
 
+# The router's own errors, with fixed messages (FastAPI's default is {"detail": ...}).
+_HTTP_ERRORS = {
+    404: ("not_found", "no such route"),
+    405: ("method_not_allowed", "method not allowed on this route"),
+}
+
+
+async def _http_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, StarletteHTTPException):  # pragma: no cover - registered only for it
+        raise exc
+    code, message = _HTTP_ERRORS.get(exc.status_code, ("http_error", "request not accepted"))
+    return JSONResponse(
+        status_code=exc.status_code, content=error_body(code, message), headers=exc.headers
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _app_error_handler)
+    app.add_exception_handler(StarletteHTTPException, _http_error_handler)
     app.add_exception_handler(AntifazBlocked, _blocked_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)

@@ -43,6 +43,29 @@ def raiser(error: type[httpx.HTTPError]) -> Handler:
     return handler
 
 
+def models_list(request: httpx.Request) -> httpx.Response:
+    """GET .../models: an Anthropic list if the request carries anthropic-version, else OpenAI."""
+    if "anthropic-version" in request.headers:
+        model = {
+            "type": "model",
+            "id": "claude-x",
+            "display_name": "Claude X",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        body: dict[str, Any] = {
+            "data": [model],
+            "has_more": False,
+            "first_id": "claude-x",
+            "last_id": "claude-x",
+        }
+    else:
+        body = {
+            "object": "list",
+            "data": [{"id": "gpt-x", "object": "model", "created": 0, "owned_by": "system"}],
+        }
+    return httpx.Response(200, json=body)
+
+
 def misses_repeats(text: str) -> Sequence[Span]:
     """A detector that only reports the first appearance: the guard must catch the rest."""
     return scan(text)[:1]
