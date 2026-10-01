@@ -10,6 +10,10 @@ checked. CI does not install the `ner` extra (torch is large): for a package of 
 not installed, the license recorded by hand in RECORDED_EXTRA (read from its metadata with the
 extra installed) is used, and a test checks that record against the metadata when it is there.
 
+The `bench` dependency group (Presidio and spaCy for the Antifaz-Bench baseline) is never
+shipped, but it is checked too, with the same rule (nothing forbidden, nothing unknown): its
+packages are recorded by hand in RECORDED_BENCH for CI, where the group is not installed.
+
     uv run python -m scripts.check_licenses
 """
 
@@ -63,6 +67,35 @@ RECORDED_EXTRA: dict[str, str] = {
     "typer": "MIT",
 }
 
+# Packages that only the `bench` dependency group brings (not shipped), with the license their
+# metadata states (read on 2026-10-01 from the versions in uv.lock, the group installed).
+RECORDED_BENCH: dict[str, str] = {
+    "blis": "BSD",
+    "catalogue": "MIT",
+    "charset-normalizer": "MIT",
+    "cloudpathlib": "MIT License",
+    "confection": "MIT",
+    "cymem": "MIT",
+    "murmurhash": "MIT",
+    "phonenumbers": "Apache-2.0",
+    "preshed": "MIT",
+    "presidio-analyzer": "MIT",
+    "requests": "Apache-2.0",
+    "requests-file": "Apache 2.0",
+    "smart-open": "MIT License",
+    "spacy": "MIT",
+    "spacy-legacy": "MIT",
+    "spacy-loggers": "MIT",
+    "srsly": "MIT",
+    "thinc": "MIT",
+    "tldextract": "BSD-3-Clause",
+    "urllib3": "MIT",
+    "wasabi": "MIT",
+    "weasel": "MIT",
+    "wrapt": "BSD-2-Clause",
+    "xx-ent-wiki-sm": "MIT",
+}
+
 FORBIDDEN = re.compile(
     r"(?<!L)\bA?GPL|GNU (Affero )?General Public|SSPL|Server Side Public|BUSL|Business Source"
     r"|Non-?Commercial|\bCC[- ]BY[- ]NC|Commons Clause|Elastic License",
@@ -105,9 +138,10 @@ def license_texts(name: str) -> list[str]:
     try:
         meta = metadata.metadata(name)
     except metadata.PackageNotFoundError:
-        if name not in RECORDED_EXTRA:
+        recorded = RECORDED_EXTRA.get(name) or RECORDED_BENCH.get(name)
+        if recorded is None:
             raise
-        return [RECORDED_EXTRA[name]]  # a package of an extra that is not installed (CI)
+        return [recorded]  # a package of an extra or of the bench group not installed (CI)
     return metadata_texts(meta)
 
 
@@ -122,13 +156,21 @@ def metadata_texts(meta: metadata.PackageMetadata) -> list[str]:
 def runtime_dependencies(extras: bool = True) -> list[tuple[str, bool]]:
     """(name, only on some platforms) of the locked runtime dependencies (with every extra
     unless `extras` is False), from uv."""
+    return _exported(["--no-dev", *(["--all-extras"] if extras else [])])
+
+
+def bench_dependencies() -> list[tuple[str, bool]]:
+    """(name, only on some platforms) of the locked `bench` dependency group, from uv."""
+    return _exported(["--only-group", "bench"])
+
+
+def _exported(selection: list[str]) -> list[tuple[str, bool]]:
     exported = subprocess.run(  # noqa: S603 - fixed arguments, no user input
         [  # noqa: S607 - uv from PATH, fixed args
             "uv",
             "export",
             "--frozen",
-            "--no-dev",
-            *(["--all-extras"] if extras else []),
+            *selection,
             "--no-emit-project",
             "--no-hashes",
         ],
@@ -164,7 +206,12 @@ def main() -> int:
     text = LICENSES_DOC.read_text(encoding="utf-8") if LICENSES_DOC.exists() else ""
     documented = documented_packages(text)
     problems = []
-    for name, platform_specific in runtime_dependencies():
+    shipped = runtime_dependencies()
+    names = {name for name, _ in shipped}
+    bench = [(name, specific) for name, specific in bench_dependencies() if name not in names]
+    for number, (name, platform_specific) in enumerate([*shipped, *bench]):
+        if number == len(shipped):
+            print("\nbench dependency group (not shipped; same rule):")
         try:
             texts = license_texts(name)
         except metadata.PackageNotFoundError:

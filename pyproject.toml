@@ -44,9 +44,25 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
 ]
+# Only for the Presidio baseline of Antifaz-Bench (`make bench PRESIDIO=1`, ADR-0011): never
+# shipped, not installed by `uv sync` nor in CI. Exact versions so the comparison can be
+# repeated. The spaCy model is the multilingual xx_ent_wiki_sm (MIT), never the GPL-3.0
+# es_core_news_* (ADR-0003); it comes from its GitHub release, pinned by uv.lock's SHA-256.
+bench = [
+    "presidio-analyzer==2.2.364",
+    "spacy==3.8.16",
+    "xx-ent-wiki-sm==3.8.0",
+]
+
+[tool.uv]
+# presidio-analyzer wants numpy < 2.5 and the ner extra locks a newer one: two separate
+# resolutions, so the bench group never changes what the ner extra ships with. They are never
+# needed together (the Presidio baseline reads the NER results from evals/results/).
+conflicts = [[{ extra = "ner" }, { group = "bench" }]]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
+xx-ent-wiki-sm = { url = "https://github.com/explosion/spacy-models/releases/download/xx_ent_wiki_sm-3.8.0/xx_ent_wiki_sm-3.8.0-py3-none-any.whl" }
 
 # Only torch comes from here (explicit = true): every other package still comes from PyPI.
 [[tool.uv.index]]
@@ -89,6 +105,13 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["gliner", "gliner.*", "torch", "torch.*"]
 ignore_missing_imports = true
+
+# The `bench` group (Presidio baseline) is not installed in CI: evals/presidio_baseline.py imports
+# it only inside build_analyzer(). Skipped the same with or without it installed.
+[[tool.mypy.overrides]]
+module = ["presidio_analyzer", "presidio_analyzer.*", "tldextract", "tldextract.*", "spacy", "spacy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
