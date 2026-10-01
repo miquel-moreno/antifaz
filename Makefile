@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi
+.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -25,6 +25,7 @@ help:
 	@echo "           make bench DEV=1: only the NER threshold table on MEDDOCAN dev"
 	@echo "           make bench PRESIDIO=1: also Presidio on the shared types (bench group, ~51 MB once)"
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
+	@echo "demo       Regenerate docs/images/demo.gif from real commands (synthetic data, fake provider)"
 
 install:
 	uv sync
@@ -88,3 +89,9 @@ bench:
 ner-model:
 	uv sync --extra ner
 	uv run python -m scripts.download_ner_model
+
+# The README GIF (scripts/demo_gif.py): Antifaz and the fake provider of tests/e2e on ports 8000
+# and 9000, throwaway keys, synthetic data, never your .env. Pillow comes for this run only (it is
+# not a project dependency). ARGS=--text prints the captured session without drawing it.
+demo:
+	uv run --with pillow==12.3.0 python -m scripts.demo_gif $(ARGS)
