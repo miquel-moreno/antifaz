@@ -106,6 +106,12 @@ presidio-analyzer pide `numpy < 2.5` y el extra `ner` fija una versión más nue
 | tqdm | MPL-2.0 AND MIT | Barras de progreso que usan gliner y transformers (solo con el extra `ner`). Se usa sin modificar; MPL solo obliga a publicar cambios en sus propios archivos. |
 | python-stdnum | LGPL-2.1-or-later | Valida los identificadores de la UE y sirve de oráculo en los tests de DNI, NIE, CIF, CCC e IBAN (ADR-0005). Se usa sin modificar, como dependencia instalada aparte. |
 
+## La imagen de Docker (issue 7, parte 7a)
+
+La imagen lleva Antifaz y sus dependencias de ejecución (las mismas que comprueba `scripts/check_licenses.py`, sin el extra `ner`) sobre la imagen oficial `python:3.12-slim` (Debian 13 "trixie"). Esa base trae los paquetes del sistema de Debian, y algunos son **GPL** (por ejemplo bash, coreutils o apt). Van **sin modificar**, como programas separados que Antifaz no enlaza ni incluye en su código: es la "agregación" que permite la GPL, igual que en cualquier imagen basada en Debian. Su código fuente está en los repositorios de Debian, y el SBOM que genera la CI (CycloneDX, Syft) lista cada paquete con su licencia.
+
+**Pendiente de decidir por Miquel**: si esta excepción de la regla (que habla de "la librería y la imagen") basta así anotada, o si se prefiere una base sin paquetes GPL (por ejemplo una distroless), con más trabajo de mantenimiento.
+
 ## Modelos y datos
 
 ### Datos del benchmark (no se distribuyen)
