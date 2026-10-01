@@ -1,0 +1,71 @@
+name: I found a leak
+description: A piece of personal data that Antifaz did not detect and would send in clear
+labels: [leak, detection]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!CAUTION]
+        > **Never paste real data here: this issue is public.** No real names, IDs, IBANs,
+        > emails, phone numbers, addresses or messages, not even "just one". Write an invented
+        > example of the same shape. For identifiers with a check digit (DNI, NIE, NSS, IBAN…),
+        > generate a valid one with its algorithm (for example the DNI `12345678Z`).
+
+        **Is it a missed value or a vulnerability?**
+
+        - **Here (public issue):** a value that the detector does not find, so it would reach
+          the provider in clear. No detector is perfect, and the benchmark says how much slips
+          through; a missed value helps improve it.
+        - **Privately, not here** ([report a vulnerability](https://github.com/miquel-moreno/antifaz/security/advisories/new),
+          see SECURITY.md): anything that gets past the safety checks. For example: a value Antifaz
+          *did* detect still reaches the provider; a request that should be blocked (detector
+          failure, unknown field, image or file) goes through; the egress guard is bypassed;
+          an answer is restored with another request's or user's data; or a key leaks.
+  - type: checkboxes
+    id: synthetic
+    attributes:
+      label: Synthetic data only
+      options:
+        - label: Everything in this issue is invented. It contains no real personal data.
+          required: true
+  - type: input
+    id: type
+    attributes:
+      label: Type of data
+      description: For example DNI, NIE, IBAN, phone, address, person name.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Synthetic example
+      description: The smallest invented text where the value is not detected. Mark the value
+        that should have been found.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where
+      description: How you found it, for example `antifaz scan`, `POST /antifaz/scan`,
+        `POST /v1/chat/completions` (which field, such as a tool argument), `POST /v1/messages`,
+        streaming or not.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Antifaz version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: ner
+    attributes:
+      label: Optional NER (names and addresses)
+      options:
+        - "Off (default)"
+        - "On"
+        - "Not sure"
+    validations:
+      required: true

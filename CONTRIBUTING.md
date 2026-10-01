@@ -7,6 +7,8 @@ Thanks for helping. Antifaz handles personal data, so a few rules are stricter t
 - **Invented data only.** Never paste real names, IDs, IBANs or messages into issues,
   tests or examples. Generate valid-looking identifiers with their algorithm.
 - **Security problems go through `SECURITY.md`**, not public issues.
+- **A value Antifaz misses** goes in a public issue with the "I found a leak" template,
+  with invented data only.
 - **Every change keeps the privacy invariants green** (see `docs/TECNICO.md`): nothing the
   policy hides reaches a provider, and anything that fails while checking a request blocks it.
 - **Tests first.** New detectors come with tests that show what they find and what they

@@ -1,10 +1,12 @@
-name: Missed or wrong detection
-description: A piece of personal data that Antifaz misses, or text it flags by mistake
+name: Wrong detection
+description: Text that Antifaz flags by mistake, or flags with the wrong type
 labels: [detection]
 body:
   - type: markdown
     attributes:
-      value: Use invented data only. For identifiers, generate a valid one with its algorithm.
+      value: |
+        Use invented data only. For identifiers, generate a valid one with its algorithm.
+        A value that Antifaz **misses** goes in the "I found a leak" template instead.
   - type: input
     id: type
     attributes:

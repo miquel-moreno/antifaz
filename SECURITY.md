@@ -34,8 +34,9 @@ allow, or making it start without a safe key.
 ## Out of scope
 
 - **Data that the detector does not find.** No detector is perfect; the benchmark
-  (`docs/benchmark.md`) says how much slips through. Better detection is very welcome as a
-  normal issue or pull request.
+  (`docs/benchmark.md`) says how much slips through. Report it as a public issue with the
+  **"I found a leak"** template, with invented data only, or send a pull request. (A value
+  that Antifaz *did* detect and still reaches the provider is in scope: report it privately.)
 - **What the provider infers** from the text left unmasked (context, writing style).
 - **Someone who controls the server or its configuration**: they can read `.env`, change
   the policy or turn settings off. Antifaz does not protect the operator from themselves.
@@ -48,3 +49,13 @@ allow, or making it start without a safe key.
   `sk-...abcd`); the full key is never returned.
 - **Denial of service by volume** (many requests from many clients): v0.1 has size and time
   limits, but no rate limits yet.
+
+## Telemetry
+
+Antifaz sends nothing anywhere except to the providers you configure in `.env`
+(`ANTIFAZ_OPENAI_BASE_URL`, `ANTIFAZ_ANTHROPIC_BASE_URL`). It makes no other outbound
+connections: no analytics, no update checks, no crash reports. The Docker healthcheck only
+calls Antifaz itself on `127.0.0.1`. The optional NER runs offline (the Hugging Face libraries
+are set offline, telemetry off) from a model downloaded once with `make ner-model`, which is the
+only command that downloads it. If Antifaz ever sends anything else, it will be opt-in and
+documented here with the full list of fields.
