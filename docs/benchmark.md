@@ -84,7 +84,7 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 86.9 |
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
-| Latencia p50 / p95 por documento | 2.88 ms / 5.70 ms |
+| Latencia p50 / p95 por documento | 2.76 ms / 5.35 ms |
 <!-- bench:end -->
 
 ## Resultados en el conjunto sintético
@@ -160,7 +160,7 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 2220 |
 | Fugas por cada 100 (todos los tipos) | 0.0 |
 | Fugas por cada 100 (tipos cubiertos) | 0.0 |
-| Latencia p50 / p95 por documento | 0.33 ms / 0.49 ms |
+| Latencia p50 / p95 por documento | 0.30 ms / 0.41 ms |
 <!-- bench-synthetic:end -->
 
 ## Resultados con NER (MEDDOCAN)
@@ -273,5 +273,66 @@ tocan ningún dato anotado, son falsos positivos.
 <!-- bench-presidio:start -->
 ## Comparación con Presidio
 
-Se genera con `make bench PRESIDIO=1` (grupo de dependencias `bench`, que no se distribuye); el detalle irá en `evals/results/<fecha>-<versión>-presidio.json`. Todavía no se ha ejecutado.
+Mismo script, mismos datos (partición de test de MEDDOCAN) y mismas métricas que el resto de esta página. Solo se comparan los tipos que **cubren los dos** y que MEDDOCAN anota.
+
+### Configuración de Presidio
+
+- **Versiones:** presidio-analyzer 2.2.364, spaCy 3.8.16 y el modelo `xx_ent_wiki_sm` 3.8.0 (MIT, multilingüe, entrenado con WikiNER); SHA-256 de su rueda `6f3c4b853852…`, fijado en `uv.lock`.
+- **Idioma:** `es` en el motor NLP, en el registro de reconocedores y en el analizador. Si falta un reconocedor en español o alguna pieza no es española, el script se para en vez de seguir en inglés sin avisar.
+- **Reconocedores:** `EmailRecognizer`, `PhoneRecognizer`, `IbanRecognizer`, `CreditCardRecognizer`, `IpRecognizer`, `EsNifRecognizer`, `EsNieRecognizer`, `EsPassportRecognizer`, `SpacyRecognizer`. Teléfonos con región ES; tarjetas con las palabras de contexto en español de la configuración por defecto de Presidio; el de pasaporte español, que Presidio trae desactivado, activado.
+- **Umbral de puntuación:** 0.0 (el de Presidio por defecto): cuenta cada resultado.
+- **NER:** los ajustes de `spacy_multilingual.yaml` de Presidio (PER, LOC y ORG) con este modelo. Los modelos de spaCy en español (`es_core_news_*`) son GPL-3.0 y no se usan.
+- **Tipos de Presidio -> Antifaz:** EMAIL_ADDRESS -> EMAIL, PHONE_NUMBER -> PHONE, IBAN_CODE -> IBAN, CREDIT_CARD -> CREDIT_CARD, IP_ADDRESS -> IP, ES_NIF -> ES_DNI, ES_NIE -> ES_NIE, ES_PASSPORT -> ES_PASSPORT, PERSON -> PERSON. LOCATION y ORGANIZATION no tienen equivalente: no se comparan, pero tapan texto y cuentan para las fugas, como cualquier detección.
+- **Antifaz sin NER y Presidio:** medidos en esta ejecución (commit `bb6290b`). **Antifaz con NER:** `evals/results/2026-10-01-0.1.0-ner.json` (commit `fbc7dbc`; no se vuelve a ejecutar).
+
+### Tipos que cubren los dos
+
+| Tipo | Herramienta | Datos | Recall (solape) | Precisión (mismo tipo) | Precisión (cualquier dato personal) | F1 estricto | Fugas por cada 100 |
+|---|---|---|---|---|---|---|---|
+| EMAIL | Antifaz sin NER | 249 | 99.2 % | 99.2 % | 99.2 % | 99.2 % | 0.8 |
+| EMAIL | Antifaz con NER | 249 | 99.2 % | 99.2 % | 99.2 % | 99.2 % | 0.4 |
+| EMAIL | Presidio | 249 | 99.2 % | 99.2 % | 99.2 % | 99.2 % | 0.8 |
+| PHONE | Antifaz sin NER | 33 | 90.9 % | 76.9 % | 100.0 % | 83.3 % | 9.1 |
+| PHONE | Antifaz con NER | 33 | 90.9 % | 76.9 % | 100.0 % | 83.3 % | 9.1 |
+| PHONE | Presidio | 33 | 97.0 % | 82.1 % | 100.0 % | 83.3 % | 3.0 |
+| PERSON | Antifaz sin NER | 1003 | no aplica (no busca este tipo) | — | — | — | 100.0 |
+| PERSON | Antifaz con NER | 1003 | 98.6 % | 73.2 % | 75.2 % | 68.8 % | 2.5 |
+| PERSON | Presidio | 1003 | 84.6 % | 50.7 % | 73.0 % | 41.9 % | 7.8 |
+
+Datos de cada tipo en MEDDOCAN: EMAIL = CORREO_ELECTRONICO; PHONE = NUMERO_TELEFONO y NUMERO_FAX; PERSON = NOMBRE_SUJETO_ASISTENCIA y NOMBRE_PERSONAL_SANITARIO. Una fuga se evita con una detección de **cualquier** tipo de la misma herramienta (ADR-0011).
+
+### Tipos que cubren los dos y MEDDOCAN no anota
+
+No aplica: MEDDOCAN no tiene estos datos, así que no hay recall ni fugas que medir. Cada detección de estos tipos cae sobre otro texto; entre paréntesis, cuántas tocan un dato anotado de otra etiqueta.
+
+| Tipo | Antifaz sin NER: detecciones | Presidio: detecciones |
+|---|---|---|
+| IBAN | 0 (0) | 0 (0) |
+| CREDIT_CARD | 0 (0) | 0 (0) |
+| IP | 0 (0) | 0 (0) |
+| ES_DNI | 0 (0) | 0 (0) |
+| ES_NIE | 0 (0) | 0 (0) |
+| ES_PASSPORT | 0 (0) | 0 (0) |
+
+### Detecciones de Presidio sin tipo en Antifaz
+
+| Tipo de Presidio | Detecciones | Tocan un dato anotado |
+|---|---|---|
+| LOCATION | 2112 | 1298 |
+| ORGANIZATION | 1461 | 89 |
+
+### Latencia por documento (CPU)
+
+| Herramienta | p50 | p95 |
+|---|---|---|
+| Antifaz sin NER | 2.76 ms | 5.35 ms |
+| Antifaz con NER (caché fría) | 1947.30 ms | 3822.07 ms |
+| Presidio | 25.57 ms | 53.44 ms |
+
+### Límites
+
+- MEDDOCAN es texto clínico: tiene emails, teléfonos y nombres, pero ningún DNI, NIE, IBAN, tarjeta, pasaporte ni IP. Por eso la comparación se queda en tres tipos.
+- El NER de Presidio aquí es un modelo multilingüe pequeño de spaCy, entrenado con Wikipedia y no con texto clínico; un modelo de spaCy en español daría otras cifras, pero esos son GPL-3.0. El NER de Antifaz es otro modelo (GLiNER), opcional y apagado por defecto.
+- Las cifras miden esta configuración en este conjunto de datos, nada más.
+- La latencia de Antifaz con NER viene de otra ejecución (otro momento, misma máquina).
 <!-- bench-presidio:end -->
