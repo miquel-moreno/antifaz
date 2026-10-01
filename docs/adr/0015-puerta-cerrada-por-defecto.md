@@ -49,7 +49,7 @@ Las listas se leen separadas por comas o en JSON (`[ "a", "b" ]`, con espacios).
 - `X-Request-ID`: la pasarela **siempre** genera el suyo y no usa el del cliente, así nada que escriba el cliente llega a los logs ni a las cabeceras por ahí.
 - Si la respuesta del proveedor (de éxito o de error) repite alguna clave configurada, se descarta con un 502 fijo. Se busca en los bytes tal cual y en las cadenas y claves del JSON ya decodificado, así que una clave escrita con escapes (`a`, `\/`) también se detecta.
 
-**Enmienda del 2026-10-01 (issue 29) · Propuesta (la aprueba Miquel en el PR).**
+**Enmienda del 2026-10-01 (issue 29) · Aceptada (aprobada por Miquel Moreno el 2026-10-01).**
 
 - El esquema OpenAPI se publica como **archivo estático**, `docs/openapi.json`, generado desde la propia app con `make openapi`. Un test falla si el archivo del repo no coincide con el generado. La pasarela sigue sin servir `/docs`, `/redoc` ni `/openapi.json`: la documentación existe sin abrir ninguna ruta.
 - Los 404 y 405 del router usan el mismo formato de error que el resto (`not_found`, `method_not_allowed`), con mensaje fijo. El 405 no se documenta por operación en el OpenAPI (sería una respuesta de un método que la ruta no tiene); está en `docs/TECNICO.md`.
