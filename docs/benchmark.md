@@ -84,7 +84,7 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 86.9 |
 | Fugas por cada 100 (tipos cubiertos) | 50.3 |
-| Latencia p50 / p95 por documento | 3.39 ms / 6.59 ms |
+| Latencia p50 / p95 por documento | 2.88 ms / 5.70 ms |
 <!-- bench:end -->
 
 ## Resultados en el conjunto sintético
@@ -160,7 +160,7 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 2220 |
 | Fugas por cada 100 (todos los tipos) | 0.0 |
 | Fugas por cada 100 (tipos cubiertos) | 0.0 |
-| Latencia p50 / p95 por documento | 0.33 ms / 0.53 ms |
+| Latencia p50 / p95 por documento | 0.33 ms / 0.49 ms |
 <!-- bench-synthetic:end -->
 
 ## Resultados con NER (MEDDOCAN)
@@ -194,10 +194,10 @@ Ningún umbral llega al suelo: se usa el más preciso, **0.6** (el de mayor prec
 | Fugas por cada 100 en CALLE | 60.3 | 12.3 |
 | Precisión de PERSON: cualquier dato personal / mismo tipo / estricta | — | 75.2 % / 73.2 % / 60.0 % |
 | Detecciones de PERSON que tapan texto no personal | — | 335 |
-| Latencia p50 / p95 por documento | 3.39 ms / 6.59 ms | 2444 ms / 4755 ms (caché fría) |
-| Latencia p50 / p95 con la caché caliente | — | 2.92 ms / 5.97 ms |
-| Memoria del proceso del NER (RSS) | — | 590 MB |
-| Arranque del pool (SHA-256 del modelo y carga) | — | — |
+| Latencia p50 / p95 por documento | 2.88 ms / 5.70 ms | 1947 ms / 3822 ms (caché fría) |
+| Latencia p50 / p95 con la caché caliente | — | 2.86 ms / 5.56 ms |
+| Memoria del proceso del NER (RSS) | — | 743 MB |
+| Arranque del pool (SHA-256 del modelo y carga) | — | 51 s |
 
 La caché fría no es fría del todo en un documento: antes de medir, la evaluación pasa el primero una vez sin cronometrar (calentamiento), así que 1 de las 250 medidas ya sale de la caché.
 
@@ -267,5 +267,5 @@ tocan ningún dato anotado, son falsos positivos.
 | Datos personales anotados | 5661 |
 | Fugas por cada 100 (todos los tipos) | 61.6 |
 | Fugas por cada 100 (tipos cubiertos) | 14.5 |
-| Latencia p50 / p95 por documento | 2443.99 ms / 4755.33 ms |
+| Latencia p50 / p95 por documento | 1947.30 ms / 3822.07 ms |
 <!-- bench-ner:end -->

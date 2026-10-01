@@ -268,13 +268,13 @@
   "covered_leaks_per_100": 14.504219409282701
  },
  "latency_ms": {
-  "p50": 2443.9903999999997,
-  "p95": 4755.330190000001
+  "p50": 1947.2999,
+  "p95": 3822.06603
  },
  "environment": {
   "date": "2026-10-01",
   "antifaz": "0.1.0",
-  "commit": "a512df1",
+  "commit": "fbc7dbc",
   "python": "3.12.12",
   "os": "Windows-11-10.0.26200-SP0",
   "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
@@ -416,10 +416,11 @@
   ],
   "selection_split": "MEDDOCAN dev",
   "latency_warm_ms": {
-   "p50": 2.92185,
-   "p95": 5.96924
+   "p50": 2.86315,
+   "p95": 5.557860000000001
   },
-  "worker_rss_mb": 590.12109375,
+  "worker_rss_mb": 743.3984375,
+  "load_seconds": 50.6,
   "model": "urchade/gliner_multi_pii-v1",
   "revision": "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d",
   "manifest_sha256": "cbdd812389ca31317218dbc45018e37ab690f04482e979f8eada0ced7def52d1",
