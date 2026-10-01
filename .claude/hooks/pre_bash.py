@@ -19,6 +19,14 @@ ENV_MENTION = r"(^|[^\w.-])\.env(?![\w-]|\.example\b)"
 ENV_GLOB = r"(^|[^\w.-])\.e[\w]{0,2}[?*\[]"
 # git with global options before the subcommand: git -C dir push, git -c key=value commit
 GIT = r"\bgit(\s+-[Cc]\s+\S+)*\s+"
+# gitleaks as a command: also by path (C:\...\gitleaks.exe), after the PowerShell call
+# operator or as a Docker image (zricethezav/gitleaks:latest detect). `pre-commit run
+# gitleaks` and `git grep gitleaks` are not scans: no subcommand follows the word.
+GITLEAKS_WORD = r"(^|[\s;&|(/\\'\"])gitleaks(\.exe)?(:[\w.-]+)?['\"]?"
+GITLEAKS = rf"{GITLEAKS_WORD}\s+(-\S+\s+)*"
+GITLEAKS_SCAN = rf"{GITLEAKS}(detect|git|dir|directory|file|files|protect|stdin)\b"
+# Full redaction only: --redact or --redact=100 (--redact=20 shows most of the secret).
+FULL_REDACT = r"\s--redact(=100)?(?![=\w])"
 
 BLOCKED = [
     (ENV_MENTION, "Touching .env files is not allowed: secrets stay out of the session."),
@@ -52,6 +60,16 @@ BLOCKED = [
         "Changing global git config is not allowed; use -c user.name/-c user.email per commit.",
     ),
     (r"\brm\s+-[a-z]*r[a-z]*\s+(/|~|\$HOME)(\s|$)", "Dangerous delete blocked."),
+    (
+        rf"{GITLEAKS}(dir|directory|file|files)\b|{GITLEAKS_WORD}[^|;&]*\s--no-git\b",
+        "Scanning the working tree for secrets (gitleaks dir, --no-git) reads .env and can "
+        "print it. Scan only the git history: gitleaks detect --source . --no-banner --redact",
+    ),
+    (
+        r"\btrufflehog\b[^|;&]*\bfilesystem\b",
+        "trufflehog filesystem reads the working tree, .env included. Scan only the git "
+        "history: gitleaks detect --source . --no-banner --redact",
+    ),
 ]
 
 
@@ -60,6 +78,15 @@ def strip_messages(command: str) -> str:
     return re.sub(
         r"(\s(-m|--message|--title|--body|--notes)\s+)('[^']*'|\"[^\"]*\")", r"\1''", command
     )
+
+
+def unredacted_gitleaks(command: str) -> bool:
+    """True if some command in the line runs a gitleaks scan without full redaction."""
+    for part in re.split(r"[;&|\n]", command):
+        scan = re.search(GITLEAKS_SCAN, part, flags=re.IGNORECASE)
+        if scan and not re.search(FULL_REDACT, part, flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def main() -> int:
@@ -79,6 +106,13 @@ def main() -> int:
         if re.search(pattern, checked, flags=re.IGNORECASE):
             print(f"Blocked by .claude/hooks/pre_bash.py: {reason}", file=sys.stderr)
             return 2
+    if unredacted_gitleaks(checked):
+        print(
+            "Blocked by .claude/hooks/pre_bash.py: gitleaks without --redact prints the secrets "
+            "it finds into the session. Use: gitleaks detect --source . --no-banner --redact",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

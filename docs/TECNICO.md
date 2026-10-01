@@ -542,7 +542,7 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 | Cobertura ≥ 90 % en `detect`, `vault`, `mask`, `guard`, `restore`, `providers` y `api` (`scripts/check_coverage.py`) | Son las piezas de privacidad: un fallo ahí significa datos personales enviados |
 | CodeQL solo cuando el repo sea público | En repos privados necesita GitHub Advanced Security (de pago); mientras tanto el job se salta en lugar de fallar |
 | Manejador propio de errores 422 | El de FastAPI devuelve el cuerpo recibido, que podría llevar un DNI. El nuestro solo dice qué campo está mal |
-| Hooks de Claude Code con tests | Bloquean los casos comunes de leer `.env`, imprimir variables secretas, `--no-verify` y force push. Son **defensa en profundidad, no una barrera**: quien ejecuta código arbitrario puede saltárselos, y la revisión de privacidad encontró varios caminos (ver el modelo de amenazas). La barrera real es gitleaks en CI |
+| Hooks de Claude Code con tests | Bloquean los casos comunes de leer `.env`, imprimir variables secretas, `--no-verify`, force push y escanear secretos sin `--redact` o sobre el árbol de trabajo (`gitleaks dir`, `--no-git`, `trufflehog filesystem`). Son **defensa en profundidad, no una barrera**: quien ejecuta código arbitrario puede saltárselos, y la revisión de privacidad encontró varios caminos (ver el modelo de amenazas). La barrera real es gitleaks en CI |
 | `uv audit` también sobre las herramientas de desarrollo | A propósito: esas herramientas corren en la CI con acceso al código; una vulnerable también es un riesgo |
 | Errores 422 sin claves del cliente y con tamaño máximo | En la ubicación del error solo quedan la parte (`body`, `query`…) y los índices; las claves de un diccionario las elige el cliente y podrían ser un DNI |
 | `X-Request-ID` propio siempre (issue 20) | Se escribe en logs y cabeceras: el del cliente se ignora, porque hasta un valor corto y sin símbolos puede ser un DNI |
@@ -558,6 +558,27 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 | `CODEOWNERS` con líneas propias para `pyproject.toml`, `uv.lock`, `.github/` y `Dockerfile` | Son los archivos que cambian qué código se ejecuta en la CI o se distribuye |
 | Herramientas de la CI con versión exacta (uv 0.12.20, zizmor 1.30.1, acciones por SHA) | La misma entrada da siempre la misma herramienta; se actualizan a propósito |
 | Sin topes superiores (`<3`) en las dependencias de `pyproject.toml`; versiones exactas solo en `uv.lock` | Antifaz también es una librería: un tope impide a quien la instala recibir arreglos de seguridad y crea conflictos con otros paquetes. Lo reproducible es el `uv.lock`. Quitar `python-stdnum<3` no cambió ninguna versión bloqueada. `requires-python` mantiene `<3.13` porque la CI solo prueba 3.12 |
+
+## Telemetría
+
+Antifaz no envía nada a ningún sitio salvo a los proveedores configurados en `.env` (`ANTIFAZ_OPENAI_BASE_URL` y `ANTIFAZ_ANTHROPIC_BASE_URL`). La única conexión de salida de la pasarela es su cliente HTTP hacia esas URL; no hay analítica, ni comprobación de versiones, ni informes de errores. El healthcheck de Docker solo llama a la propia pasarela en `127.0.0.1`. El NER opcional funciona sin red: los procesos del pool ponen Hugging Face en modo offline y con su telemetría apagada (`HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_HUB_DISABLE_TELEMETRY`), y el modelo solo se descarga con `make ner-model`. Si algún día Antifaz envía algo más, será opcional y con la tabla de campos en `SECURITY.md`.
+
+## Demo del README (issue 7, parte 7b)
+
+`docs/images/demo.gif` se genera con `make demo` (`scripts/demo_gif.py`), con salidas reales y datos inventados (`scripts/demo/ticket.txt`: DNI `12345678Z`, email `ana.prueba@example.com`, IBAN `ES9121000418450200051332`):
+
+1. Arranca el proveedor falso de los tests de extremo a extremo (`tests/e2e/fake_upstream.py`) en `127.0.0.1:9000` y Antifaz con uvicorn en `127.0.0.1:8000`, con claves aleatorias que se tiran y desde una carpeta temporal vacía: **nunca lee tu `.env` ni llama a un proveedor real**. Necesita los puertos 8000 y 9000 libres.
+2. Ejecuta de verdad los comandos que salen en el GIF: `cat ticket.txt`, `antifaz scan`, `antifaz mask`, `python ask.py` (el SDK oficial de OpenAI con `base_url=http://localhost:8000/v1`) y `python provider_received.py` (lo que guardó el proveedor falso). Se para si un valor llega al proveedor falso, si no vuelve en la respuesta o si la clave aparece en alguna salida.
+3. Dibuja la sesión como fotogramas de terminal con Pillow (sin navegador) y guarda el GIF con una paleta fija (unos 100 KB). Solo colorea: los marcadores en ámbar y los valores en azul; el texto es el de la salida real, cortado a 92 columnas como lo haría una terminal.
+
+| Decisión | Por qué |
+|---|---|
+| Pillow en vez de grabar una página con Playwright | Pillow pesa unos MB y no necesita un navegador (Playwright y Chromium son cientos de MB). El resultado no depende de una grabación de pantalla |
+| Pillow fuera de las dependencias del proyecto | `make demo` lo trae solo para esa ejecución (`uv run --with pillow==12.3.0`): no entra en `uv.lock`, ni en la imagen, ni en la CI |
+| Uvicorn en local en vez de Docker | Más rápido y sin Docker; la imagen ya se prueba de extremo a extremo con `make e2e` |
+| Sin el NER | Es opcional y viene apagado. Por eso el ticket no lleva ningún nombre: sin el NER saldría en claro |
+
+`make demo ARGS=--text` solo imprime la sesión capturada, sin dibujar. La fuente es Consolas en Windows, DejaVu Sans Mono en Linux o Menlo en macOS, así que el GIF cambia un poco según el sistema.
 
 ## Limitaciones
 

@@ -60,6 +60,57 @@ def test_dangerous_commands_are_blocked(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        # The incident of 2026-10-01: a scan of the working tree printed .env values.
+        "gitleaks dir .",
+        "gitleaks dir . --redact",
+        "gitleaks directory --redact .",
+        "gitleaks -v dir .",
+        "gitleaks detect --source . --no-git --redact",
+        "gitleaks detect --no-git",
+        "trufflehog filesystem .",
+        "trufflehog --no-update filesystem --directory .",
+        # Any scan without full redaction.
+        "gitleaks detect --source . --no-banner",
+        "gitleaks git .",
+        "gitleaks protect --staged",
+        "gitleaks detect --source . --redact=20",
+        "gitleaks detect --redactx",
+        "/usr/local/bin/gitleaks detect",
+        "& 'C:\\Tools\\gitleaks.exe' detect --source .",
+        "docker run -v .:/repo zricethezav/gitleaks:latest detect --source /repo",
+        "cat x | gitleaks stdin",
+        "gitleaks detect --redact; gitleaks detect",
+        "cd repo && GITLEAKS.EXE detect --source .",
+    ],
+)
+def test_unsafe_secret_scans_are_blocked(command: str) -> None:
+    result = run_hook(json.dumps({"tool_input": {"command": command}}))
+
+    assert result.returncode == 2
+    assert "redact" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gitleaks detect --source . --no-banner --redact",
+        "gitleaks detect --redact=100 --source .",
+        "gitleaks git --redact --staged",
+        "gitleaks version",
+        "gitleaks help detect",
+        "pre-commit run gitleaks --all-files",
+        'git grep -n "gitleaks" -- Makefile',
+        "make secrets",
+        'git commit -m "ci: gitleaks dir is now blocked"',
+    ],
+)
+def test_redacted_history_scans_pass(command: str) -> None:
+    assert verdict(command) == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "cat .env.example",
         "uv run pytest -q",
         "git push -u origin feat/validators",

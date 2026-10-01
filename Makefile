@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi
+.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -14,7 +14,7 @@ help:
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
 	@echo "e2e        End-to-end: builds the image, runs Compose with a fake provider (needs Docker)"
-	@echo "secrets    Scan the repository for secrets (gitleaks)"
+	@echo "secrets    Scan the git history for secrets (gitleaks, redacted)"
 	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
 	@echo "audit      Known vulnerabilities in the locked dependencies (uv audit)"
@@ -25,6 +25,7 @@ help:
 	@echo "           make bench DEV=1: only the NER threshold table on MEDDOCAN dev"
 	@echo "           make bench PRESIDIO=1: also Presidio on the shared types (bench group, ~51 MB once)"
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
+	@echo "demo       Regenerate docs/images/demo.gif from real commands (synthetic data, fake provider)"
 
 install:
 	uv sync
@@ -58,8 +59,10 @@ contract:
 e2e:
 	uv run pytest tests/e2e --no-cov --e2e -p no:cacheprovider
 
+# Only the git history, never the working tree (gitleaks dir or --no-git would read .env),
+# and always --redact so a finding never prints the secret.
 secrets:
-	gitleaks detect --source . --no-banner
+	gitleaks detect --source . --no-banner --redact
 
 workflows:
 	$(ZIZMOR) .
@@ -88,3 +91,9 @@ bench:
 ner-model:
 	uv sync --extra ner
 	uv run python -m scripts.download_ner_model
+
+# The README GIF (scripts/demo_gif.py): Antifaz and the fake provider of tests/e2e on ports 8000
+# and 9000, throwaway keys, synthetic data, never your .env. Pillow comes for this run only (it is
+# not a project dependency). ARGS=--text prints the captured session without drawing it.
+demo:
+	uv run --with pillow==12.3.0 python -m scripts.demo_gif $(ARGS)

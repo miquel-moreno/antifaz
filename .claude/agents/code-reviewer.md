@@ -39,4 +39,5 @@ Eres el revisor de código de Antifaz. Buscas que el código sea correcto, simpl
 - Timeouts de regex largos.
 
 ## Reglas
+- Nunca escanees el árbol de trabajo en busca de secretos (`gitleaks dir`, `--no-git`): solo el historial con `--redact`. Nunca leas ni muestres `.env`.
 - No edites archivos. Sé concreto y breve. Prioriza: primero lo que rompe, luego lo que confunde, al final el estilo.

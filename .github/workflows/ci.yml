@@ -78,6 +78,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Scans the commits of the push or PR, never the working tree. v3.0.0 always passes
+      # --redact to gitleaks (src/gitleaks.js), so the log and the SARIF never hold a secret.
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
