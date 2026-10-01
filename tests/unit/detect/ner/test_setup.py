@@ -52,7 +52,8 @@ def model(tmp_path: Path) -> tuple[Path, Path]:
     return directory, manifest
 
 
-def test_ner_is_off_by_default() -> None:
+def test_ner_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTIFAZ_NER_MODEL_DIR", raising=False)  # set when the model tests run
     settings = _settings()
     assert settings.ner_enabled is False
     assert settings.ner_model_dir is None
@@ -101,7 +102,10 @@ def test_invalid_ner_settings_are_refused(values: dict[str, object]) -> None:
         _settings(**values)
 
 
-def test_enabled_without_a_model_directory_refuses_to_start() -> None:
+def test_enabled_without_a_model_directory_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ANTIFAZ_NER_MODEL_DIR", raising=False)  # set when the model tests run
     with pytest.raises(UnsafeConfigError, match="ANTIFAZ_NER_MODEL_DIR"):
         ner_from_settings(_settings(ner_enabled=True))
 

@@ -410,8 +410,9 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit() -> None:
 # --- 8. configuration --------------------------------------------------------------------------
 
 
-def test_ner_enabled_without_a_model_refuses_to_start() -> None:
+def test_ner_enabled_without_a_model_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """ANTIFAZ_NER_ENABLED=true sin modelo: la pasarela no arranca (nunca 'sin NER' en silencio)."""
+    monkeypatch.delenv("ANTIFAZ_NER_MODEL_DIR", raising=False)  # set when the model tests run
     settings = oai._settings(ner_enabled=True)
     with pytest.raises(UnsafeConfigError):
         ner_from_settings(settings)

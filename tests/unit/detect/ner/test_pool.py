@@ -147,6 +147,19 @@ def test_workers_write_nothing_the_text_holds(
 # --- Loading, circuit breaker and shutdown (review of 6a) --------------------------------------
 
 
+def _eventually(pool: NerPool, texts: list[str], within: float = 60.0) -> object:
+    """The first answer of `pool` within `within` seconds (a spawned worker can take a while
+    to start, above all on Windows); DetectorFailed if it never answers."""
+    ready_by = time.monotonic() + within
+    while True:
+        try:
+            return pool.predict(texts, ["person"], 0.5)
+        except DetectorFailed:
+            if time.monotonic() > ready_by:
+                raise
+            time.sleep(0.2)
+
+
 def test_a_request_waits_at_most_its_time_limit_for_a_reloading_worker(tmp_path: Path) -> None:
     delay = tmp_path / "load_seconds"  # read by the fake backend when a worker loads
     options = {**OPTIONS, "load_delay_file": str(delay)}
@@ -161,8 +174,18 @@ def test_a_request_waits_at_most_its_time_limit_for_a_reloading_worker(tmp_path:
             slow_reload.predict([CARMEN], ["person"], 0.5)
         assert time.monotonic() - began < 1.5  # never the 3 s of the load
         assert slow_reload.status() == "starting"
-        time.sleep(3.5)
-        assert slow_reload.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+        # The 3 s load plus starting a process (slow on Windows): wait until it is ready, with a
+        # generous deadline, instead of a fixed sleep. Every try still obeys its 0.5 s limit.
+        answer: object = None
+        ready_by = time.monotonic() + 60
+        while answer is None and time.monotonic() < ready_by:
+            tried = time.monotonic()
+            try:
+                answer = slow_reload.predict([CARMEN], ["person"], 0.5)
+            except DetectorFailed:
+                assert time.monotonic() - tried < 1.5
+                time.sleep(0.2)
+        assert answer == [_person(CARMEN)]
         assert slow_reload.status() == "ok"
     finally:
         slow_reload.close()
@@ -185,8 +208,8 @@ def test_repeated_failures_open_the_circuit_and_it_closes_after_the_backoff(
         with pytest.raises(DetectorFailed):
             breaker.predict([CARMEN], ["person"], 0.5)  # blocked at once: circuit open
         assert time.monotonic() - began < 0.2
-        time.sleep(1.6)
-        assert breaker.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+        time.sleep(1.6)  # past the backoff; the replacement worker may still be starting
+        assert _eventually(breaker, [CARMEN]) == [_person(CARMEN)]
         assert breaker.status() == "ok"
     finally:
         breaker.close()
