@@ -1,0 +1,360 @@
+{
+ "dataset": "synthetic-v1 (evals/datasets/synthetic-v1.jsonl)",
+ "documents": 600,
+ "by_source_label": {
+  "ADDRESS": {
+   "type": "ADDRESS",
+   "n": 240,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "CREDIT_CARD": {
+   "type": "CREDIT_CARD",
+   "n": 80,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "DATE_OF_BIRTH": {
+   "type": "DATE_OF_BIRTH",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "EMAIL": {
+   "type": "EMAIL",
+   "n": 420,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_CCC": {
+   "type": "ES_CCC",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_CIF": {
+   "type": "ES_CIF",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_DNI": {
+   "type": "ES_DNI",
+   "n": 400,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_NIE": {
+   "type": "ES_NIE",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_NIF": {
+   "type": "ES_NIF",
+   "n": 40,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_NSS": {
+   "type": "ES_NSS",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_PASSPORT": {
+   "type": "ES_PASSPORT",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "ES_PLATE": {
+   "type": "ES_PLATE",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "IBAN": {
+   "type": "IBAN",
+   "n": 120,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "IP": {
+   "type": "IP",
+   "n": 60,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  },
+  "PHONE": {
+   "type": "PHONE",
+   "n": 440,
+   "precision": null,
+   "recall": 1.0,
+   "f1": null,
+   "leaks": 0,
+   "leaks_per_100": 0.0
+  }
+ },
+ "by_type": {
+  "ADDRESS": {
+   "tp": 240,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "CREDIT_CARD": {
+   "tp": 80,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "DATE_OF_BIRTH": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "EMAIL": {
+   "tp": 420,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_CCC": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_CIF": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_DNI": {
+   "tp": 400,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_NIE": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_NIF": {
+   "tp": 40,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_NSS": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_PASSPORT": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "ES_PLATE": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "IBAN": {
+   "tp": 120,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "IP": {
+   "tp": 60,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  },
+  "PHONE": {
+   "tp": 440,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "strict_precision": 1.0,
+   "strict_recall": 1.0,
+   "strict_f1": 1.0,
+   "any_pii_precision": 1.0,
+   "non_pii_fp": 0
+  }
+ },
+ "overall": {
+  "total": 2220,
+  "leaked": 0,
+  "leaks_per_100": 0.0,
+  "covered_total": 2220,
+  "covered_leaked": 0,
+  "covered_leaks_per_100": 0.0
+ },
+ "latency_ms": {
+  "p50": 0.32594999999999996,
+  "p95": 0.53431
+ },
+ "environment": {
+  "date": "2026-10-01",
+  "antifaz": "0.1.0",
+  "commit": "a512df1",
+  "python": "3.12.12",
+  "os": "Windows-11-10.0.26200-SP0",
+  "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD"
+ },
+ "unmatched_types": {},
+ "ner": {}
+}
