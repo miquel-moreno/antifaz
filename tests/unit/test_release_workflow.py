@@ -126,3 +126,21 @@ def test_the_registry_login_uses_only_the_job_token() -> None:
     assert login["password"] == "${{ secrets.GITHUB_TOKEN }}"
     # No other stored secret anywhere in the workflow.
     assert set(re.findall(r"secrets\.(\w+)", RELEASE_TEXT)) == {"GITHUB_TOKEN"}
+
+
+def test_only_a_tag_on_main_is_published() -> None:
+    checkout = _step("actions/checkout")["with"]
+    # Full history (with origin/main) to check where the tagged commit comes from.
+    assert checkout["fetch-depth"] == 0
+    (check,) = [s for s in STEPS if "run" in s and "pyproject.toml" in s["run"]]
+    assert 'git merge-base --is-ancestor "${GITHUB_SHA}" origin/main' in check["run"]
+
+
+def test_the_changelog_section_is_matched_as_a_fixed_string() -> None:
+    (check,) = [s for s in STEPS if "run" in s and "pyproject.toml" in s["run"]]
+    assert 'grep -qF "## [${version}]" CHANGELOG.md' in check["run"]
+
+
+def test_annotations_go_on_the_manifest_and_the_index() -> None:
+    meta = _step("docker/metadata-action")
+    assert meta["env"]["DOCKER_METADATA_ANNOTATIONS_LEVELS"] == "manifest,index"

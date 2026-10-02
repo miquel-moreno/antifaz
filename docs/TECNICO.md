@@ -100,21 +100,30 @@ Estado real el 2026-10-01 (CI de la rama `feat/7a-docker`, Grype v0.118.0): desp
 
 ### Publicación (issue 7, parte 7c)
 
-La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, `.github/workflows/release.yml`, que **solo** arranca con un tag `vX.Y.Z`. Cómo va una release:
+La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, `.github/workflows/release.yml`, que **solo** arranca con un tag `vX.Y.Z`.
+
+**El primer tag, solo cuando el repo sea público.** En GitHub Free las atestaciones de procedencia necesitan un repo público: con el repo privado la imagen se subiría y el paso de la atestación fallaría, y quedaría una release a medias (imagen publicada sin procedencia). Antes del primer tag, en la configuración del repo (lo hace Miquel):
+
+- environment `release`: Miquel como revisor obligatorio (*required reviewers*), sin saltarse la protección como administrador (*allow administrators to bypass* desactivado) y con *prevent self-review* desactivado, porque hay un solo mantenedor y si no nadie podría aprobar;
+- un *ruleset* de tags que limite quién puede crear tags `v*`.
+
+Cómo va una release:
 
 1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas.
 2. **Miquel** crea y sube el tag (`git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`). Nadie más (ni un agente) crea tags.
 3. El job `publish-image` espera en el environment protegido `release`: solo lo pueden usar tags `v*` y, cuando el repo sea público, pide la aprobación manual de Miquel antes de recibir ningún permiso.
-4. Comprueba que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
+4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
 5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.
 6. Firma una atestación de procedencia SLSA con la identidad OIDC del job (Sigstore) y la sube junto a la imagen.
 
 Comprobar que una imagen salió de este repo y de este workflow:
 
 ```bash
-gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 --owner miquel-moreno
+gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \n  --repo miquel-moreno/antifaz \n  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
 docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{{ json .SBOM }}"
 ```
+
+`--repo` y `--signer-workflow` exigen que la firma sea de este repo **y** de `release.yml`, no de cualquier workflow de la cuenta.
 
 | Decisión | Por qué |
 |---|---|
@@ -122,7 +131,9 @@ docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{
 | Solo `GITHUB_TOKEN` y OIDC, sin tokens guardados | El token dura lo que la ejecución y solo vale para este repo. No hay contraseña del registro que pueda filtrarse |
 | Permisos del job: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
 | La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG) | Crearla desde el workflow pediría `contents: write`, que permite cambiar el repo. Se mantiene el mínimo |
-| Etiquetas `X.Y.Z` y `X.Y`, sin `latest` | Antifaz es beta (0.x): quien la usa elige versión a propósito y una versión nueva no le llega sin querer |
+| Etiquetas `X.Y.Z` y `X.Y`, sin `latest` | Antifaz es beta (0.x): quien la usa elige versión a propósito y una versión nueva no le llega sin querer. Ojo: `0.1` se mueve con cada `0.1.x` (recibe los parches); `0.1.0` no cambia nunca |
+| Solo se publica un commit que ya está en `main` (`git merge-base --is-ancestor`) | Un tag puesto en una rama sin revisar no llega a la imagen |
+| Anotaciones OCI en el manifiesto y en el índice (`DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index`) | Con el SBOM y la procedencia, buildx crea un índice; así ghcr.io enlaza ambos con el repo |
 | Solo `linux/amd64` | Es lo único probado (CI y `make e2e`). `arm64` se añadirá cuando tenga pruebas |
 | Sin caché de construcción | Nada de una ejecución anterior (ni de un PR) puede acabar en la imagen publicada |
 | Sin registro de almacenamiento (`create-storage-record: false`) en la atestación | Pediría otro permiso y no cambia la verificación con `gh attestation verify` |
