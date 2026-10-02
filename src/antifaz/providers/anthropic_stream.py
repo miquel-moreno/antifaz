@@ -9,6 +9,8 @@ Events (ADR-0013):
     `thinking` and `redacted_thinking` block.
   - `message_stop` flushes what is left. `ping`, `error`, `message_start` and `message_delta`
     pass untouched; unknown events and delta types pass untouched and are counted.
+  - An event whose `index` is not a plain integer (0.0, "0", -1), or a content block event
+    without one, is a malformed stream: a client could join it where the gateway cannot.
 
 Forbidden: Never change a reasoning block or its signature. Never restore unknown events.
 """
@@ -16,7 +18,7 @@ Forbidden: Never change a reasoning block or its signature. Never restore unknow
 from typing import Any
 
 from antifaz.providers.json_walk import restore_json_text, restore_strings
-from antifaz.providers.sse import SSEEvent, format_event, replace_data
+from antifaz.providers.sse import MalformedStream, SSEEvent, format_event, replace_data
 from antifaz.providers.streaming import (
     Accumulator,
     StreamCut,
@@ -29,6 +31,7 @@ from antifaz.vault import Vault
 
 PASS_EVENTS = frozenset({"ping", "error", "message_start", "message_delta"})
 UNTOUCHED_DELTAS = frozenset({"thinking_delta", "signature_delta"})
+_BLOCK_EVENTS = frozenset({"content_block_start", "content_block_delta", "content_block_stop"})
 
 
 def _delta_event(index: int, delta: dict[str, str]) -> str:
@@ -52,6 +55,12 @@ class AnthropicMessagesStream:
             return event.raw  # a comment
         payload = json_object(event.data)
         kind = payload.get("type") if payload is not None else None
+        if (
+            payload is not None
+            and ("index" in payload or kind in _BLOCK_EVENTS)
+            and not is_index(payload.get("index"))
+        ):
+            raise MalformedStream()  # fail closed: a client could join it as another block
         if payload is None or kind in PASS_EVENTS:
             if payload is None:
                 self.unknown += 1
@@ -62,9 +71,7 @@ class AnthropicMessagesStream:
             self._done = True
             return self._flush_open(with_input=True) + event.raw
         index = payload.get("index")
-        if kind in ("content_block_start", "content_block_delta", "content_block_stop") and (
-            is_index(index)
-        ):
+        if kind in _BLOCK_EVENTS and is_index(index):
             if kind == "content_block_start":
                 return self._start(event, payload, index)
             if kind == "content_block_delta":

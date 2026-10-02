@@ -117,10 +117,10 @@ Tablas completas, configuración y límites: [docs/benchmark.md](docs/benchmark.
 
 ## Seguridad
 
-- **Cierra por defecto**: una petición se bloquea si el detector falla, si trae un campo desconocido con texto o si lleva una imagen, un PDF o un archivo.
+- **Cierra por defecto**: una petición se bloquea si el detector falla o si lleva una imagen, un PDF, un archivo u otro campo que no se puede enmascarar. El texto de un campo desconocido también se enmascara, no sale tal cual.
 - **Guardia de salida**: una segunda comprobación sobre los bytes exactos que van a salir; si queda un valor oculto, la petición se bloquea.
 - **Puerta cerrada**: todas las rutas piden la clave de Antifaz, se rechazan los navegadores, las URL y claves de los proveedores solo se leen de `.env`, y Antifaz no arranca con una clave débil o de ejemplo.
-- **Probado atacándolo**: pasan 829 tests de red team; otros 13 son fallos conocidos, escritos como fallos esperados. Un test de extremo a extremo arranca la imagen real de Docker contra un proveedor falso y comprueba que solo recibe marcadores.
+- **Probado atacándolo**: pasan 960 tests de red team; otros 13 son fallos conocidos documentados, escritos como fallos esperados. Un test de extremo a extremo arranca la imagen real de Docker contra un proveedor falso y comprueba que solo recibe marcadores.
 
 ¿Has encontrado un problema? Lee [SECURITY.md](SECURITY.md): las vulnerabilidades se avisan en privado. Un dato que Antifaz no detecta es una issue pública con **datos inventados** ([I found a leak](https://github.com/miquel-moreno/antifaz/issues/new?template=leak.yml)).
 

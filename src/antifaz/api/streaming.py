@@ -33,7 +33,8 @@ from antifaz.restore import StreamLimitExceeded
 
 logger = logging.getLogger("antifaz.stream")
 
-# Most field paths whose tail is kept in one stream (each tail is shorter than the longest key).
+# Most field paths (and field names) whose tail is kept in one stream; each tail is shorter
+# than the longest key. A stream that needs more ends with an error: never forget a tail.
 _MAX_TAILS = 4096
 
 
@@ -98,12 +99,17 @@ class KeyWatch:
       - every string field joined with the end of the same field in earlier events (one tail
         per path: choice or block index and field name, known fields or not), so a key split
         between two deltas is caught when it completes. The part already sent is not a key.
+      - and, as a second net, joined with the end of the last field of the same NAME in any
+        path ("content", "text", "arguments"...), so an odd path cannot hide a split key.
+    A stream with more than _MAX_TAILS paths or names ends (StreamLimitExceeded): forgetting
+    an old tail would let a key split around it through.
     """
 
     def __init__(self, keys: Sequence[str]) -> None:
         self._keys = [key for key in keys if key]
         self._keep = max((len(key) for key in self._keys), default=1) - 1
         self._tails: dict[Path, str] = {}
+        self._names: dict[str, str] = {}  # field name -> tail of its last value, any path
 
     def _holds(self, text: str) -> bool:
         return any(key in text for key in self._keys)
@@ -127,17 +133,25 @@ class KeyWatch:
             except (ValueError, RecursionError):
                 continue
             for path, value in _leaves(parsed):
+                name = _name(path)
                 joined = self._tails.get(path, "") + value
-                if self._holds(joined):
+                by_name = self._names.get(name, "") + value
+                if self._holds(joined) or self._holds(by_name):
                     raise KeyEchoed()
                 if self._keep > 0:
-                    self._remember(path, joined[-self._keep :])
+                    _remember(self._tails, path, joined[-self._keep :])
+                    _remember(self._names, name, by_name[-self._keep :])
 
-    def _remember(self, path: Path, tail: str) -> None:
-        self._tails.pop(path, None)
-        if len(self._tails) >= _MAX_TAILS:
-            self._tails.pop(next(iter(self._tails)))  # the oldest path
-        self._tails[path] = tail
+
+def _name(path: Path) -> str:
+    """The field name of a leaf: the last name in its path ("" for a bare string)."""
+    return next((part for part in reversed(path) if isinstance(part, str)), "")
+
+
+def _remember[K](tails: dict[K, str], key: K, tail: str) -> None:
+    if key not in tails and len(tails) >= _MAX_TAILS:
+        raise StreamLimitExceeded()  # fail closed: an old tail is never forgotten
+    tails[key] = tail
 
 
 async def _restored(
@@ -206,6 +220,8 @@ async def relay(
             watch.check_output(last)
         except KeyEchoed:  # the held text completes a key: only the error goes out
             last = transformer.abort(KEY.code, KEY.message, safe_text=False)
+        except StreamLimitExceeded:  # too many fields to check the held text: only the error
+            last = transformer.abort(failure.code, failure.message, safe_text=False)
         yield last.encode("utf-8")
 
 

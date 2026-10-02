@@ -8,6 +8,8 @@ Each chunk is `data: {...}` and the stream ends with `data: [DONE]` (ADR-0013):
     of each call still carries its id, type and name, with empty arguments.
   - `[DONE]` flushes what is left. Anything else passes untouched; unknown events and delta
     fields are counted.
+  - A choice without a plain integer `index` (or a tool call whose `index` is not one) is a
+    malformed stream: a client would join it where the gateway cannot follow it (0.0, "0").
 
 Forbidden: Never restore unknown fields. Never emit half accumulated arguments.
 """
@@ -15,7 +17,7 @@ Forbidden: Never restore unknown fields. Never emit half accumulated arguments.
 from typing import Any
 
 from antifaz.providers.json_walk import restore_json_text
-from antifaz.providers.sse import SSEEvent, format_event, replace_data
+from antifaz.providers.sse import MalformedStream, SSEEvent, format_event, replace_data
 from antifaz.providers.streaming import (
     Accumulator,
     StreamCut,
@@ -103,8 +105,7 @@ class OpenAIChatStream:
 
     def _choice(self, choice: Any) -> bool:
         if not isinstance(choice, dict) or not is_index(choice.get("index")):
-            self.unknown += 1
-            return False
+            raise MalformedStream()  # fail closed: it cannot be followed like the client does
         index: int = choice["index"]
         delta = choice.get("delta")
         changed = False
@@ -137,6 +138,8 @@ class OpenAIChatStream:
             kept = []
             for call in calls:
                 function = call.get("function") if isinstance(call, dict) else None
+                if isinstance(call, dict) and "index" in call and not is_index(call["index"]):
+                    raise MalformedStream()
                 if not isinstance(call, dict) or not is_index(call.get("index")):
                     self.unknown += 1  # without an index it cannot be joined: passes as it is
                 if (
