@@ -1,0 +1,113 @@
+name: Release
+
+# Publishes the container image when Miquel pushes a version tag (vX.Y.Z). Nothing else
+# starts it: no branches, no pull requests, no manual runs.
+#
+# Kept apart from ci.yml on purpose (ANTIFAZ.md section 5.2): this workflow holds the
+# permission to publish, so it runs no scanners or other third-party tools, only first-party
+# GitHub and Docker actions. The scans (Grype, gitleaks, zizmor, CodeQL...) run in ci.yml on
+# the tagged commit before the tag is created.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+# Least privilege: nothing by default; the job asks only for what it needs.
+permissions: {}
+
+# One release at a time, and a release that has started is never cancelled halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Actions are pinned by full commit SHA (a tag can be moved; a SHA cannot).
+# Dependabot keeps them up to date.
+env:
+  IMAGE: ghcr.io/miquel-moreno/antifaz
+
+jobs:
+  publish-image:
+    name: Publish the image to ghcr.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Protected environment: only v* tags may deploy to it, and (once the repository is
+    # public) a manual approval is required before this job gets its token.
+    environment: release
+    permissions:
+      contents: read # check out the code
+      packages: write # push the image to ghcr.io
+      id-token: write # OIDC token to sign the provenance attestation (Sigstore), no stored keys
+      attestations: write # store the provenance attestation in the repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The tag must be exactly vX.Y.Z and match the version in pyproject.toml, so the image
+      # tag, the package version and the CHANGELOG always say the same thing.
+      - name: Check that the tag matches the version in pyproject.toml
+        run: |
+          set -euo pipefail
+          if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag must be vX.Y.Z (no pre-release suffix)."
+            exit 1
+          fi
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "::error::The tag does not match the version ${version} in pyproject.toml."
+            exit 1
+          fi
+          if ! grep -q "^## \[${version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for ${version}."
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # GITHUB_TOKEN only: short-lived, created for this run; no stored registry password.
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags X.Y.Z and X.Y from the git tag. No `latest` while Antifaz is a beta (0.x): who
+      # pulls the image chooses a version on purpose.
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # linux/amd64 only: the only platform tested (CI and make e2e). No cache, so nothing
+      # from an earlier run can end up in a published image. Buildx attaches the SBOM and the
+      # full (mode=max) provenance to the image.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          pull: true
+          no-cache: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+
+      # SLSA build provenance signed with the job's OIDC identity (Sigstore) and pushed next
+      # to the image. Check it with `gh attestation verify` (docs/TECNICO.md, "Publicación").
+      # No storage record: it would need one more permission and adds nothing to the check.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
