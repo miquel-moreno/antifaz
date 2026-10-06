@@ -34,6 +34,9 @@ ALLOWED_DIFFERENCES = {
     "app_dir",
     # No extra headers either way ([] from the CLI, None from run()).
     "headers",
+    # One process either way: the CLI passed None (one worker unless WEB_CONCURRENCY is set);
+    # serve passes 1, so WEB_CONCURRENCY in .env cannot start more.
+    "workers",
 }
 
 
@@ -57,6 +60,7 @@ def test_serve_settings_are_pinned() -> None:
         "proxy_headers": False,
         "server_header": False,
         "timeout_graceful_shutdown": 20,
+        "workers": 1,
     }
 
 
@@ -105,9 +109,23 @@ def test_serve_does_not_read_uvicorn_variables(monkeypatch: pytest.MonkeyPatch) 
     # environment, and so from .env; serve passes its settings to uvicorn.run, which does not.
     monkeypatch.setenv("UVICORN_PROXY_HEADERS", "true")
     monkeypatch.setenv("UVICORN_HOST", "127.0.0.2")
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
     calls = _capture_run(monkeypatch, uvicorn)
     assert main(["serve"]) == 0
     assert calls == [("antifaz.api.app:create_app", serve.OPTIONS)]
+
+
+def test_uvicorn_config_keeps_one_worker_and_no_proxy_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # uvicorn's Config itself still reads two plain variables: WEB_CONCURRENCY (only when
+    # workers is None, so workers=1 wins) and FORWARDED_ALLOW_IPS (read, but inert: without
+    # proxy headers X-Forwarded-* are never trusted).
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "*")
+    config = uvicorn.Config(serve.APP, **serve.OPTIONS)
+    assert config.workers == 1
+    assert config.proxy_headers is False
 
 
 def test_help_lists_serve(capsys: pytest.CaptureFixture[str]) -> None:
