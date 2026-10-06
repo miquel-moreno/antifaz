@@ -157,14 +157,24 @@ jobs:
 
       # Miquel writes the release page by hand. If he has not created it yet, a draft
       # pre-release is created for the tag (--verify-tag: never a new tag) and he publishes it
-      # after writing the notes. --clobber: a re-run replaces the asset with the new digest.
+      # after writing the notes (it is marked pre-release while Antifaz is a beta: untick it when
+      # publishing a non-beta version). Only gh's exact "release not found" creates it; any
+      # other error fails. --clobber: a re-run replaces the asset with the new digest.
       - name: Upload it to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if ! gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+          errors="${RUNNER_TEMP}/release-view.err"
+          if gh release view "${GITHUB_REF_NAME}" --json tagName > /dev/null 2> "${errors}"; then
+            echo "The release exists: uploading the asset."
+          elif grep -qxF "release not found" "${errors}"; then
             gh release create "${GITHUB_REF_NAME}" --draft --prerelease --verify-tag --title "${GITHUB_REF_NAME}" --notes "Draft created by release.yml with the digest-pinned docker-compose.yml. Notes: the CHANGELOG section of this version."
+          else
+            # Network, token or rate limit: never guess that the release is missing.
+            echo "::error::Could not read the release:"
+            cat "${errors}" >&2
+            exit 1
           fi
           gh release upload "${GITHUB_REF_NAME}" dist/docker-compose.yml --clobber

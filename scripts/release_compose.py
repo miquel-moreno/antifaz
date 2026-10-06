@@ -44,8 +44,7 @@ def pinned(compose: str, version: str, digest: str) -> str:
     header = (
         f"# Antifaz {version}, attached to the GitHub release v{version}. The image is pinned by\n"
         "# digest: it is exactly the one built and attested by release.yml.\n"
-        "# Check it: gh attestation verify oci://"
-        f"{IMAGE}:{version} --repo miquel-moreno/antifaz\n"
+        f"# Check it: gh attestation verify oci://{IMAGE}@{digest} --repo miquel-moreno/antifaz\n"
         "#\n"
     )
     return header + compose[: line.start()] + replacement + compose[line.end() :]

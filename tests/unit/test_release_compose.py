@@ -36,6 +36,15 @@ def test_the_released_file_has_no_variable_for_the_image() -> None:
     assert text.startswith(f"# Antifaz {VERSION}, attached to the GitHub release v{VERSION}.")
 
 
+def test_the_header_verifies_the_attestation_of_the_digest_not_the_tag() -> None:
+    text = pinned(COMPOSE, VERSION, DIGEST)
+    verify = (
+        f"# Check it: gh attestation verify oci://ghcr.io/miquel-moreno/antifaz@{DIGEST} "
+        "--repo miquel-moreno/antifaz"
+    )
+    assert verify in text.splitlines()
+
+
 @pytest.mark.parametrize(
     "digest",
     [

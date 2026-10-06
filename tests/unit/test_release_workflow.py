@@ -113,6 +113,12 @@ def test_the_asset_is_uploaded_with_gh_and_a_missing_release_becomes_a_draft() -
     script = upload["run"]
     assert "set -euo pipefail" in script
     assert 'gh release view "${GITHUB_REF_NAME}"' in script
+    # Only gh's exact "release not found" leads to a draft; any other error (network, token,
+    # rate limit) fails the job instead of creating a second release.
+    assert "2>&1" not in script and "|| true" not in script
+    assert 'grep -qxF "release not found"' in script
+    branches = script.split("elif", 1)[1]
+    assert branches.index("gh release create") < branches.index("else") < branches.index("exit 1")
     create = next(line for line in script.splitlines() if "gh release create" in line)
     for flag in ("--draft", "--prerelease", "--verify-tag"):
         assert flag in create, flag
