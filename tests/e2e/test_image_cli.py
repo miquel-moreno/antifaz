@@ -116,7 +116,16 @@ def env_file(init_folder: Path, fake_keys: dict[str, str]) -> Path:
     leaked = any(key in output for key in fake_keys.values())
     assert not leaked, "a provider key appeared in the output of init"
     assert code == 0, "init failed in the container (output not shown: it may hold paths)"
-    return init_folder / ".env"
+    env = init_folder / ".env"
+    # Without -t the output is not a terminal: the new Antifaz key is not shown either.
+    lines = env.read_text(encoding="utf-8").splitlines()
+    (gateway,) = [
+        x.removeprefix("ANTIFAZ_API_KEY=") for x in lines if x.startswith("ANTIFAZ_API_KEY=")
+    ]
+    shown = bool(gateway) and gateway in output
+    assert not shown, "the new Antifaz key appeared in the output of init without a terminal"
+    assert "ANTIFAZ_API_KEY" in output  # it says where the key is instead
+    return env
 
 
 def test_init_in_the_container_writes_a_usable_env(
