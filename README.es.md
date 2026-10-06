@@ -46,7 +46,29 @@ Lo he diseñado y desarrollado de principio a fin. Desarrollo asistido por IA ba
 
 ## Puesta en marcha
 
-Necesitas Docker con Compose. La imagen publicada es `ghcr.io/miquel-moreno/antifaz:0.1.0` (`docker pull ghcr.io/miquel-moreno/antifaz:0.1.0`).
+Necesitas Docker con Compose.
+
+**Desde la v0.2.0 (todavía no publicada): un minuto, sin clonar.** En una carpeta vacía:
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.2.0"}
+```
+
+`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: la imagen 0.1.0 solo sirve.
+
+En Windows (PowerShell), `curl.exe` en vez de `curl`, sin `--user` y con `${PWD}`, en una sola línea (o partida con una comilla invertida `` ` `` al final de cada línea, no con `\`):
+
+```powershell
+curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+```
+
+**Con la v0.1.0 (hoy), a mano:**
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -55,11 +77,21 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: un valor aleatorio, por ejemplo la salida de `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY y/o ANTIFAZ_ANTHROPIC_API_KEY: las claves de tus proveedores
 #   (borra la línea del proveedor que no uses: su ruta responde 503)
-docker compose up -d --build
+docker compose up -d                 # descarga ghcr.io/miquel-moreno/antifaz:0.1.0
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
 ```
 
 Antifaz se niega a arrancar mientras una clave tenga su valor de ejemplo (`change-me...`); `docker compose logs antifaz` dice qué variable hay que arreglar, nunca su valor. Solo escucha en `127.0.0.1`: para llegar desde otras máquinas, pon delante un proxy inverso con HTTPS ([detalles](docs/TECNICO.md)).
+
+**Sin Compose**, el mismo endurecimiento en un solo `docker run` (también vale con la 0.1.0):
+
+```bash
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
+  ghcr.io/miquel-moreno/antifaz:0.1.0
+```
 
 Después, apunta tu cliente a Antifaz en vez de al proveedor, con tu `ANTIFAZ_API_KEY` como clave (las claves de los proveedores se quedan en `.env`):
 

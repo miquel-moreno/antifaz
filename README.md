@@ -44,7 +44,29 @@ Designed and built end to end. AI-assisted development under my specification an
 
 ## Quick start
 
-You need Docker with Compose. The published image is `ghcr.io/miquel-moreno/antifaz:0.1.0` (`docker pull ghcr.io/miquel-moreno/antifaz:0.1.0`).
+You need Docker with Compose.
+
+**From v0.2.0 (not released yet): one minute, no clone.** In an empty folder:
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.2.0"}
+```
+
+`init` asks for your provider keys without showing them, writes `.env` and makes a new random `ANTIFAZ_API_KEY`, which it shows once: your clients use it. No key goes on the command line. `--rm` deletes the container and its log (which holds that key); `--user` makes `.env` yours. The downloaded `docker-compose.yml` pins the image by digest. Running `init` in the container needs v0.2.0 or later: the 0.1.0 image can only serve.
+
+On Windows (PowerShell), `curl.exe` instead of `curl`, without `--user`, and `${PWD}`, in one line (or split it with a backtick `` ` `` at the end of each line, not `\`):
+
+```powershell
+curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+```
+
+**With v0.1.0 (today), by hand:**
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -53,11 +75,21 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: a random value, for example the output of `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY and/or ANTIFAZ_ANTHROPIC_API_KEY: your provider keys
 #   (delete the line of a provider you do not use: its route answers 503)
-docker compose up -d --build
+docker compose up -d                 # pulls ghcr.io/miquel-moreno/antifaz:0.1.0
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
 ```
 
 Antifaz refuses to start while a key still has its example value (`change-me...`); `docker compose logs antifaz` says which variable to fix, never its value. It listens on `127.0.0.1` only: to reach it from other machines, put a reverse proxy with HTTPS in front ([details](docs/TECNICO.md)).
+
+**Without Compose**, the same hardening in one `docker run` (works with 0.1.0 too):
+
+```bash
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
+  ghcr.io/miquel-moreno/antifaz:0.1.0
+```
 
 Then point your client at Antifaz instead of the provider, with your `ANTIFAZ_API_KEY` as the key (the provider keys stay in `.env`):
 

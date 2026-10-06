@@ -3,17 +3,19 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
+.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
 
 help:
 	@echo "install    Install dependencies and git hooks"
 	@echo "dev        Run the API with auto-reload on http://localhost:8000"
+	@echo "up         Build the image from this clone and start it with Compose (needs .env)"
+	@echo "down       Stop what make up started"
 	@echo "lint       Check style and common bugs (ruff)"
 	@echo "format     Auto-format the code (ruff)"
 	@echo "typecheck  Check types (mypy strict)"
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
-	@echo "e2e        End-to-end: builds the image, runs Compose with a fake provider (needs Docker)"
+	@echo "e2e        End-to-end: builds the image, runs init and Compose with a fake provider (needs Docker)"
 	@echo "secrets    Scan the git history for secrets (gitleaks, redacted)"
 	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
@@ -33,6 +35,15 @@ install:
 
 dev:
 	uv run uvicorn --factory $(PKG).api.app:create_app --reload --no-access-log
+
+# The image built from this clone (compose.build.yml) instead of the published one.
+COMPOSE_LOCAL := docker compose -f docker-compose.yml -f compose.build.yml
+
+up:
+	$(COMPOSE_LOCAL) up -d --build
+
+down:
+	$(COMPOSE_LOCAL) down
 
 lint:
 	uv run ruff check .
