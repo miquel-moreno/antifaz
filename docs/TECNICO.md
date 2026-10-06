@@ -276,6 +276,7 @@ antifaz scan fichero.txt   # una línea por detección: TIPO inicio fin (nunca e
 antifaz mask fichero.txt   # el texto con marcadores (nunca la tabla)
 antifaz mask -             # lee de stdin
 antifaz verify             # planta datos falsos con tu configuración (ver "antifaz verify")
+antifaz init               # escribe un .env con una clave nueva (ver "antifaz init")
 ```
 
 Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
@@ -423,6 +424,33 @@ uv run antifaz verify
 - Tests: `tests/unit/test_verify.py`, también con la pasarela saboteada (enmascarador ciego → `LEAK` y código 1; enmascarador que deja un valor → `BLOCKED`; comprobación de claves desactivada → `KEY`; clave de Antifaz reenviada, en las dos rutas → `LEAK`; respuesta sin restaurar → `RESTORE`; `count_tokens` contestado sin proveedor → `NO UPSTREAM`). En estos tests y en los de contrato, cualquier búsqueda de nombre o conexión de socket que no sea a la propia máquina falla.
 
 Limitaciones de esta primera versión: los valores sembrados son fijos (los mismos que usan los tests), la política no se lee todavía de un fichero, y no revisa lo que se escribe en los logs (eso lo cubren los tests de las invariantes 8 y 13).
+
+## `antifaz init` (issue 41)
+
+Decisión en [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md) (propuesta). Escribe un `.env` listo para arrancar sin que ninguna clave pase por la línea de órdenes:
+
+```bash
+uv run antifaz init                       # pregunta las claves de los proveedores (ocultas)
+uv run antifaz init --path /srv/antifaz   # en otra carpeta (por defecto, la actual)
+
+# CI o scripts: nada de preguntas; las claves, por el NOMBRE de una variable o por stdin
+OPENAI_FOR_ANTIFAZ=... uv run antifaz init --non-interactive --openai-key-env OPENAI_FOR_ANTIFAZ
+uv run antifaz init --non-interactive --anthropic-key-stdin < clave.txt
+uv run antifaz init --non-interactive --force --allowed-hosts antifaz.internal,localhost
+```
+
+- **Clave de Antifaz**: `secrets.token_hex(32)`, hecha en la máquina (se saca otra si no pasara la comprobación de arranque). Se muestra **una vez**, solo si la salida es un terminal, o con `--show-key`. Si no, se dice que está en `.env`.
+- **Claves de proveedores**: con `getpass` (no se ven al escribir) o, con `--non-interactive`, de `--openai-key-env VAR` / `--anthropic-key-env VAR` o de `--openai-key-stdin` / `--anthropic-key-stdin` (como mucho una por stdin). Ninguna opción acepta una clave: `--*-key-env` solo acepta un nombre de variable válido, y si se le pasa algo que parece una clave lo rechaza sin repetirlo. Se quitan espacios, comillas, una marca BOM y un `Bearer ` delante. Por stdin, como mucho 4 KiB, y nunca desde un terminal (hay que usar una tubería, o el modo interactivo). Si `getpass` no puede ocultar lo que se escribe, `init` se para. Los mensajes no repiten el nombre de `--*-key-env` (hay claves con forma de nombre, como `gsk_…`) ni la ruta de `--path`. Error (nombrando la variable, nunca el valor) si la clave es la de ejemplo, no es ASCII imprimible o lleva `"`, `'`, `#`, `$`, `\` o espacios; solo un aviso si no empieza por `sk-` (OpenAI) o `sk-ant-` (Anthropic). Un proveedor sin clave no tiene línea (su ruta da 503). Las variables `ANTIFAZ_*_API_KEY` del entorno **no** se copian solas.
+- **`.env` existente**: en interactivo hay que escribir `yes`; con `--non-interactive` hace falta `--force`; si no, código 2 y no cambia nada. Antes se guarda `.env.bak-AAAAMMDD-HHMMSS` (con `-1`, `-2`… si ya existe: una copia nunca pisa otra), creada con `O_EXCL` y `0600`. Si `.env` es un enlace o una carpeta, no se toca.
+- **Escritura atómica**: temporal `0600` con `O_EXCL` en la misma carpeta → `fsync` → validación con `check_safe_to_start` leyendo **solo ese archivo** (las variables de entorno del proceso no cuentan) → copia de seguridad → `os.replace` (en Windows se reintenta si el archivo está bloqueado). Pase lo que pase (también Ctrl-C), se borra el temporal; el `.env` anterior queda igual, con un mensaje genérico (si la copia ya se había hecho, dice cómo se llama).
+- **Formato**: `VAR=valor` sin comillas, sin comentarios detrás del valor y sin `$`, saltos de línea LF y sin BOM. Lo leen igual pydantic-settings y `docker --env-file` (un test lo compara). La plantilla va en el paquete (`src/antifaz/cli/env_template.py`) porque en la imagen no hay `.env.example`; un test comprueba que tienen las mismas variables en el mismo orden.
+- **Sin terminal**: en modo interactivo, si stdin no es un terminal, código 2 y "usa `-it` o `--non-interactive`".
+- **Sin red**: no habla con nadie (un test lo comprueba quitando los sockets).
+- **Códigos de salida**: 0 escrito; 2 uso incorrecto, `.env` existente sin permiso o un valor malo (no se escribe nada); 1 no se pudo escribir o validar (el `.env` anterior sigue igual).
+- **Dentro de Docker** (issue 42): con `-it` la clave se imprime y Docker la guarda en `docker logs` mientras exista el contenedor, así que usa siempre `--rm`. En Linux, añade `--user "$(id -u):$(id -g)"` para que el `.env` sea tuyo y no del usuario del contenedor.
+- **Copias y rotación**: las copias `.env.bak-…` contienen las claves antiguas. Después de rotar una clave, borra las copias que la contienen.
+- **Permisos en Windows**: `0600` no existe; el archivo hereda los permisos de la carpeta (en el perfil del usuario, solo él). No ejecutes `init` en una carpeta compartida.
+- Tests: `tests/unit/test_cli_init.py` (claves canario que nunca salen por stdout, stderr ni logs, también en los errores; `getpass`; copias; fallo de `os.replace` y de validación; `0600` en POSIX; terminal y `--show-key`; Hypothesis para la clave generada). El job `cli-windows` de CI pasa los tests de la CLI en Windows.
 
 ## NER: la infraestructura (issue 6, PR 6a)
 

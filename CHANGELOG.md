@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+### Added
+- `antifaz init` (issue 41, ADR-0017 proposed): writes a `.env` that passes the startup check, without network. `ANTIFAZ_API_KEY` is made locally (`secrets.token_hex(32)`) and shown once, only on a terminal or with `--show-key`. Provider keys never come from the command line: hidden input (`getpass`), or with `--non-interactive` the environment variable named by `--openai-key-env`/`--anthropic-key-env` or stdin (`--openai-key-stdin`/`--anthropic-key-stdin`, one at most); spaces, quotes and `Bearer ` are trimmed, a key that cannot be written or sent is refused naming the variable, never the value. An existing `.env` needs a typed `yes` (or `--force`) and is kept as `.env.bak-YYYYMMDD-HHMMSS` (never overwriting another backup). The file is written to a `0600` temp file (`O_EXCL`) in the same folder, checked with `check_safe_to_start` on that file alone, then moved with `os.replace`; on failure the old `.env` stays. The template ships in the package and a test keeps it in sync with `.env.example`; the file reads the same for pydantic-settings and `docker --env-file`. Also `--path` and `--allowed-hosts`. Messages never repeat the `--*-key-env` name or the `--path` value; stdin keys are capped at 4 KiB and refused from a terminal; a BOM is dropped; getpass's echoing fallback is refused; the temp file is removed even on Ctrl-C.
+- CI job `cli-windows`: the CLI tests also run on Windows.
+
 ### Changed
 - README (English and Spanish): a row of badges under the tagline (version, CI, license, Python, FastAPI, ghcr.io image, OpenAI | Anthropic compatible, beta status, stars), and post-release text fixes: the beta notice links the v0.1.0 release and the quick start names the `ghcr.io/miquel-moreno/antifaz:0.1.0` image; the recruiter section now says 960 red-team tests pass, as the security section already did.
 

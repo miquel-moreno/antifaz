@@ -1,9 +1,11 @@
-"""Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`.
+"""Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`,
+`antifaz init`.
 
 Uses the library functions directly. `scan` prints `TYPE start end` per detection and
 `mask` prints the masked text. Neither prints values nor the placeholder table, and errors
 are generic messages that never echo the input. `verify` (cli/verify.py) plants synthetic
-data with the current configuration and checks that none reaches a fake provider.
+data with the current configuration and checks that none reaches a fake provider. `init`
+(cli/init.py) writes a .env with a new key; provider keys never come from argv.
 
 Forbidden: No dependency on the database for scan.
 """
@@ -14,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
+from antifaz.cli import init
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
@@ -39,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
         help="plant synthetic data with your configuration and check that none reaches a fake "
         "provider (never calls a real one)",
     )
+    init.add_parser(commands)
     return parser
 
 
@@ -53,6 +57,8 @@ def _read(name: str) -> str | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "init":
+        return init.run(args)
     if args.command == "verify":
         # Imported here: scan and mask do not need the web app and its dependencies.
         from antifaz.cli.verify import verify_from_environment

@@ -47,6 +47,26 @@ jobs:
       - name: Coverage >= 90 % in the privacy pieces
         run: uv run python -m scripts.check_coverage
 
+  # The CLI writes files (antifaz init: O_EXCL temp file, os.replace, backups) and talks to a
+  # console: Windows behaves differently there, so its tests also run on Windows.
+  cli-windows:
+    name: CLI tests on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen
+      - name: CLI tests
+        run: uv run pytest tests/unit/test_cli.py tests/unit/test_cli_init.py --no-cov
+
   supply-chain:
     name: Vulnerabilities and licenses
     runs-on: ubuntu-latest
