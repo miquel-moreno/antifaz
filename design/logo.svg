@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="128" height="128" role="img" aria-label="Antifaz">
   <title>Antifaz</title>
-  <!-- Primary logo (proposal, issue #30): the white mask in a rounded tile with an indigo
+  <!-- Project logo (issue #30, adopted by Miquel on 2026-10-07; docs/images/logo.svg is the
+       published copy and must stay identical): the white mask in a rounded tile with an indigo
        gradient (155deg, #7363f7 to #3b2db0) and a faint inner edge. The mask is one path
        with the eyes cut out (evenodd); the eyes are slightly larger than in the first
        sample so they still read at 16 px. Single-colour version: logo-mark.svg. -->

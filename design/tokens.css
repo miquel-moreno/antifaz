@@ -48,7 +48,8 @@
   --color-stage: #fbfbfd; /* the stage of the mask animation */
 
   /* Lines. Hairlines are decoration (only where they separate); --color-control is the 3:1
-     edge of a control that needs one (switch off, segmented thumb, text box). */
+     edge of a control that needs one (switch off, text box). The segmented thumb has none:
+     its selected label is told apart by text colour and weight (design/README.md). */
   --color-line: rgb(29 29 31 / 0.08);
   --color-line-strong: rgb(29 29 31 / 0.15);
   --color-control: #7b7b83;

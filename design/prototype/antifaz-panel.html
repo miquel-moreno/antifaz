@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Antifaz · Panel (prototipo)</title>
-<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<link rel="icon" href="../../docs/images/logo.svg" type="image/svg+xml">
 <!-- Fonts bundled with Antifaz (design/fonts, OFL-1.1): no external requests. -->
 <link rel="stylesheet" href="../fonts/fonts.css">
 <link rel="stylesheet" href="../tokens.css">
@@ -49,8 +49,8 @@ h1,h2,h3{text-wrap:balance}
 .chips legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .chips input{position:absolute;opacity:0;width:1px;height:1px}
 .chips label{padding:4px 11px;border-radius:var(--radius-pill);cursor:pointer;font-weight:var(--weight-medium);color:var(--color-text-muted);white-space:nowrap;transition:background .3s var(--ease-out),color .2s,box-shadow .3s}
-.chips label:has(input:checked){background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-pop)}
-.chips label:has(input:focus-visible){box-shadow:0 0 0 2px var(--color-focus)}
+.chips label:has(input:checked){background:var(--color-surface);color:var(--color-text);font-weight:var(--weight-semibold);box-shadow:var(--shadow-pop)}
+.chips label:has(input:focus-visible){box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
 .tg{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:var(--weight-medium);white-space:nowrap}
 .tg input{position:absolute;opacity:0;width:1px;height:1px}
 .sw{width:30px;height:18px;border-radius:var(--radius-pill);background:var(--color-surface-3);box-shadow:inset 0 0 0 1px var(--color-control);position:relative;transition:background .25s var(--ease-out),box-shadow .25s;flex:none}
@@ -84,7 +84,12 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .stage-wrap.is-mobile .app-window{max-width:390px;margin-inline:auto;border-radius:var(--radius-phone)}
 
 /* ---------- Sidebar (translucent over the glass) ---------- */
-.app-sidebar{background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha),transparent);border-right:1px solid var(--color-line);padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.app-sidebar{background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha),transparent);border-right:1px solid var(--color-line);min-width:0;contain:size}
+/* Desktop: the sidebar column keeps its tint and hairline for the whole window, and its content
+   stays fixed while long views scroll (sticky, at most one viewport tall; it scrolls on its own
+   only if the viewport is very short). contain:size keeps the sidebar out of the row height,
+   so the window is as tall as the view, not as the viewport. */
+.app-sidebar-inner{position:sticky;top:0;height:100vh;height:100dvh;max-height:100%;overflow-y:auto;scrollbar-width:thin;overscroll-behavior:contain;padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px;min-width:0}
 .app-brand{display:flex;align-items:center;gap:10px;padding:0 8px;min-width:0}
 .app-logo{width:30px;height:30px;border-radius:var(--radius-control-sm);display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px var(--logo-ring),inset 0 1px 0 var(--logo-highlight),0 6px 14px -6px var(--logo-shadow);flex:none}
 .app-logo svg{display:block;width:20px;height:10px;fill:var(--logo-mask)}
@@ -97,7 +102,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-tab .ic{color:var(--color-text-muted);transition:color var(--duration-fast)}
 .app-tab:hover{background:var(--color-surface-3)}
 .app-tab:active{transform:scale(.98)}
-.app-tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:550}
+.app-tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:var(--weight-semibold)}
 .app-tab[aria-selected="true"] .ic{color:var(--color-accent)}
 .app-tab[aria-selected="true"]:focus-visible{box-shadow:var(--shadow-pop),0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
 .app-tab kbd{margin-left:auto;font-family:var(--font-sans);font-size:var(--text-2xs);color:var(--color-text-faint);opacity:0;transition:opacity var(--duration-fast)}
@@ -199,10 +204,12 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .hint .ic{width:15px;height:15px}
 
 /* Segmented control with a spring thumb. --n options; the thumb follows the checked one.
-   The thumb has a 3:1 ring (--color-control) so the selected option is visible without colour. */
+   The thumb is the reference's white pill with --shadow-pop (no dark ring). The selected option
+   does not depend on the pill: its label is --color-text at 600, the others --color-text-muted
+   at 500 (WCAG 1.4.11 is met by that text cue; see design/README.md). */
 .seg{--n:2;--k:0;position:relative;display:inline-grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));padding:3px;border-radius:var(--radius-md);background:var(--color-surface-3);margin:0;border:0;min-width:0}
 .seg legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-.seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/var(--n));border-radius:8px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-control),var(--shadow-pop);transform:translateX(calc(100% * var(--k)));transition:transform .45s var(--ease-spring)}
+.seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/var(--n));border-radius:8px;background:var(--color-surface);box-shadow:var(--shadow-pop);transform:translateX(calc(100% * var(--k)));transition:transform .45s var(--ease-spring)}
 .seg:has(input:nth-of-type(2):checked){--k:1}
 .seg:has(input:nth-of-type(3):checked){--k:2}
 .seg:has(input:nth-of-type(4):checked){--k:3}
@@ -461,7 +468,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 @container app (max-width: 640px){
   .app-shell{grid-template-columns:minmax(0,1fr);min-height:0}
   /* The sidebar becomes the fixed bar: brand, status and theme, with the tabs scrolling below */
-  .app-sidebar{position:sticky;top:0;z-index:6;border-right:0;border-bottom:1px solid var(--color-line);padding:12px 12px 8px;gap:8px;background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha-phone),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));transition:transform var(--duration-base) var(--ease-out)}
+  .app-sidebar{position:sticky;top:0;z-index:6;contain:none;border-right:0;border-bottom:1px solid var(--color-line);background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha-phone),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));transition:transform var(--duration-base) var(--ease-out)}
+  .app-sidebar-inner{position:static;height:auto;max-height:none;overflow:visible;padding:12px 12px 8px;gap:8px}
   .app-brand{padding:0 4px}
   .app-version{display:none}
   .app-bar-tools{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
@@ -493,10 +501,10 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .flight .lbl2{display:none}
   .callout{padding:12px 14px;font-size:var(--text-sm)}
   .pswitch{display:grid;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
-  .pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-control),var(--shadow-pop);transition:transform .45s var(--ease-spring)}
+  .pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-pop);transition:transform .45s var(--ease-spring)}
   .pswitch[data-p="2"] .thumb{transform:translateX(100%)}
   .pswitch[data-p="3"] .thumb{transform:translateX(200%)}
-  .pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:550;color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
+  .pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:var(--weight-medium);color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
   .pswitch button[aria-pressed="true"]{color:var(--color-text);font-weight:var(--weight-semibold)}
   .pane+.pane{border-top:0}
   .panes[data-p="1"] .pane:not(.p1),.panes[data-p="2"] .pane:not(.p2),.panes[data-p="3"] .pane:not(.p3){display:none}
@@ -575,12 +583,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
   <!-- The mask: one path with the eyes cut out (evenodd), so it takes any fill. -->
   <symbol id="mask" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
-  <!-- New primary logo: the mask in a rounded tile with the indigo gradient (same as design/logo.svg). -->
+  <!-- The project logo: the mask in a rounded tile with the indigo gradient (same as docs/images/logo.svg). -->
   <linearGradient id="logo-grad" x1="0.29" y1="0.05" x2="0.71" y2="0.95"><stop offset="0" style="stop-color:var(--logo-from)"/><stop offset="1" style="stop-color:var(--logo-to)"/></linearGradient>
   <symbol id="logo-new" viewBox="0 0 32 32"><rect width="32" height="32" rx="9.6" fill="url(#logo-grad)"/><rect x="0.5" y="0.5" width="31" height="31" rx="9.1" fill="none" stroke="#ffffff" stroke-opacity="0.2"/><path transform="translate(0.08 0.52) scale(0.4423)" fill="#ffffff" fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
-  <!-- Current published logo (docs/images/logo.svg), for comparison only. -->
-  <symbol id="logo-current" viewBox="0 0 72 72"><rect x="4" y="4" width="64" height="64" rx="16" fill="#4b3fb8"/><path d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14z" fill="#ffffff"/><ellipse cx="25" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/><ellipse cx="47" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/></symbol>
-  <symbol id="mask-current" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0zM41.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0z"/></symbol>
   <!-- Line icons (stroke = currentColor) -->
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 15l4 3-4 3z"/></symbol>
   <symbol id="i-live" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
@@ -629,7 +634,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
   <div class="stage-wrap" id="stage-wrap">
   <div class="app-window" id="app" data-state="data"><div class="app-shell">
-    <div class="app-sidebar">
+    <div class="app-sidebar"><div class="app-sidebar-inner">
       <div class="app-brand rv" style="--i:1">
         <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version">v0.2.0</span>
         <span class="app-bar-tools">
@@ -653,7 +658,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
         <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
         <span class="app-local"><span class="app-status-dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
       </div>
-    </div>
+    </div></div>
 
     <div class="app-main">
       <header class="app-header">
@@ -1010,20 +1015,20 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   <section class="annex" aria-labelledby="logo-t">
     <header>
       <h2 id="logo-t">Logo</h2>
-      <p>Propuesta principal: el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color. Debajo, el publicado ahora, para comparar. Decide Miquel; hasta entonces no se cambia el publicado.</p>
+      <p>El logo del proyecto (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color.</p>
     </header>
     <div class="lrow">
-      <div><h3>Nuevo · propuesta</h3><p><span class="code">design/logo.svg</span> y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
+      <div><h3>Logo</h3><p><span class="code">docs/images/logo.svg</span> (copia en <span class="code">design/logo.svg</span>) y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
       <div class="lsets">
         <div class="lset on-light">
-          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
-          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 32 px, sobre claro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
-          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 16 px, sobre claro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo, 32 px, sobre claro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo, 16 px, sobre claro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
         </div>
         <div class="lset on-dark">
-          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 64 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
-          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 32 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
-          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 16 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo, 32 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo, 16 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
         </div>
         <div class="lset on-light">
           <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
@@ -1032,24 +1037,6 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
         <div class="lset on-dark">
           <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
           <figure><svg width="16" height="8" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
-        </div>
-      </div>
-    </div>
-    <div class="lrow">
-      <div><h3>Actual · publicado</h3><p><span class="code">docs/images/logo.svg</span> · cuadro índigo plano; a 16 px los ojos casi se pierden</p></div>
-      <div class="lsets">
-        <div class="lset on-light">
-          <figure><svg width="64" height="64" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 64 px, sobre claro"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
-          <figure><svg width="32" height="32" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 32 px, sobre claro"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
-          <figure><svg width="16" height="16" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 16 px, sobre claro"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
-        </div>
-        <div class="lset on-dark">
-          <figure><svg width="64" height="64" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 64 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
-          <figure><svg width="32" height="32" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 32 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
-          <figure><svg width="16" height="16" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 16 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
-        </div>
-        <div class="lset on-light">
-          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz actual en un color" fill="currentColor"><use href="#mask-current"/></svg><figcaption>1 color</figcaption></figure>
         </div>
       </div>
     </div>

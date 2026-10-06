@@ -7,7 +7,7 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 **Rediseño en curso** (encargo de Miquel, octubre de 2026): un estilo más cercano a Apple, casi monocromo, con la ventana de vidrio esmerillado sobre una luz ambiental muy suave. Se hace en seis pasos, cada uno con el visto bueno de Miquel:
 
 1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
-2. Ventana, barra lateral, cabecera y móvil. **Hecho** (esta versión).
+2. Ventana, barra lateral, cabecera y móvil. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
 3. Vista «Prueba un texto» con sus cinco estados.
 4. Animación del antifaz y entrada.
 5. Las otras cuatro vistas con el mismo lenguaje.
@@ -23,6 +23,14 @@ Hasta el paso 5, el prototipo ya usa los tokens, las fuentes y la ventana nuevas
 - **Móvil** (ventana de 640 px o menos, con container queries): una barra fija con la marca, el estado corto y el tema, y las pestañas en una fila con scroll horizontal debajo; la pestaña elegida se mantiene a la vista. La barra se esconde al bajar igual que la cabecera. Sin scroll horizontal de la página (comprobado a 390, 768 y 1280 px, en los cinco estados y las cinco vistas).
 - **Nombres de clase propios** para cada pieza de la ventana (`app-*`, `ambient-*`, `proto-*`): en la referencia, las puertas de la entrada se llamaban `.top` como la cabecera y heredaban su `z-index`.
 - **Logo corregido**: el símbolo del antifaz tiene `viewBox="10 22 52 26"`, así que cada `<svg>` que lo usa con `<use>` lleva `viewBox="0 0 52 26"` (antes salía cortado).
+
+### Paso 2: ajustes tras la revisión de Miquel
+
+- **Bloqueo**: la cabecera sigue en verde, «Todo en orden». Bloquear es la pasarela funcionando.
+- **Barra lateral fija en escritorio**: al bajar por una vista larga, la barra lateral se queda quieta (`position: sticky`, como mucho la altura de la pantalla). La columna mantiene su tono y su línea en toda la ventana. En el móvil no cambia: sigue siendo la barra de arriba que se esconde al bajar.
+- **La fila del prototipo** puede ocupar dos líneas a 1280 px: se deja así (no es parte del panel).
+- **Logo nuevo adoptado**: ver «Logo» más abajo.
+- **Control segmentado** (política `default`/`rrhh`, acción por tipo de dato, columnas en el móvil) y **pestañas en píldora** (las del prototipo y la pestaña activa de la barra lateral): la opción elegida es la píldora blanca con sombra de la referencia (`--shadow-pop`), sin el borde oscuro. Ver «Control segmentado y WCAG 1.4.11» en las reglas.
 
 ## La dirección visual
 
@@ -52,7 +60,7 @@ y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o 
 | `prototype/tokens-preview.html` | Página de revisión de los tokens: colores de los dos temas lado a lado, tipografía, radios, sombras, estados y la tabla de contraste calculada en vivo. No es parte del panel |
 | `tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras, vidrio y movimiento, en claro y oscuro. Es la única fuente de colores |
 | `fonts/` | Inter y Geist Mono (woff2 oficiales, sin modificar), sus licencias OFL y `fonts.css` con los `@font-face` |
-| `logo.svg` | Logo principal propuesto: el antifaz blanco en el cuadro con degradado índigo |
+| `logo.svg` | El logo del proyecto: el antifaz blanco en el cuadro con degradado índigo. Es una copia idéntica de `docs/images/logo.svg`, que es el publicado |
 | `logo-mark.svg` | Solo el antifaz, en un color (`currentColor`: toma el color del texto donde se use) |
 | `logo-option-a.svg`, `logo-option-b.svg` | Las dos propuestas anteriores. Se guardan como referencia; el apartado Logo ya no las enseña |
 | `captures/` | **Pendiente**: capturas de referencia de cada estado, que se harán con Playwright cuando Miquel apruebe el prototipo |
@@ -101,7 +109,8 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 - `--color-text-faint` (texto terciario) nunca va sobre `--color-surface-3`: ahí no llega a 4,5:1.
 - Contraste WCAG AA en los dos temas (tabla abajo).
 - Nada se comunica solo con color: cada estado lleva icono o punto **y** palabra; los datos resaltados llevan su tipo escrito; el punto de aviso en la pestaña Estado lleva texto para lectores de pantalla.
-- Los controles tienen un borde de 3:1 (`--color-control`): el indicador de los controles de píldora, los interruptores apagados y el cuadro de texto del Playground. Es un poco más marcado que en la muestra, a propósito.
+- Los controles que lo necesitan tienen un borde de 3:1 (`--color-control`): los interruptores apagados y el cuadro de texto del Playground. Es un poco más marcado que en la muestra, a propósito.
+- **Control segmentado y WCAG 1.4.11.** Antes, la píldora de la opción elegida llevaba un borde oscuro de 3:1 para cumplir 1.4.11 (contraste de lo que no es texto), porque la píldora blanca sobre el carril gris no llega a 3:1. Miquel pidió quitarlo. Ahora la píldora es la de la referencia (blanca con `--shadow-pop`, sin borde) y **la opción elegida se reconoce sin mirar la píldora**: su texto va en `--color-text` y peso 600, y el de las demás en `--color-text-muted` y peso 500. Los dos textos pasan 4,5:1 sobre su fondo (texto / tarjeta 16,71 y 16,41; texto secundario / fondo de pistas 5,33 y 5,30). Como el estado ya lo dice el propio texto, que cumple 1.4.3, la píldora es un refuerzo y no tiene que llegar a 3:1. No se depende solo del color (1.4.1): entre los dos grises hay 2,7:1 en claro y 2,5:1 en oscuro, y el cambio de peso es la señal que no es de color. Además siguen siendo botones de opción de verdad (`input type="radio"`, que el lector de pantalla anuncia como «marcado») o botones con `aria-pressed` (las columnas en el móvil), así que el lector de pantalla dice cuál está elegida, y el anillo de foco no cambia. Lo mismo vale para las pestañas en píldora.
 - Teclado: las pestañas usan tabindex itinerante (flechas, Inicio y Fin) y las teclas 1 a 5 saltan a cada sección; todo tiene foco visible (anillo índigo); hay enlace «Saltar al contenido»; cada control tiene su etiqueta. La lista en directo es `role="log"` con `aria-live="polite"`; los mensajes de «Comprobar ahora» y de cambios sin guardar son `role="status"`.
 - Movimiento: todo se apaga con `prefers-reduced-motion` y con el interruptor del prototipo.
 - En el panel real el JavaScript y los estilos van en archivos aparte (CSP estricta, sin JS en línea); en el prototipo están dentro de la página para que sea un solo archivo.
@@ -192,16 +201,15 @@ El resto de colores de la referencia pasan tal cual: acento, marcadores, ámbar,
 
 ## Logo
 
-**Propuesta principal** (`logo.svg`): el antifaz blanco en un cuadro redondeado con degradado índigo (155°, de `#7363f7` a `#3b2db0`) y un borde interior muy suave, el mismo que lleva el panel. Los ojos son un poco más grandes que en la muestra para que se lean a 16 px. La versión de un color (`logo-mark.svg`) es solo el antifaz con los ojos recortados y toma el color del texto (`currentColor`).
+**Logo del proyecto** (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo (155°, de `#7363f7` a `#3b2db0`) y un borde interior muy suave, el mismo que lleva el panel. Los ojos son un poco más grandes que en la muestra para que se lean a 16 px. La versión de un color (`logo-mark.svg`) es solo el antifaz con los ojos recortados y toma el color del texto (`currentColor`).
 
-El apartado Logo del prototipo enseña la propuesta a 64, 32 y 16 px sobre claro y sobre oscuro, la versión de un color sobre los dos fondos y, debajo, el logo publicado ahora (`docs/images/logo.svg`) para comparar.
+Ya es el logo publicado: **`docs/images/logo.svg` es ahora este archivo** (mismo nombre, así que los README y `LICENSE-ASSETS.md` siguen enlazando bien), y `design/logo.svg` es una copia idéntica. Mide 128 px y los README lo enseñan a 120 px. Como el cuadro tiene su propio fondo, se ve igual con el tema claro y con el oscuro de GitHub. `LICENSE-ASSETS.md` ya lo cubre: habla de `docs/images/logo.svg` «and any later version of it» («y sus versiones futuras»), así que no hace falta cambiarlo. El favicon del prototipo es el logo publicado.
 
-**`docs/images/logo.svg` no se ha cambiado**: se sustituye solo cuando Miquel lo apruebe. Entonces queda cubierto por `LICENSE-ASSETS.md` («y cualquier versión posterior»). Las propuestas A y B anteriores se guardan en esta carpeta como referencia.
+El apartado Logo del prototipo lo enseña a 64, 32 y 16 px sobre claro y sobre oscuro, y la versión de un color sobre los dos fondos. Las propuestas A y B anteriores se guardan en esta carpeta como referencia.
 
 ## Pendiente de decidir (Miquel)
 
 - Aprobar el prototipo (la línea de arriba).
-- Logo: aprobar la propuesta principal para sustituir `docs/images/logo.svg`.
 - Rediseño, pasos 2 a 6: GSAP o Web Animations API, y si la entrada con puertas sale solo la primera vez por sesión (recomendado).
 - Si «Prueba un texto» llama a la IA de verdad (gasta) o usa una respuesta de prueba local. El prototipo enseña una respuesta de ejemplo y el destino real.
 - Qué nombre de cliente se enseña en directo (`Claude Code`, `Codex`…): el prototipo pone el nombre de la clave y, si se sabe, el del programa.
