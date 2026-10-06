@@ -19,12 +19,14 @@ Forbidden: reading a key from argv. Printing a provider key. Logging anything.
 """
 
 import argparse
+import contextlib
 import getpass
 import os
 import re
 import secrets
 import sys
 import time
+import warnings
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +56,9 @@ _BEARER = re.compile(r"bearer\s+", re.IGNORECASE)
 _KEY_TRIES = 100
 _REPLACE_TRIES = 5
 _BACKUP_TRIES = 1000
+# Longest key read from stdin (real provider keys are well under 300 characters).
+MAX_STDIN_KEY = 4096
+_BOM = "﻿"
 
 PROVIDERS = (
     # (name shown, variable written, usual prefix, option stem)
@@ -155,7 +160,7 @@ def generate_gateway_key(token_hex: Callable[[int], str] = secrets.token_hex) ->
 
 def clean_provider_key(raw: str) -> str:
     """Trim what a paste brings along: spaces, line ends, quotes and a "Bearer " prefix."""
-    key = raw.strip()
+    key = raw.strip().lstrip(_BOM).strip()  # a BOM from a file saved by Notepad
     for _ in range(2):  # '"Bearer sk-..."' and 'Bearer "sk-..."'
         if len(key) >= 2 and key[0] == key[-1] and key[0] in "\"'":
             key = key[1:-1].strip()
@@ -185,11 +190,27 @@ def _checked_provider_key(name: str, variable: str, prefix: str, raw: str) -> st
     return key
 
 
-def _read_stdin_key() -> str:
+def _read_stdin_key(variable: str) -> str:
     try:
-        return sys.stdin.read()
+        raw = sys.stdin.read(MAX_STDIN_KEY + 1)
     except (OSError, UnicodeDecodeError):
-        raise InitError("cannot read the key from stdin") from None
+        raise InitError(f"cannot read {variable} from stdin") from None
+    if len(raw) > MAX_STDIN_KEY:
+        raise InitError(f"{variable} from stdin is longer than {MAX_STDIN_KEY} characters")
+    return raw
+
+
+def _ask_hidden(prompt: str) -> str:
+    """getpass, but never its fallback that shows what is typed (GetPassWarning)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        try:
+            return getpass.getpass(prompt)
+        except getpass.GetPassWarning:
+            raise InitError(
+                "this terminal cannot read a key hidden; use --non-interactive with "
+                "--openai-key-env / --anthropic-key-env"
+            ) from None
 
 
 def _provider_keys(args: argparse.Namespace, interactive: bool) -> dict[str, str | None]:
@@ -200,13 +221,12 @@ def _provider_keys(args: argparse.Namespace, interactive: bool) -> dict[str, str
         if env_name is not None:
             raw = os.environ.get(env_name)
             if raw is None:
-                raise InitError(f"the environment variable {env_name} is not set")
+                # Never the name itself: a key pasted as VAR can look like one (gsk_...).
+                raise InitError(f"the variable named by --{stem}-key-env is not set")
         elif from_stdin:
-            raw = _read_stdin_key()
+            raw = _read_stdin_key(variable)
         elif interactive:
-            raw = getpass.getpass(
-                f"{name} key for {variable} (hidden; Enter to skip this provider): "
-            )
+            raw = _ask_hidden(f"{name} key for {variable} (hidden; Enter to skip this provider): ")
         else:
             raw = ""
         keys[variable] = _checked_provider_key(name, variable, prefix, raw)
@@ -225,6 +245,11 @@ def _check_sources(args: argparse.Namespace, interactive: bool) -> None:
         raise InitError("only one key can come from stdin; use --*-key-env for the other")
     if stdin_sources and interactive:
         raise InitError("--*-key-stdin needs --non-interactive")
+    if stdin_sources and sys.stdin.isatty():
+        raise InitError(
+            "--*-key-stdin reads a key sent through a pipe: pipe the key, or use interactive "
+            "mode (without --non-interactive) to type it hidden"
+        )
 
 
 def _allowed_hosts(value: str | None) -> str:
@@ -350,9 +375,14 @@ def _sync_folder(folder: Path) -> None:
 
 
 def write_env(folder: Path, content: str, *, replace_existing: bool) -> Path | None:
-    """Write `content` to folder/.env atomically, after checking it. Returns the backup."""
+    """Write `content` to folder/.env atomically, after checking it. Returns the backup.
+
+    The temp file is removed whatever happens (also Ctrl-C). Messages never hold the path
+    (it came from --path) nor any value.
+    """
     env = folder / ENV_NAME
     temp = folder / f"{ENV_NAME}.tmp-{secrets.token_hex(8)}"
+    backup: Path | None = None
     try:
         _write_all(_open_new(temp), content.encode("utf-8"))
         try:
@@ -365,16 +395,17 @@ def write_env(folder: Path, content: str, *, replace_existing: bool) -> Path | N
         if replace_existing:
             backup = _backup(env)
         elif os.path.lexists(env):  # appeared after the question: never replaced unasked
-            raise InitError(f"{env} appeared while init was running; nothing was changed")
-        else:
-            backup = None
+            raise InitError(".env appeared while init was running; nothing was changed")
         _replace(temp, env)
-    except InitError:
-        temp.unlink(missing_ok=True)
-        raise
     except OSError:
-        temp.unlink(missing_ok=True)
-        raise InitError(f"could not write {env}; nothing was changed", code=1) from None
+        if backup is None:
+            message = "could not write .env; nothing was changed"
+        else:
+            message = f"could not write .env; it was not replaced and a copy is in {backup.name}"
+        raise InitError(message, code=1) from None
+    finally:
+        with contextlib.suppress(OSError):
+            temp.unlink(missing_ok=True)
     _sync_folder(folder)
     return backup
 
@@ -387,12 +418,14 @@ def _confirm_replace(env: Path, args: argparse.Namespace, interactive: bool) -> 
     if not os.path.lexists(env):
         return False
     if env.is_symlink() or not env.is_file():
-        raise InitError(f"{env} exists and is not a regular file; not touching it")
+        raise InitError(".env exists and is not a regular file; not touching it")
     if args.force:
         return True
     if not interactive:
-        raise InitError(f"{env} already exists; use --force to replace it (a backup is kept)")
-    answer = input(f"{env} already exists. Type yes to replace it (a backup is kept): ")
+        raise InitError(".env already exists; use --force to replace it (a backup is kept)")
+    answer = input(
+        ".env already exists in that folder. Type yes to replace it (a backup is kept): "
+    )
     if answer.strip() != "yes":
         raise InitError("nothing was changed")
     return True
@@ -434,7 +467,7 @@ def run(args: argparse.Namespace) -> int:
             )
         folder = Path(args.path)
         if not folder.is_dir():
-            raise InitError(f"{folder} is not a folder")
+            raise InitError("the folder given with --path does not exist")
         _check_sources(args, interactive)
         hosts = _allowed_hosts(args.allowed_hosts)
         env = folder / ENV_NAME
@@ -447,7 +480,7 @@ def run(args: argparse.Namespace) -> int:
         _warn(str(error))
         return error.code
     except (EOFError, KeyboardInterrupt):
-        _warn("cancelled; nothing was changed")
+        _warn("cancelled")
         return 2
     _report(env, key, backup, keys, show=args.show_key or sys.stdout.isatty())
     return 0

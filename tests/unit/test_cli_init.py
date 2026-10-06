@@ -5,6 +5,8 @@ written. Provider keys are canaries made at runtime (no key-like literal in the 
 """
 
 import argparse
+import contextlib
+import getpass
 import io
 import logging
 import os
@@ -13,6 +15,7 @@ import secrets
 import socket
 import stat
 import sys
+import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -31,6 +34,8 @@ from antifaz.config import Settings, UnsafeConfigError, _gateway_key_problem, ch
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV_NAME = ".env"
+BOM = chr(0xFEFF)
+NL = chr(10)
 VARIABLE = re.compile(r"^#?\s*(ANTIFAZ_[A-Z0-9_]+)=", re.MULTILINE)
 
 
@@ -263,16 +268,92 @@ def test_at_most_one_source_per_key_and_one_stdin_source(
     assert not env_file(tmp_path).exists()
 
 
-def test_a_missing_environment_variable_names_the_variable_only(
+@pytest.mark.parametrize("flag", ["--openai-key-env", "--anthropic-key-env"])
+def test_a_missing_environment_variable_names_the_option_never_its_value(
     tmp_path: Path,
     no_tty: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    flag: str,
 ) -> None:
-    monkeypatch.delenv("CI_NOT_SET", raising=False)
-    assert run(tmp_path, "--non-interactive", "--openai-key-env", "CI_NOT_SET") == 2
-    assert "CI_NOT_SET" in capsys.readouterr().err
+    # Some keys look like variable names (gsk_...): a key pasted as VAR is never echoed.
+    looks_like_a_name = f"gsk_{secrets.token_hex(20)}"
+    monkeypatch.delenv(looks_like_a_name, raising=False)
+    assert run(tmp_path, "--non-interactive", flag, looks_like_a_name) == 2
+    text = output(capsys, caplog)
+    assert looks_like_a_name not in text
+    assert flag in text
     assert not env_file(tmp_path).exists()
+
+
+def test_stdin_key_from_a_terminal_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", _Terminal("never read" + NL))
+    assert run(tmp_path, "--non-interactive", "--openai-key-stdin") == 2
+    assert "pipe" in capsys.readouterr().err
+    assert not env_file(tmp_path).exists()
+
+
+def test_a_huge_stdin_is_refused_naming_the_variable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    huge = "sk-" + "a1" * 5000
+    monkeypatch.setattr("sys.stdin", io.StringIO(huge))
+    assert run(tmp_path, "--non-interactive", "--openai-key-stdin") == 2
+    text = output(capsys, caplog)
+    assert "ANTIFAZ_OPENAI_API_KEY" in text
+    assert "a1a1a1a1" not in text
+    assert not env_file(tmp_path).exists()
+
+
+def test_a_bom_before_the_key_is_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, openai_key: str, anthropic_key: str
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(BOM + openai_key + NL))
+    monkeypatch.setenv("CI_ANTHROPIC", BOM + anthropic_key)
+    code = run(
+        tmp_path,
+        "--non-interactive",
+        "--openai-key-stdin",
+        "--anthropic-key-env",
+        "CI_ANTHROPIC",
+    )
+    assert code == 0
+    values = dotenv_values(env_file(tmp_path))
+    assert values["ANTIFAZ_OPENAI_API_KEY"] == openai_key
+    assert values["ANTIFAZ_ANTHROPIC_API_KEY"] == anthropic_key
+
+
+def test_a_getpass_that_would_echo_is_refused(
+    tmp_path: Path,
+    tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def echoing_getpass(prompt: str = "", stream: Any = None) -> str:
+        warnings.warn("Can not control echo on the terminal.", getpass.GetPassWarning, stacklevel=2)
+        return "sk-would-have-been-echoed"
+
+    monkeypatch.setattr("getpass.getpass", echoing_getpass)
+    assert run(tmp_path) == 2
+    err = capsys.readouterr().err
+    assert "hidden" in err
+    assert "would-have-been-echoed" not in err
+    assert not env_file(tmp_path).exists()
+
+
+def test_a_bad_path_is_not_echoed(
+    tmp_path: Path, no_tty: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret_looking = tmp_path / f"sk-{secrets.token_hex(12)}"
+    assert main(["init", "--path", str(secret_looking), "--non-interactive"]) == 2
+    captured = capsys.readouterr()
+    assert secret_looking.name not in captured.out + captured.err
 
 
 @pytest.mark.parametrize(
@@ -633,6 +714,46 @@ def test_a_locked_file_on_windows_is_retried(
     monkeypatch.setattr(os, "replace", flaky_replace)
     assert run(tmp_path, "--non-interactive") == 0
     assert len(attempts) == 3
+    assert leftovers(tmp_path) == []
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, ValueError])
+def test_the_temp_file_is_always_removed(
+    tmp_path: Path,
+    no_tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+    error: type[BaseException],
+) -> None:
+    env_file(tmp_path).write_bytes(OLD)
+
+    def explode(settings: Settings) -> None:
+        raise error()
+
+    monkeypatch.setattr(init_module, "check_safe_to_start", explode)
+    with contextlib.suppress(KeyboardInterrupt, ValueError):
+        run(tmp_path, "--non-interactive", "--force")
+    assert leftovers(tmp_path) == []
+    assert env_file(tmp_path).read_bytes() == OLD
+
+
+def test_a_failure_after_the_backup_says_the_backup_exists(
+    tmp_path: Path,
+    no_tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    env_file(tmp_path).write_bytes(OLD)
+
+    def broken_replace(src: Any, dst: Any) -> None:
+        raise OSError("broken")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+    assert run(tmp_path, "--non-interactive", "--force") == 1
+    err = capsys.readouterr().err
+    [backup] = backups(tmp_path)
+    assert backup.name in err
+    assert "nothing was changed" not in err
+    assert env_file(tmp_path).read_bytes() == OLD
     assert leftovers(tmp_path) == []
 
 
