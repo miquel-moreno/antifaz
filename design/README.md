@@ -8,12 +8,12 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 
 1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
 2. Ventana, barra lateral, cabecera y móvil. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
-3. Vista «Prueba un texto» con sus cinco estados.
+3. Vista «Prueba un texto» con sus cinco estados. **Hecho** (esta versión).
 4. Animación del antifaz y entrada.
 5. Las otras cuatro vistas con el mismo lenguaje.
 6. Comprobación final.
 
-Hasta el paso 5, el prototipo ya usa los tokens, las fuentes y la ventana nuevas, pero el contenido de las vistas, la animación del antifaz y la entrada son todavía los anteriores: es normal que se vea a medias.
+Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana y «Prueba un texto» nuevos, pero las otras cuatro vistas son todavía las anteriores, y la animación del antifaz y la entrada llegan en el paso 4: es normal que se vea a medias.
 
 ### Paso 2: la ventana
 
@@ -31,6 +31,18 @@ Hasta el paso 5, el prototipo ya usa los tokens, las fuentes y la ventana nuevas
 - **La fila del prototipo** puede ocupar dos líneas a 1280 px: se deja así (no es parte del panel).
 - **Logo nuevo adoptado**: ver «Logo» más abajo.
 - **Control segmentado** (política `default`/`rrhh`, acción por tipo de dato, columnas en el móvil) y **pestañas en píldora** (las del prototipo y la pestaña activa de la barra lateral): la opción elegida es la píldora blanca con sombra de la referencia (`--shadow-pop`), sin el borde oscuro. Ver «Control segmentado y WCAG 1.4.11» en las reglas.
+
+### Paso 3: «Prueba un texto»
+
+- **Compositor**: un solo bloque con el texto y una barra abajo: la política (`default`/`rrhh`, control segmentado con la píldora que se desliza con rebote), «Usar el ejemplo» («Ejemplo» en el móvil) y «Probar». `Ctrl` + `Intro` prueba (`⌘` + `Intro` en Mac; la pista cambia sola). El anillo índigo suave sale solo cuando el foco está en el texto; los botones de la barra llevan su propio anillo. En el móvil la etiqueta «Texto de prueba» no se ve, pero sigue ahí para el lector de pantalla.
+- **«Así viaja tu texto»**: tarjeta con el borde en degradado y un brillo arriba. En este paso enseña **su estado de reposo**, que es el último fotograma de la animación: lo que recibe la IA (con marcadores) y la respuesta con los datos de vuelta (subrayado verde). La animación y «Ver otra vez» llegan en el paso 4; hasta entonces el botón está oculto. Con «reducir movimiento» la tarjeta no sale y queda la nota de siempre.
+- **Las tres columnas** (escribes, recibe la IA, te vuelve): en escritorio, una sola superficie con líneas finas; en tableta, una debajo de otra; **en el móvil, un control segmentado que enseña una columna cada vez** (botones con `aria-pressed`, que controlan las columnas). Se abre siempre en «Recibe la IA», también en el bloqueo, porque ahí está el aviso de «no se ha enviado nada».
+- **Datos encontrados**: chips con el número en un círculo. En el móvil pasan a la línea siguiente si no caben (antes hacían scroll de lado sin que se notara ni se pudiera usar con el teclado).
+- **Metadatos**: una línea gris, separada solo por espacio.
+- **Avisos**: bloques suaves del color del estado, con icono, título y pasos (cadena rota) o explicación (error). El bloqueo es una nota roja dentro de la columna 2. El estado vacío explica las tres cosas que se verán y ofrece «Usar el ejemplo».
+- **Lector de pantalla**: un mensaje `role="status"` dice el resultado cada vez que cambia (al probar, al usar el ejemplo o al cambiar de estado), por ejemplo «Bloqueado: no se ha enviado nada…». No se dice al abrir la página.
+- **Privacidad**: los resultados solo enseñan el ejemplo inventado. Lo que alguien escriba en el cuadro no se copia a ningún sitio de la página: «Probar» enseña el resultado del ejemplo.
+- Sin scroll horizontal ni textos cortados a 390, 768 y 1280 px, en los cinco estados y en los dos temas; consola limpia.
 
 ## La dirección visual
 
@@ -77,7 +89,7 @@ La fila de arriba, fuera de la ventana y con el borde discontinuo y la etiqueta 
 
 ## Las secciones
 
-1. **Prueba un texto** (Playground). Es la muestra elegida, casi sin cambios: cuadro de texto con selector de política (`default`/`rrhh`), «Usar el ejemplo» y «Probar» (también con Ctrl + Enter); la animación «Así viaja tu texto»; las tres columnas (lo que escribes, lo que recibe la IA, lo que te vuelve) como una sola superficie; la línea de datos encontrados y el resumen. En el móvil, las tres columnas pasan a un selector de columna para no hacer scroll.
+1. **Prueba un texto** (Playground). Cuadro de texto con selector de política (`default`/`rrhh`), «Usar el ejemplo» y «Probar» (también con Ctrl o ⌘ + Intro); la tarjeta «Así viaja tu texto»; las tres columnas (lo que escribes, lo que recibe la IA, lo que te vuelve) como una sola superficie; la línea de datos encontrados y los metadatos. En el móvil, las tres columnas pasan a un selector de columna para no hacer scroll. Detalle en «Paso 3».
 2. **En directo**. Cabecera con «Conectado» y la fecha. Una superficie con los contadores del día: datos protegidos (número grande y barras por tipo), bloqueos, envíos a IA local y la cadena de evidencias (con una cadena dibujada que marca el eslabón roto). Debajo, «Últimas peticiones»: hora, clave y programa, qué ha pasado y una etiqueta (ocultados N, bloqueado, IA local, sin datos, error, alerta). **Solo tipos y cantidades: nunca un valor ni un marcador.** En el prototipo llega una petición inventada cada 6 segundos mientras se mira la vista y los contadores suben; al salir de la vista o esconder la pestaña, se para. Al pie, el aviso de que si nadie mira no se gasta CPU (0 %).
 3. **Claves**. Botón «Crear clave» y una tabla en una superficie: nombre e id, qué puede usar, política, límites, último uso, estado (punto y palabra) y «Revocar». Una clave revocada sale tachada y en gris. **La clave nunca aparece, ni un trozo**: el pie lo explica. En el móvil, cada fila pasa a ser una tarjeta con sus etiquetas.
 4. **Políticas**. Selector de la política que se edita (`default`/`rrhh`) con su revisión, huella y cuántas claves la usan; la explicación de las cuatro acciones; una fila por tipo de dato con el control de cuatro opciones **Ocultar / Permitir / Bloquear / IA local**; las reglas de seguridad fijas (con candado) y la de categorías especiales (IA local o bloquear); y la vista previa del YAML, que cambia al tocar una opción y resalta en índigo las líneas cambiadas. «Guardar como revisión N» solo se activa si hay cambios, y un mensaje dice cuántos hay.
@@ -90,7 +102,7 @@ Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 | Estado | Qué se ve |
 |---|---|
 | Vacío | Playground sin texto y con una explicación; en directo a cero y sin peticiones; sin claves (con «Crear la primera clave»); aviso en Políticas de que se usa la política por defecto |
-| Con datos | El caso normal, con la animación al abrir el Playground |
+| Con datos | El caso normal: la tarjeta «Así viaja tu texto» (la animación llega en el paso 4), las tres columnas y los datos encontrados |
 | Bloqueo | El texto habla de salud y la política `rrhh` lo bloquea: «no se ha enviado nada», con el motivo fijo (`special_category`); el evento aparece arriba en directo y los bloqueos suben a 4 |
 | Error | Anthropic no responde: aviso ámbar arriba en todas las vistas, la tercera columna sin respuesta, el evento «Error 504», un punto en la pestaña Estado y Anthropic en rojo en proveedores |
 | Cadena rota | Aviso rojo arriba con qué ha pasado y qué hacer, el estado de la cabecera en rojo, la cadena rota en En directo (eslabón marcado), el evento «Alerta» y Evidencias en rojo en Estado |
@@ -98,7 +110,7 @@ Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 
 ## La animación del antifaz (F3)
 
-El antifaz pasa por encima de la frase como una línea de luz; a su paso, cada dato (nombre, DNI, email e IBAN) se convierte en su marcador justo cuando el antifaz lo alcanza. Tres puntos viajan hacia la IA, aparece la respuesta con marcadores, el antifaz vuelve a pasar y los datos vuelven a su sitio con un subrayado verde. Dura unos 7 segundos y se repite con «Ver otra vez». Está hecha con CSS (dos capas de texto que se recortan al ritmo del antifaz); el JavaScript solo calcula cuándo llega el antifaz a cada dato. En reposo enseña el final.
+**Se rehace en el paso 4** (la de antes se ha quitado del prototipo). Lo que tendrá, según el encargo: el antifaz pasa por encima de la frase como una línea de luz; a su paso, cada dato (nombre, DNI, email e IBAN) se convierte en su marcador justo cuando el antifaz lo alcanza. Tres puntos viajan hacia la IA, aparece la respuesta con marcadores, el antifaz vuelve a pasar y los datos vuelven a su sitio con un subrayado verde. Se repite con «Ver otra vez». En reposo enseña el final, que es lo que ya se ve en el paso 3.
 
 Con «reducir movimiento» no se anima nada: la animación se oculta y quedan las tres columnas, que son el antes y el después estático. Para lectores de pantalla, la animación está oculta y la sustituye una frase que cuenta lo mismo.
 

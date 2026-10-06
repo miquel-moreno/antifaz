@@ -13,9 +13,10 @@
    glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
    The window is a size container, so "Móvil" and a real phone use the same rules.
    Colours come only from design/tokens.css.
-   Redesign, step 2: the shell (frosted window, sidebar, header, phone bar) is the new one;
-   the Playground content, the mask animation, the intro and the other four views are still
-   the previous ones and change in steps 3-5.
+   Redesign, step 3: the shell (frosted window, sidebar, header, phone bar) and «Prueba un
+   texto» with its five states are the new ones. The mask animation and the intro come in
+   step 4 (until then the journey card shows its resting state, the final frame) and the
+   other four views in step 5.
    Shell pieces use their own prefixed class names (app-*, ambient-*, proto-*) so nothing
    collides with the views (in the reference, the intro doors were called .top like the header
    and took its z-index). */
@@ -189,7 +190,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 
 /* Composer (Playground) */
 .composer{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:0 0 0 1px var(--color-control),var(--shadow-drop);overflow:hidden;transition:box-shadow .3s var(--ease-out)}
-.composer:focus-within{box-shadow:0 0 0 1.5px var(--color-focus),0 0 0 6px var(--color-accent-soft),0 10px 28px -12px var(--color-glow)}
+.composer:has(textarea:focus){box-shadow:0 0 0 1.5px var(--color-focus),0 0 0 6px var(--color-accent-soft),0 10px 28px -12px var(--color-glow)}
 .composer textarea:focus-visible{box-shadow:none}
 .composer label.cap{display:block;padding:16px 20px 0;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
 .composer textarea{display:block;width:100%;min-height:92px;border:0;outline:none;resize:vertical;background:transparent;padding:6px 20px 14px;font-size:16px;line-height:1.6;color:var(--color-text)}
@@ -199,7 +200,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .bar .sp{flex:1}
 #pg-example .short{display:none}
 .kh{font-size:var(--text-xs);color:var(--color-text-faint);white-space:nowrap}
-.kh kbd{font-family:var(--font-sans);font-size:var(--text-2xs);padding:1px 5px;border-radius:5px;background:var(--color-surface);box-shadow:var(--shadow-pop);color:var(--color-text-muted)}
+.kh kbd{margin-inline:1px;font-family:var(--font-sans);font-size:var(--text-2xs);padding:1px 5px;border-radius:5px;background:var(--color-surface);box-shadow:var(--shadow-pop);color:var(--color-text-muted)}
 .hint{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px;margin-top:-8px}
 .hint .ic{width:15px;height:15px}
 
@@ -226,67 +227,28 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .empty p{max-width:48ch;color:var(--color-text-muted)}
 .empty p b{color:var(--color-text);font-weight:var(--weight-semibold)}
 
-/* ---------- The journey (mask animation, F3) ---------- */
-.journey{position:relative;border-radius:20px;padding:20px 26px 26px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid transparent;background:linear-gradient(var(--color-stage),var(--color-stage)) padding-box,linear-gradient(135deg,var(--color-edge),transparent 35%,transparent 65%,var(--color-edge)) border-box;box-shadow:0 10px 30px -16px var(--color-glow)}
+/* ---------- «Así viaja tu texto»: card with a gradient border and a glow on top ----------
+   Step 3 shows only its resting state (the final frame: what the AI receives and the reply
+   with the data back). The mask animation and «Ver otra vez» come in step 4. */
+.journey{position:relative;border-radius:20px;padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid transparent;
+  background:linear-gradient(color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent),color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent)) padding-box,linear-gradient(135deg,var(--color-edge),transparent 35%,transparent 65%,var(--color-edge)) border-box;
+  box-shadow:0 10px 30px -16px var(--color-glow)}
 .journey::before{content:"";position:absolute;inset:-60% 0 auto;height:80%;background:radial-gradient(45% 60% at 50% 0%,var(--color-accent-soft),transparent 70%);pointer-events:none}
-.jhead{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.jhead{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px}
 .eyebrow{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
-#mask-anim{--sweep:cubic-bezier(.45,.05,.35,1);display:flex;flex-direction:column;gap:16px}
-.mrow{position:relative;display:grid;gap:6px}
-.mcap{display:grid;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
-.mcap>span{grid-area:1/1}
-.wipe{position:relative;display:grid;font-size:19px;line-height:1.8;letter-spacing:-.016em;overflow-wrap:anywhere}
-.wipe>.layer{grid-area:1/1}
-.layer-before{clip-path:inset(0 0 0 100%)}
-.cap-before{opacity:0}
-.glider{position:absolute;top:-10px;bottom:-10px;left:100%;width:2px;transform:translateX(-50%);opacity:0;pointer-events:none}
-.glider::before{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(180deg,transparent,var(--color-accent) 18%,var(--color-accent) 82%,transparent);box-shadow:0 0 16px 3px var(--color-glow)}
-.glider::after{content:"";position:absolute;top:8%;bottom:8%;right:1px;width:90px;background:linear-gradient(90deg,transparent,var(--color-accent-soft));filter:blur(2px)}
-.glider svg{position:absolute;top:50%;left:50%;width:50px;height:25px;transform:translate(-50%,-50%);fill:var(--color-accent);filter:drop-shadow(0 0 12px var(--color-glow)) drop-shadow(0 4px 8px var(--color-mask-drop))}
-.flight{position:relative;display:flex;align-items:center;gap:12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.jstage{position:relative;display:flex;flex-direction:column;gap:16px}
+.mrow{display:grid;gap:6px}
+.mcap{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
+.jline{font-size:19px;line-height:1.8;letter-spacing:-.016em;overflow-wrap:anywhere}
+.flight{display:flex;align-items:center;gap:12px;font-size:var(--text-sm);color:var(--color-text-muted)}
 .flight span{white-space:nowrap}
-.flight .track{position:relative;flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent);transform-origin:left}
-.flight .track i{position:absolute;top:-3px;left:0;width:7px;height:7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 12px 2px var(--color-glow);opacity:0}
+.flight .track{flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent)}
 
 /* Tokens in text */
 mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;border-radius:6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .ptype{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:var(--weight-semibold);letter-spacing:.04em;color:var(--color-pii);margin-left:5px;vertical-align:1px}
 .marker{display:inline-block;font-family:var(--font-mono);font-size:.78em;font-weight:var(--weight-medium);letter-spacing:0;line-height:1.45;white-space:nowrap;background:var(--color-accent-soft);color:var(--color-accent-ink);border-radius:var(--radius-sm);padding:0 6px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent);vertical-align:1px}
 .restored{background:linear-gradient(var(--color-ok),var(--color-ok)) 0 100%/100% 1.5px no-repeat;padding-bottom:1px}
-
-/* Timeline: scan → mask sweeps → markers pop as it passes → flight → reply → data comes back */
-.play .scan{animation:scan .9s var(--ease-out) both;animation-delay:var(--d)}
-.play .w1 .layer-before{animation:hide 2.1s var(--sweep) 1.3s both}
-.play .w1 .layer-after{animation:show 2.1s var(--sweep) 1.3s both}
-.play .w1 .glider{animation:glide 2.1s var(--sweep) 1.3s both,gfade 2.1s linear 1.3s both}
-.play .w1 .marker{animation:pop .7s var(--ease-spring) both;animation-delay:var(--d)}
-.play .r1 .cap-before{animation:out .35s var(--ease-out) 3.3s both}
-.play .r1 .cap-after{animation:in .5s var(--ease-out) 3.35s both}
-.play .flight{animation:in .5s var(--ease-out) 3.4s both}
-.play .flight .track{animation:draw .6s var(--ease-out) 3.5s both}
-.play .flight .track i{animation:fly 1s cubic-bezier(.5,0,.3,1) both}
-.play .flight .track i:nth-child(1){animation-delay:3.75s}
-.play .flight .track i:nth-child(2){animation-delay:3.87s}
-.play .flight .track i:nth-child(3){animation-delay:3.99s}
-.play .r2{animation:rise .7s var(--ease-out) 4.6s both}
-.play .w2 .layer-before{animation:hide 1.9s var(--sweep) 5.3s both}
-.play .w2 .layer-after{animation:show 1.9s var(--sweep) 5.3s both}
-.play .w2 .glider{animation:glide 1.9s var(--sweep) 5.3s both,gfade 1.9s linear 5.3s both}
-.play .w2 .restored{animation:under .7s var(--ease-out) both,okglow 1.2s var(--ease-out) both;animation-delay:var(--d),var(--d)}
-.play .r2 .cap-before{animation:out .35s var(--ease-out) 7.15s both}
-.play .r2 .cap-after{animation:in .5s var(--ease-out) 7.2s both}
-@keyframes scan{0%{box-shadow:0 0 0 0 transparent}40%{box-shadow:0 0 0 4px var(--color-pii-glow)}100%{box-shadow:0 0 0 0 transparent}}
-@keyframes hide{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 0 100%)}}
-@keyframes show{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-@keyframes glide{from{left:0%}to{left:100%}}
-@keyframes gfade{0%{opacity:0}8%,90%{opacity:1}100%{opacity:0}}
-@keyframes pop{0%{opacity:0;transform:scale(.55);filter:blur(5px)}60%{opacity:1;transform:scale(1.08);filter:none;box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px 2px var(--color-glow)}100%{opacity:1;transform:none}}
-@keyframes out{from{opacity:1;transform:none;filter:none}to{opacity:0;transform:translateY(-4px);filter:blur(3px)}}
-@keyframes in{from{opacity:0;transform:translateY(4px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
-@keyframes draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@keyframes fly{0%{left:0;opacity:0}12%{opacity:1}85%{opacity:1}100%{left:calc(100% - 7px);opacity:0}}
-@keyframes under{from{background-size:0% 1.5px}to{background-size:100% 1.5px}}
-@keyframes okglow{0%{text-shadow:none}35%{text-shadow:0 0 14px var(--color-ok)}100%{text-shadow:none}}
 
 .rm-note{display:none;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted)}
 .reduce-motion .journey{display:none}
@@ -457,6 +419,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .panes{grid-template-columns:minmax(0,1fr)}
   .pane+.pane{border-left:0;border-top:1px solid var(--color-line)}
   .pol-grid{grid-template-columns:minmax(0,1fr)}
+  .flight .lbl2{display:none}
   .help{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @container app (max-width: 800px){
@@ -485,7 +448,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .vh h1{font-size:var(--text-title-phone)}
   .vh p{font-size:13.5px;margin-top:4px}
   .composer{border-radius:16px}
-  .composer label.cap{display:none}
+  .composer label.cap{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .composer textarea{min-height:0;height:74px;font-size:14.5px;line-height:1.5;padding:12px 14px 8px;resize:none}
   .bar{padding:8px 8px 8px 12px;gap:8px;flex-wrap:nowrap}
   .bar .lbl,.kh{display:none}
@@ -494,9 +457,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   #pg-example .short{display:inline}
   .seg label{padding:4px 9px}
   .hint{font-size:var(--text-xs);margin-top:-6px}
-  .journey{padding:14px 14px 16px;gap:10px;border-radius:16px}
-  .wipe{font-size:14.5px;line-height:1.7}
-  .glider svg{width:38px;height:19px}
+  .journey{padding:12px 14px 16px;gap:8px;border-radius:16px}
+  .jstage{gap:10px}
+  .jline{font-size:14.5px;line-height:1.7}
   .flight{font-size:11.5px;gap:8px}
   .flight .lbl2{display:none}
   .callout{padding:12px 14px;font-size:var(--text-sm)}
@@ -512,9 +475,10 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .pane{padding:14px 16px;animation:rise .4s var(--ease-out)}
   .ptext{font-size:13.5px;line-height:1.75}
   .pfoot{font-size:11.5px}
-  .found{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
-  .found::-webkit-scrollbar{display:none}
+  .found{gap:5px}
   .found dt{display:none}
+  .found dd{font-size:var(--text-xs);padding:3px 4px 3px 9px;gap:6px}
+  .found dd b{min-width:18px;height:18px;font-size:10.5px}
   .meta{font-size:11.5px;gap:2px 12px}
   /* En directo */
   .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -698,7 +662,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
           <form class="composer rv" style="--i:4" id="pg-form" novalidate>
             <label class="cap" for="pg-text">Texto de prueba</label>
-            <textarea id="pg-text" name="pg-text" rows="3" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
+            <textarea id="pg-text" name="pg-text" rows="3" aria-keyshortcuts="Control+Enter Meta+Enter" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
             <div class="bar">
               <span class="lbl" aria-hidden="true">Política</span>
               <fieldset class="seg mono-l" style="--n:2">
@@ -708,7 +672,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                 <input type="radio" name="pg-policy" id="pg-pol-rrhh" value="rrhh"><label for="pg-pol-rrhh">rrhh</label>
               </fieldset>
               <span class="sp"></span>
-              <span class="kh"><kbd>Ctrl</kbd> <kbd>↵</kbd> para probar</span>
+              <span class="kh" aria-hidden="true"><kbd id="pg-mod">Ctrl</kbd> <kbd>↵</kbd> para probar</span>
               <button class="btn" type="button" id="pg-example"><span><span class="full">Usar el e</span><span class="short">E</span>jemplo</span></button>
               <button class="btn primary" type="submit">Probar</button>
             </div>
@@ -724,38 +688,31 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <section class="journey rv" style="--i:6" data-only="data broken" aria-labelledby="j-t">
             <div class="jhead">
               <h2 class="eyebrow" id="j-t">Así viaja tu texto</h2>
-              <button class="btn ghost" type="button" id="anim-replay"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
+              <!-- «Ver otra vez» replays the mask animation: it comes with the animation (step 4). -->
+              <button class="btn ghost" type="button" id="anim-replay" hidden><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
             </div>
-            <p class="sr-only">Animación: el antifaz pasa por encima del texto y tapa el nombre, el DNI, el email y el IBAN. La IA recibe marcadores. La respuesta vuelve y los datos aparecen otra vez en su sitio. Abajo tienes el mismo contenido sin animación.</p>
-            <div id="mask-anim" aria-hidden="true">
-              <div class="mrow r1">
-                <div class="mcap"><span class="cap-before">Tú escribes</span><span class="cap-after">La IA recibe</span></div>
-                <div class="wipe w1">
-                  <div class="layer layer-before">Hola, soy <mark class="pii scan">Carmen Prueba López</mark>, con DNI <mark class="pii scan">12345678Z</mark>. Escribid a <mark class="pii scan">ana.prueba@example.com</mark> y pagad en <mark class="pii scan">ES9121000418450200051332</mark>.</div>
-                  <div class="layer layer-after">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</div>
-                  <span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span>
-                </div>
+            <p class="sr-only">La IA recibe el texto con marcadores en lugar del nombre, el DNI, el email y el IBAN, y su respuesta te llega con los datos otra vez en su sitio. Abajo tienes el mismo contenido, columna por columna.</p>
+            <div class="jstage" id="mask-anim" aria-hidden="true">
+              <div class="mrow">
+                <p class="mcap">La IA recibe</p>
+                <p class="jline">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</p>
               </div>
-              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"><i></i><i></i><i></i></span><span class="lbl2">vuelve la respuesta</span></div>
-              <div class="mrow r2">
-                <div class="mcap"><span class="cap-before">La IA responde</span><span class="cap-after">Te llega, con tus datos</span></div>
-                <div class="wipe w2">
-                  <div class="layer layer-before">Gracias, <span class="marker">[[PERSON_1]]</span>. Enviaremos el recibo a <span class="marker">[[EMAIL_1]]</span> cuando llegue el pago a <span class="marker">[[IBAN_1]]</span>.</div>
-                  <div class="layer layer-after">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</div>
-                  <span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span>
-                </div>
+              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"></span><span class="lbl2">vuelve la respuesta</span></div>
+              <div class="mrow">
+                <p class="mcap">Te llega, con tus datos</p>
+                <p class="jline">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
               </div>
             </div>
           </section>
           <p class="rm-note" data-only="data broken"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Movimiento reducido: no hay animación. Abajo tienes el antes y el después.</p>
 
-          <div class="pswitch" role="group" aria-label="Qué columna ver" data-p="2" data-only="data blocked error broken">
+          <div class="pswitch" role="group" aria-label="Qué columna ver" aria-controls="pg-panes" data-p="2" data-only="data blocked error broken">
             <span class="thumb" aria-hidden="true"></span>
             <button type="button" data-p="1" aria-pressed="false">Escribes</button>
             <button type="button" data-p="2" aria-pressed="true">Recibe la IA</button>
             <button type="button" data-p="3" aria-pressed="false">Te vuelve</button>
           </div>
-          <div class="panes rv" style="--i:7" data-p="2" data-only="data blocked error broken">
+          <div class="panes rv" style="--i:7" id="pg-panes" data-p="2" data-only="data blocked error broken">
             <article class="pane p1" aria-labelledby="pane1-t">
               <div class="ph"><span class="num" aria-hidden="true">1</span><h2 id="pane1-t">Lo que escribes</h2></div>
               <p class="ptext">Hola, soy <mark class="pii">Carmen Prueba López<span class="ptype">NOMBRE</span></mark>, con DNI <mark class="pii">12345678Z<span class="ptype">DNI</span></mark>. Escribid a mi gestora <mark class="pii">ana.prueba@example.com<span class="ptype">EMAIL</span></mark> y haced el pago en <mark class="pii">ES9121000418450200051332<span class="ptype">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="ptype">SALUD</span></mark> desde el lunes.</span></p>
@@ -794,6 +751,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             <p class="meta" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política rrhh</span><span>Nada ha salido de tu red</span></p>
             <p class="meta" data-only="error" hidden><span>4 datos ocultados</span><span>Política default</span><span>Anthropic no responde</span></p>
           </div>
+          <!-- Says what came out each time the result changes (screen readers) -->
+          <p class="sr-only" id="pg-live" role="status" aria-live="polite"></p>
         </section>
 
         <!-- ===================== 2 · En directo ===================== -->
@@ -1080,7 +1039,6 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     if(!calm()) enter(view);
     if(focus) tab.focus();
     reveal(tab);
-    if(view.id==="panel-playground") setTimeout(playMask,250);
     syncLive(); }
   tabs.forEach(function(tab,i){
     tab.addEventListener("click",function(){ select(tab,false); });
@@ -1221,21 +1179,30 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     var out=document.getElementById("check-time"), b=this; b.disabled=true; out.textContent="Comprobando…";
     setTimeout(function(){ chk++; out.textContent="Comprobado a las 10:"+(44+chk>59?59:44+chk); b.disabled=false; },calm()?0:700); });
 
-  /* ---- Prototype states ---- */
+  /* ---- Prototype states. Only the synthetic example is ever shown in the results: what
+     someone types is never copied anywhere on the page. ---- */
   var EX="Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
   var TXT={empty:"",data:EX,error:EX,broken:EX,blocked:EX+" Está de baja médica desde el lunes."};
-  var txt=document.getElementById("pg-text");
-  function setState(s){ app.setAttribute("data-state",s);
+  var OK="Listo. 4 datos encontrados y ocultados: la IA recibe marcadores y la respuesta te vuelve con tus datos.";
+  var SAY={empty:"",data:OK,broken:OK,
+    blocked:"Bloqueado: no se ha enviado nada. El texto habla de salud y la política rrhh bloquea esos textos.",
+    error:"Sin respuesta. Los 4 datos se ocultaron, pero Anthropic no ha respondido a tiempo."};
+  var txt=document.getElementById("pg-text"), live=document.getElementById("pg-live");
+  /* Cleared first so the same message is read again after another «Probar» */
+  function say(s){ live.textContent=""; if(SAY[s]) setTimeout(function(){ live.textContent=SAY[s]; },60); }
+  function setState(s,announce){ app.setAttribute("data-state",s);
     document.querySelectorAll("[data-only]").forEach(function(n){ n.hidden=n.getAttribute("data-only").split(" ").indexOf(s)===-1; });
     txt.value=TXT[s]; document.getElementById(s==="blocked"?"pg-pol-rrhh":"pg-pol-default").checked=true;
-    setPane(s==="blocked"?"1":"2"); renderLive(s); syncLive(); playMask(); }
-  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value); }); });
-  function useExample(){ document.getElementById("st-data").checked=true; setState("data"); }
+    setPane("2"); renderLive(s); syncLive(); if(announce) say(s); }
+  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value,true); }); });
+  function useExample(){ document.getElementById("st-data").checked=true; setState("data",true); }
   document.getElementById("pg-example").addEventListener("click",useExample);
-  document.querySelector('[data-action="example"]').addEventListener("click",useExample);
+  document.querySelector('[data-action="example"]').addEventListener("click",function(){ useExample(); txt.focus(); });
   var form=document.getElementById("pg-form");
-  form.addEventListener("submit",function(e){ e.preventDefault(); if(app.getAttribute("data-state")==="empty") useExample(); else playMask(); });
+  form.addEventListener("submit",function(e){ e.preventDefault();
+    if(app.getAttribute("data-state")==="empty") useExample(); else say(app.getAttribute("data-state")); });
   txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
+  if(/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent)) document.getElementById("pg-mod").textContent="⌘";
 
   /* ---- Window size: the tab list is vertical on the sidebar and a row on the phone bar ---- */
   function syncOrientation(){ tablist.setAttribute("aria-orientation", app.clientWidth<=640?"horizontal":"vertical"); }
@@ -1248,30 +1215,12 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     root.classList.toggle("chrome-hidden", d>0 && y>140); lastY=y; },{passive:true});
 
   /* ---- Simulated phone ---- */
-  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked); setTimeout(playMask,600); });
+  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked); });
 
   /* ---- Reduced motion: system setting, or the toggle to preview it ---- */
   var mBox=document.getElementById("proto-motion");
   function syncM(){ if(reduceQ.matches){ mBox.checked=true; mBox.disabled=true; } root.classList.toggle("reduce-motion",mBox.checked); }
-  mBox.addEventListener("change",function(){ syncM(); playMask(); }); reduceQ.addEventListener("change",syncM); syncM();
-
-  /* ---- Mask animation: each token reacts when the mask actually reaches it.
-     The sweep eases with cubic-bezier(.45,.05,.35,1); invert it to time each token. ---- */
-  function bez(x1,y1,x2,y2){ function c(a,b,t){ return 3*a*t*(1-t)*(1-t)+3*b*t*t*(1-t)+t*t*t; }
-    return function(p){ var lo=0,hi=1,t=.5; for(var k=0;k<30;k++){ t=(lo+hi)/2; if(c(y1,y2,t)<p) lo=t; else hi=t; } return c(x1,x2,t); }; }
-  var tAt=bez(.45,.05,.35,1), stage=document.getElementById("mask-anim"), pg=document.getElementById("panel-playground");
-  function stamp(wipe,sel,start,dur,lead){
-    var W=wipe.getBoundingClientRect(); if(!W.width) return;
-    wipe.querySelectorAll(sel).forEach(function(n){ var r=n.getBoundingClientRect(), p=Math.min(1,Math.max(0,(r.left+r.width*lead-W.left)/W.width));
-      n.style.setProperty("--d",(start+dur*tAt(p)).toFixed(3)+"s"); }); }
-  function playMask(){ var s=app.getAttribute("data-state");
-    if(calm()||(s!=="data"&&s!=="broken")||pg.hidden) return;
-    stage.classList.remove("play");
-    stage.querySelectorAll(".w1 .scan").forEach(function(m,i){ m.style.setProperty("--d",(.25+i*.2)+"s"); });
-    stamp(stage.querySelector(".w1"),".layer-after .marker",1.3,2.1,.15);
-    stamp(stage.querySelector(".w2"),".layer-after .restored",5.3,1.9,.1);
-    void stage.offsetWidth; stage.classList.add("play"); }
-  document.getElementById("anim-replay").addEventListener("click",playMask);
+  mBox.addEventListener("change",syncM); reduceQ.addEventListener("change",syncM); syncM();
 
   loadPreset("default");
   setState("data");
