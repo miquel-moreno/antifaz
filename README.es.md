@@ -58,7 +58,15 @@ docker compose up -d
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.2.0"}
 ```
 
-`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. En Windows, quita `--user` (en PowerShell, usa `-v "${PWD}:/work"`). El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: la imagen 0.1.0 solo sirve.
+`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: la imagen 0.1.0 solo sirve.
+
+En Windows (PowerShell), `curl.exe` en vez de `curl`, sin `--user` y con `${PWD}`, en una sola línea (o partida con una comilla invertida `` ` `` al final de cada línea, no con `\`):
+
+```powershell
+curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+```
 
 **Con la v0.1.0 (hoy), a mano:**
 
