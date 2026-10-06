@@ -1,6 +1,6 @@
 # ADR-0017 · Instalación y secretos en la CLI
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-10-06)
 - **Fecha:** 2026-10-06
 - **Concreta:** el bloque de la v0.2 "Instalación en un minuto" (issues 41 `init`, 42 imagen, 31 `setup claude-code`, 44 `setup codex`) y la fila "Arranque" del modelo de amenazas
 
