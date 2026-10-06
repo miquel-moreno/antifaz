@@ -13,13 +13,17 @@
    glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
    The window is a size container, so "Móvil" and a real phone use the same rules.
    Colours come only from design/tokens.css.
-   Step 1 of the redesign (tokens and local fonts) only: the window, the views and the
-   animation are still the previous ones and change in steps 2-5. */
+   Redesign, step 2: the shell (frosted window, sidebar, header, phone bar) is the new one;
+   the Playground content, the mask animation, the intro and the other four views are still
+   the previous ones and change in steps 3-5.
+   Shell pieces use their own prefixed class names (app-*, ambient-*, proto-*) so nothing
+   collides with the views (in the reference, the intro doors were called .top like the header
+   and took its z-index). */
 
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 html{background:var(--color-bg)}
-body{margin:0;background-color:var(--color-bg);background-image:radial-gradient(60% 50% at 20% 0%,var(--color-ambient-1),transparent 70%),radial-gradient(50% 40% at 90% 10%,var(--color-ambient-2),transparent 70%);background-repeat:no-repeat;color:var(--color-text);font-family:var(--font-sans);font-optical-sizing:auto;font-size:var(--text-md);line-height:var(--leading-body);letter-spacing:var(--tracking-tight);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:var(--font-features)}
+body{margin:0;background:transparent;color:var(--color-text);font-family:var(--font-sans);font-optical-sizing:auto;font-size:var(--text-md);line-height:var(--leading-body);letter-spacing:var(--tracking-tight);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:var(--font-features)}
 button,input,textarea,select{font:inherit;color:inherit;letter-spacing:inherit}
 h1,h2,h3,p,ol,ul,dl,dd,figure{margin:0}
 ol,ul{padding:0;list-style:none}
@@ -36,9 +40,10 @@ h1,h2,h3{text-wrap:balance}
 .page{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
 
 /* ---------- Prototype strip (not part of the product) ---------- */
-.proto{display:flex;align-items:center;gap:10px 16px;font-size:var(--text-sm);color:var(--color-text-muted);min-width:0;flex-wrap:wrap}
-.proto-t b{color:var(--color-text);font-weight:var(--weight-semibold)}
-.proto .sp{flex:1}
+.proto-strip{display:flex;align-items:center;gap:10px 16px;padding:8px 10px 8px 12px;border:1px dashed var(--color-line-strong);border-radius:var(--radius-callout);font-size:var(--text-sm);color:var(--color-text-muted);min-width:0;flex-wrap:wrap}
+.proto-badge{font-family:var(--font-mono);font-size:var(--text-2xs);font-weight:var(--weight-semibold);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-surface-3);padding:3px 8px;border-radius:var(--radius-pill);white-space:nowrap}
+.proto-title b{color:var(--color-text);font-weight:var(--weight-semibold)}
+.proto-spacer{flex:1}
 .chips{display:flex;gap:2px;padding:3px;border-radius:var(--radius-pill);background:var(--color-surface-3);border:0;margin:0;min-width:0;overflow-x:auto;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chips legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -55,53 +60,86 @@ h1,h2,h3{text-wrap:balance}
 .tg input:focus-visible+.sw{box-shadow:0 0 0 2px var(--color-focus)}
 .tg input:disabled+.sw{opacity:.6}
 
-/* ---------- Window ---------- */
-.window{container:app/inline-size;border-radius:var(--radius-xl);background:var(--color-window);box-shadow:var(--shadow-window);overflow:clip;transition:max-width .55s var(--ease-out)}
-.shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:760px}
-.stage-wrap.is-mobile .window{max-width:390px;margin-inline:auto;border-radius:var(--radius-phone)}
+/* ---------- Ambient light behind the window (decoration; moves only with transform) ---------- */
+.ambient{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.ambient-blob{position:absolute;width:52vmax;height:52vmax;border-radius:50%;filter:blur(70px)}
+.ambient-blob.is-1{left:-14vmax;top:-26vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%)}
+.ambient-blob.is-2{right:-18vmax;top:-10vmax;background:radial-gradient(circle,var(--color-ambient-2),transparent 65%)}
+.ambient-blob.is-3{left:30vmax;bottom:-36vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%);opacity:.6}
+@media (prefers-reduced-motion: no-preference){
+  :root:not(.reduce-motion) .ambient-blob{will-change:transform}
+  :root:not(.reduce-motion) .ambient-blob.is-1{animation:ambient-drift-a 26s ease-in-out infinite alternate}
+  :root:not(.reduce-motion) .ambient-blob.is-2{animation:ambient-drift-b 32s ease-in-out infinite alternate}
+  :root:not(.reduce-motion) .ambient-blob.is-3{animation:ambient-drift-a 38s ease-in-out infinite alternate-reverse}
+}
+@keyframes ambient-drift-a{to{transform:translate3d(8vmax,6vmax,0) scale(1.08)}}
+@keyframes ambient-drift-b{to{transform:translate3d(-7vmax,9vmax,0) scale(.94)}}
+/* Fine grain over the page (an SVG noise, no colour of its own) */
+body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;opacity:var(--grain-opacity);mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
-.side{background:var(--color-sidebar);border-right:1px solid var(--color-line);padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px}
-.brand{display:flex;align-items:center;gap:10px;padding:0 8px}
-.logo{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px var(--logo-ring),inset 0 1px 0 var(--logo-highlight),0 6px 14px -6px var(--color-glow);flex:none}
-.logo svg{width:20px;height:10px;fill:var(--logo-mask)}
-.brand b{font-size:16.5px;font-weight:var(--weight-bold);letter-spacing:-.025em}
-.brand .ver{font-size:var(--text-2xs);color:var(--color-text-faint);font-family:var(--font-mono);margin-left:auto}
-.m-only{display:none}
-.nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px;letter-spacing:.01em}
-.nav{display:flex;flex-direction:column;gap:2px}
-.tab{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:9px;background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font-size:14px;font-weight:450;transition:background .25s var(--ease-out),transform .2s var(--ease-out)}
-.tab .ic{color:var(--color-text-muted);transition:color .2s}
-.tab:hover{background:var(--color-surface-3)}
-.tab:active{transform:scale(.98)}
-.tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:550}
-.tab[aria-selected="true"] .ic{color:var(--color-accent)}
-.tab kbd{margin-left:auto;font-family:var(--font-sans);font-size:var(--text-2xs);color:var(--color-text-faint);opacity:0;transition:opacity .2s}
-.tab:hover kbd,.tab[aria-selected="true"] kbd{opacity:1}
-.tab .tab-dot{width:7px;height:7px;border-radius:50%;margin-left:auto;flex:none}
-.tab .tab-dot.warn{background:var(--color-warn)} .tab .tab-dot.danger{background:var(--color-danger)}
-.tab .tab-dot+kbd{margin-left:6px}
-.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
-.side-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
-.local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
+/* ---------- Window: frosted glass ---------- */
+.app-window{container:app/inline-size;border-radius:var(--radius-window);background:color-mix(in srgb,var(--color-window) var(--window-alpha),transparent);-webkit-backdrop-filter:blur(var(--window-blur)) saturate(var(--window-saturate));backdrop-filter:blur(var(--window-blur)) saturate(var(--window-saturate));box-shadow:var(--shadow-window),inset 0 1px 0 var(--color-window-highlight);overflow:clip;transition:max-width var(--duration-slow) var(--ease-out),border-radius var(--duration-slow) var(--ease-out)}
+.app-shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:760px}
+.stage-wrap.is-mobile .app-window{max-width:390px;margin-inline:auto;border-radius:var(--radius-phone)}
+
+/* ---------- Sidebar (translucent over the glass) ---------- */
+.app-sidebar{background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha),transparent);border-right:1px solid var(--color-line);padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.app-brand{display:flex;align-items:center;gap:10px;padding:0 8px;min-width:0}
+.app-logo{width:30px;height:30px;border-radius:var(--radius-control-sm);display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px var(--logo-ring),inset 0 1px 0 var(--logo-highlight),0 6px 14px -6px var(--logo-shadow);flex:none}
+.app-logo svg{display:block;width:20px;height:10px;fill:var(--logo-mask)}
+.app-wordmark{font-size:16.5px;font-weight:var(--weight-bold);letter-spacing:-.025em}
+.app-version{font-size:var(--text-2xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0;margin-left:auto}
+.app-bar-tools{display:none}
+.app-nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px;letter-spacing:.01em}
+.app-tablist{position:relative;display:flex;flex-direction:column;gap:2px}
+.app-tab{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font-size:14px;font-weight:450;transition:background var(--duration-fast) var(--ease-out),box-shadow var(--duration-fast) var(--ease-out),transform var(--duration-fast) var(--ease-out)}
+.app-tab .ic{color:var(--color-text-muted);transition:color var(--duration-fast)}
+.app-tab:hover{background:var(--color-surface-3)}
+.app-tab:active{transform:scale(.98)}
+.app-tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:550}
+.app-tab[aria-selected="true"] .ic{color:var(--color-accent)}
+.app-tab[aria-selected="true"]:focus-visible{box-shadow:var(--shadow-pop),0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.app-tab kbd{margin-left:auto;font-family:var(--font-sans);font-size:var(--text-2xs);color:var(--color-text-faint);opacity:0;transition:opacity var(--duration-fast)}
+.app-tab:hover kbd,.app-tab:focus-visible kbd,.app-tab[aria-selected="true"] kbd{opacity:1}
+.app-tab-dot{width:7px;height:7px;border-radius:50%;margin-left:auto;flex:none}
+.app-tab-dot.is-warn{background:var(--color-warn)} .app-tab-dot.is-danger{background:var(--color-danger)}
+.app-tab-dot+kbd{margin-left:6px}
+.app-sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
+.app-sidebar-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
+.app-local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
+.app-local .app-status-dot{color:var(--color-ok)}
+
+/* Status: a dot with a pulsing ring and always a word (never colour alone) */
+.app-status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
+.app-status.is-ok{color:var(--color-ok)} .app-status.is-warn{color:var(--color-warn)} .app-status.is-danger{color:var(--color-danger)}
+.app-status-dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
+
+/* Shared by the views: a plain dot (pulse adds the ring) */
 .dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.local .dot{color:var(--color-ok)}
 .dot.pulse::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
 @keyframes ring{0%{transform:scale(.4);opacity:.6}70%,100%{transform:scale(1.3);opacity:0}}
-
-.main{min-width:0;display:flex;flex-direction:column}
-.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 28px;background:color-mix(in srgb,var(--color-window) 76%,transparent);backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px);border-bottom:1px solid var(--color-line)}
-.crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;white-space:nowrap}
-.crumb b{color:var(--color-text);font-weight:550}
 .status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
 .status.ok{color:var(--color-ok)} .status.warn{color:var(--color-warn)} .status.danger{color:var(--color-danger)} .status.neutral{color:var(--color-text-muted)}
-.iconbtn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:9px;background:transparent;color:var(--color-text-muted);cursor:pointer;transition:background .2s,color .2s,transform .2s var(--ease-out)}
-.iconbtn:hover{background:var(--color-surface-3);color:var(--color-text)}
-.iconbtn:active{transform:scale(.92)}
-.iconbtn .ic{transition:transform .5s var(--ease-spring)}
-.iconbtn:hover .ic{transform:rotate(-20deg)}
 
-.content{padding:36px 44px 52px;display:flex;flex-direction:column;gap:22px;min-width:0}
-.content:focus{outline:none}
+/* ---------- Header: sticky and translucent; hides on scroll down, returns on scroll up ---------- */
+.app-main{min-width:0;display:flex;flex-direction:column}
+.app-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 28px;background:color-mix(in srgb,var(--color-window) var(--chrome-alpha),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));border-bottom:1px solid var(--color-line);transition:transform var(--duration-base) var(--ease-out),opacity var(--duration-base) var(--ease-out)}
+.app-crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.app-crumb b{color:var(--color-text);font-weight:550}
+.app-iconbtn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text-muted);cursor:pointer;flex:none;transition:background var(--duration-fast),color var(--duration-fast),transform var(--duration-fast) var(--ease-out)}
+.app-iconbtn:hover{background:var(--color-surface-3);color:var(--color-text)}
+.app-iconbtn:active{transform:scale(.92)}
+.app-iconbtn .ic{transition:transform .5s var(--ease-spring)}
+@media (hover:hover) and (pointer:fine){ .app-iconbtn:hover .ic{transform:rotate(-20deg)} }
+/* Never with reduced motion, and never while the focus is inside the bar */
+@media (prefers-reduced-motion: no-preference){
+  :root.chrome-hidden:not(.reduce-motion) .app-header:not(:focus-within){transform:translateY(-110%);opacity:0}
+}
+
+.app-content{padding:36px 44px 52px;display:flex;flex-direction:column;gap:22px;min-width:0}
+.app-content:focus{outline:none}
 .alerts{display:flex;flex-direction:column;gap:12px}
 .alerts:not(:has(>:not([hidden]))){display:none}
 .view{display:flex;flex-direction:column;gap:22px;min-width:0}
@@ -115,7 +153,7 @@ h1,h2,h3{text-wrap:balance}
 /* Intro: an orchestrated first appearance (runs once, ends at the normal resting state) */
 @keyframes rise{from{opacity:0;transform:translateY(12px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
 .intro .rv{animation:rise .8s var(--ease-out) both;animation-delay:calc(120ms + var(--i,0)*70ms)}
-.intro .window{animation:win 1s var(--ease-out) both}
+.intro .app-window{animation:win 1s var(--ease-out) both}
 @keyframes win{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
 
 /* Callouts */
@@ -408,7 +446,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
 /* ---------- Medium: panes and grids stack ---------- */
 @container app (max-width: 980px){
-  .content{padding:30px 30px 44px}
+  .app-content{padding:30px 30px 44px}
   .panes{grid-template-columns:minmax(0,1fr)}
   .pane+.pane{border-left:0;border-top:1px solid var(--color-line)}
   .pol-grid{grid-template-columns:minmax(0,1fr)}
@@ -421,19 +459,20 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 }
 /* ---------- Phone (or simulated phone): compact, little scrolling ---------- */
 @container app (max-width: 640px){
-  .shell{grid-template-columns:minmax(0,1fr);min-height:0}
-  .side{position:sticky;top:0;z-index:6;border-right:0;border-bottom:1px solid var(--color-line);padding:12px 12px 10px;gap:10px;background:color-mix(in srgb,var(--color-sidebar) 82%,transparent);backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px)}
-  .brand{padding:0 4px}
-  .brand .ver{display:none}
-  .m-only{display:flex;align-items:center;gap:6px;margin-left:auto}
-  .m-only .status{font-size:var(--text-xs)}
-  .nav{flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px}
-  .nav::-webkit-scrollbar{display:none}
-  .nav-label,.side-foot,.top,.tab kbd{display:none}
-  .tab{width:auto;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm)}
-  .tab .ic{width:15px;height:15px}
-  .tab .tab-dot{margin-left:2px}
-  .content{padding:18px 14px 24px;gap:14px}
+  .app-shell{grid-template-columns:minmax(0,1fr);min-height:0}
+  /* The sidebar becomes the fixed bar: brand, status and theme, with the tabs scrolling below */
+  .app-sidebar{position:sticky;top:0;z-index:6;border-right:0;border-bottom:1px solid var(--color-line);padding:12px 12px 8px;gap:8px;background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha-phone),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));transition:transform var(--duration-base) var(--ease-out)}
+  .app-brand{padding:0 4px}
+  .app-version{display:none}
+  .app-bar-tools{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
+  .app-bar-tools .app-status{font-size:var(--text-xs)}
+  .app-tablist{flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;padding:3px;margin:-3px;overscroll-behavior-x:contain}
+  .app-tablist::-webkit-scrollbar{display:none}
+  .app-nav-label,.app-sidebar-foot,.app-header,.app-tab kbd{display:none}
+  .app-tab{width:auto;flex:none;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm)}
+  .app-tab .ic{width:15px;height:15px}
+  .app-tab-dot{margin-left:2px}
+  .app-content{padding:18px 14px 24px;gap:14px}
   .view{gap:14px}
   .vh h1{font-size:var(--text-title-phone)}
   .vh p{font-size:13.5px;margin-top:4px}
@@ -506,12 +545,19 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .prov .lat{grid-column:1/-1;grid-row:2}
 }
 @media (max-width:640px){
-  .proto-t,.proto .sp{display:none}
+  .proto-title,.proto-spacer{display:none}
   .chips{flex:1 1 100%}
   .chips label{padding:4px 8px;font-size:var(--text-xs)}
   .annex{padding:20px 16px 22px;border-radius:20px}
   .lrow{grid-template-columns:minmax(0,1fr)}
   .lset{gap:12px;padding:14px 14px 8px}
+}
+
+/* Phone bar: hides on scroll down like the header (same guards) */
+@media (prefers-reduced-motion: no-preference){
+  @container app (max-width: 640px){
+    :root.chrome-hidden:not(.reduce-motion) .app-sidebar:not(:focus-within){transform:translateY(-100%)}
+  }
 }
 
 /* Reduced motion: the system setting, or the prototype toggle that previews it */
@@ -558,12 +604,17 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 </defs></svg>
 
+<!-- Ambient light behind the window (decoration only) -->
+<div class="ambient" aria-hidden="true"><span class="ambient-blob is-1"></span><span class="ambient-blob is-2"></span><span class="ambient-blob is-3"></span></div>
+
 <a class="skip" href="#main">Saltar al contenido</a>
 
 <div class="page" lang="es">
-  <section class="proto rv" style="--i:0" aria-label="Controles del prototipo">
-    <span class="proto-t"><b>Prototipo · issue #30</b> · estos controles no son parte del panel</span>
-    <span class="sp"></span>
+  <!-- Prototype only: not part of the panel -->
+  <section class="proto-strip rv" style="--i:0" aria-label="Controles del prototipo (no son parte del panel)">
+    <span class="proto-badge">Solo prototipo</span>
+    <span class="proto-title"><b>Muestra de estilo</b> · estos controles no son parte del panel</span>
+    <span class="proto-spacer"></span>
     <fieldset class="chips">
       <legend>Estado de ejemplo</legend>
       <label><input type="radio" name="proto-state" id="st-empty" value="empty">Vacío</label>
@@ -577,41 +628,43 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   </section>
 
   <div class="stage-wrap" id="stage-wrap">
-  <div class="window" id="app" data-state="data"><div class="shell">
-    <aside class="side">
-      <div class="brand rv" style="--i:1">
-        <span class="logo" aria-hidden="true"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span><b>Antifaz</b><span class="ver">v0.2.0</span>
-        <span class="m-only">
-          <span class="status ok" data-only="empty data blocked"><span class="dot"></span>Todo en orden</span>
-          <span class="status warn" data-only="error" hidden><span class="dot"></span>Sin respuesta</span>
-          <span class="status danger" data-only="broken" hidden><span class="dot"></span>Cadena rota</span>
-          <button class="iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+  <div class="app-window" id="app" data-state="data"><div class="app-shell">
+    <div class="app-sidebar">
+      <div class="app-brand rv" style="--i:1">
+        <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version">v0.2.0</span>
+        <span class="app-bar-tools">
+          <span class="app-status is-ok" data-only="empty data blocked"><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Todo en orden</span>
+          <span class="app-status is-warn" data-only="error" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Sin respuesta</span>
+          <span class="app-status is-danger" data-only="broken" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Cadena rota</span>
+          <button class="app-iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
         </span>
       </div>
-      <p class="nav-label rv" style="--i:2" id="nav-label">Panel</p>
-      <nav class="nav" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
-        <button class="tab rv" style="--i:2" role="tab" id="tab-playground" data-name="Prueba un texto" aria-controls="panel-playground" aria-selected="true" tabindex="0"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto<kbd aria-hidden="true">1</kbd></button>
-        <button class="tab rv" style="--i:3" role="tab" id="tab-live" data-name="En directo" aria-controls="panel-live" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg>En directo<kbd aria-hidden="true">2</kbd></button>
-        <button class="tab rv" style="--i:4" role="tab" id="tab-keys" data-name="Claves" aria-controls="panel-keys" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Claves<kbd aria-hidden="true">3</kbd></button>
-        <button class="tab rv" style="--i:5" role="tab" id="tab-policies" data-name="Políticas" aria-controls="panel-policies" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-policy"/></svg>Políticas<kbd aria-hidden="true">4</kbd></button>
-        <button class="tab rv" style="--i:6" role="tab" id="tab-status" data-name="Estado" aria-controls="panel-status" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-status"/></svg>Estado<span class="tab-dot warn" data-only="error" hidden><span class="sr-only"> (aviso)</span></span><span class="tab-dot danger" data-only="broken" hidden><span class="sr-only"> (alerta)</span></span><kbd aria-hidden="true">5</kbd></button>
+      <p class="app-nav-label rv" style="--i:2" id="nav-label">Panel</p>
+      <nav class="app-nav" aria-labelledby="nav-label">
+        <div class="app-tablist" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
+          <button class="app-tab rv" style="--i:2" role="tab" id="tab-playground" data-name="Prueba un texto" aria-controls="panel-playground" aria-selected="true" aria-keyshortcuts="1" tabindex="0"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto<kbd aria-hidden="true">1</kbd></button>
+          <button class="app-tab rv" style="--i:3" role="tab" id="tab-live" data-name="En directo" aria-controls="panel-live" aria-selected="false" aria-keyshortcuts="2" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg>En directo<kbd aria-hidden="true">2</kbd></button>
+          <button class="app-tab rv" style="--i:4" role="tab" id="tab-keys" data-name="Claves" aria-controls="panel-keys" aria-selected="false" aria-keyshortcuts="3" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Claves<kbd aria-hidden="true">3</kbd></button>
+          <button class="app-tab rv" style="--i:5" role="tab" id="tab-policies" data-name="Políticas" aria-controls="panel-policies" aria-selected="false" aria-keyshortcuts="4" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-policy"/></svg>Políticas<kbd aria-hidden="true">4</kbd></button>
+          <button class="app-tab rv" style="--i:6" role="tab" id="tab-status" data-name="Estado" aria-controls="panel-status" aria-selected="false" aria-keyshortcuts="5" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-status"/></svg>Estado<span class="app-tab-dot is-warn" data-only="error" hidden><span class="sr-only"> (aviso)</span></span><span class="app-tab-dot is-danger" data-only="broken" hidden><span class="sr-only"> (alerta)</span></span><kbd aria-hidden="true">5</kbd></button>
+        </div>
       </nav>
-      <div class="side-foot rv" style="--i:7">
+      <div class="app-sidebar-foot rv" style="--i:7">
         <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
-        <span class="local"><span class="dot pulse"></span>Todo se procesa en tu red</span>
+        <span class="app-local"><span class="app-status-dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
       </div>
-    </aside>
+    </div>
 
-    <div class="main">
-      <header class="top">
-        <span class="crumb">Antifaz · <b id="crumb-name">Prueba un texto</b></span>
-        <span class="status ok" data-only="empty data blocked"><span class="dot"></span>Todo en orden</span>
-        <span class="status warn" data-only="error" hidden><span class="dot pulse"></span>Anthropic no responde</span>
-        <span class="status danger" data-only="broken" hidden><span class="dot pulse"></span>Cadena de evidencias rota</span>
-        <button class="iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+    <div class="app-main">
+      <header class="app-header">
+        <p class="app-crumb">Antifaz · <b id="crumb-name">Prueba un texto</b></p>
+        <span class="app-status is-ok" data-only="empty data blocked"><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Todo en orden</span>
+        <span class="app-status is-warn" data-only="error" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Anthropic no responde</span>
+        <span class="app-status is-danger" data-only="broken" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Cadena de evidencias rota</span>
+        <button class="app-iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
       </header>
 
-      <main class="content" id="main" tabindex="-1">
+      <main class="app-content" id="main" tabindex="-1">
         <!-- Alerts shown in every view -->
         <div class="alerts">
           <div class="callout warn" role="status" data-only="error" hidden>
@@ -675,7 +728,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                 <div class="wipe w1">
                   <div class="layer layer-before">Hola, soy <mark class="pii scan">Carmen Prueba López</mark>, con DNI <mark class="pii scan">12345678Z</mark>. Escribid a <mark class="pii scan">ana.prueba@example.com</mark> y pagad en <mark class="pii scan">ES9121000418450200051332</mark>.</div>
                   <div class="layer layer-after">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</div>
-                  <span class="glider"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span>
+                  <span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span>
                 </div>
               </div>
               <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"><i></i><i></i><i></i></span><span class="lbl2">vuelve la respuesta</span></div>
@@ -684,7 +737,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                 <div class="wipe w2">
                   <div class="layer layer-before">Gracias, <span class="marker">[[PERSON_1]]</span>. Enviaremos el recibo a <span class="marker">[[EMAIL_1]]</span> cuando llegue el pago a <span class="marker">[[IBAN_1]]</span>.</div>
                   <div class="layer layer-after">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</div>
-                  <span class="glider"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span>
+                  <span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span>
                 </div>
               </div>
             </div>
@@ -973,12 +1026,12 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 16 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
         </div>
         <div class="lset on-light">
-          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
-          <figure><svg width="16" height="8" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
         </div>
         <div class="lset on-dark">
-          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
-          <figure><svg width="16" height="8" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
         </div>
       </div>
     </div>
@@ -996,7 +1049,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <figure><svg width="16" height="16" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 16 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
         </div>
         <div class="lset on-light">
-          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz actual en un color" fill="currentColor"><use href="#mask-current"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz actual en un color" fill="currentColor"><use href="#mask-current"/></svg><figcaption>1 color</figcaption></figure>
         </div>
       </div>
     </div>
@@ -1024,7 +1077,12 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   darkQ.addEventListener("change",paint); paint();
 
   /* ---- Tabs: roving tabindex, arrows, Home/End, and 1–5 as shortcuts ---- */
-  var tabs=[].slice.call(document.querySelectorAll('.nav [role="tab"]'));
+  var tablist=document.querySelector(".app-tablist"), tabs=[].slice.call(tablist.querySelectorAll('[role="tab"]'));
+  /* On the phone bar the tabs are a row that scrolls sideways: keep the chosen one in view
+     (by hand, so the page itself never scrolls). */
+  function reveal(tab){ var l=tablist; if(l.scrollWidth<=l.clientWidth) return;
+    var a=tab.offsetLeft, b=a+tab.offsetWidth;
+    if(a<l.scrollLeft) l.scrollLeft=a-8; else if(b>l.scrollLeft+l.clientWidth) l.scrollLeft=b-l.clientWidth+8; }
   function enter(v){ v.classList.remove("enter"); void v.offsetWidth; [].forEach.call(v.children,function(c,i){ c.style.setProperty("--i",i); }); v.classList.add("enter"); }
   function current(){ return document.getElementById(tabs.filter(function(t){ return t.getAttribute("aria-selected")==="true"; })[0].getAttribute("aria-controls")); }
   function select(tab,focus){
@@ -1034,6 +1092,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     document.getElementById("crumb-name").textContent=tab.getAttribute("data-name");
     if(!calm()) enter(view);
     if(focus) tab.focus();
+    reveal(tab);
     if(view.id==="panel-playground") setTimeout(playMask,250);
     syncLive(); }
   tabs.forEach(function(tab,i){
@@ -1043,7 +1102,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
       else if(e.key==="ArrowUp"||e.key==="ArrowLeft") to=tabs[(i-1+tabs.length)%tabs.length];
       else if(e.key==="Home") to=tabs[0]; else if(e.key==="End") to=tabs[tabs.length-1];
       if(to){ e.preventDefault(); select(to,true); } }); });
-  document.addEventListener("keydown",function(e){ if(e.target.matches("input,textarea,select,[contenteditable]")||e.metaKey||e.ctrlKey||e.altKey) return;
+  document.addEventListener("keydown",function(e){ if(e.target.matches("input,textarea,select,[contenteditable]")||e.metaKey||e.ctrlKey||e.altKey||e.repeat) return;
     var n=parseInt(e.key,10); if(n>=1&&n<=5) select(tabs[n-1],true); });
 
   /* ---- Playground: step switcher on phones ---- */
@@ -1190,6 +1249,16 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   var form=document.getElementById("pg-form");
   form.addEventListener("submit",function(e){ e.preventDefault(); if(app.getAttribute("data-state")==="empty") useExample(); else playMask(); });
   txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
+
+  /* ---- Window size: the tab list is vertical on the sidebar and a row on the phone bar ---- */
+  function syncOrientation(){ tablist.setAttribute("aria-orientation", app.clientWidth<=640?"horizontal":"vertical"); }
+  if(window.ResizeObserver) new ResizeObserver(syncOrientation).observe(app); syncOrientation();
+
+  /* ---- Header (and phone bar): hides on scroll down, returns on scroll up.
+     CSS keeps it in place with reduced motion and while the focus is inside it. ---- */
+  var lastY=window.scrollY;
+  window.addEventListener("scroll",function(){ var y=window.scrollY, d=y-lastY; if(Math.abs(d)<6) return;
+    root.classList.toggle("chrome-hidden", d>0 && y>140); lastY=y; },{passive:true});
 
   /* ---- Simulated phone ---- */
   document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked); setTimeout(playMask,600); });

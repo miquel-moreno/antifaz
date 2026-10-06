@@ -6,14 +6,23 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 
 **Rediseño en curso** (encargo de Miquel, octubre de 2026): un estilo más cercano a Apple, casi monocromo, con la ventana de vidrio esmerillado sobre una luz ambiental muy suave. Se hace en seis pasos, cada uno con el visto bueno de Miquel:
 
-1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (esta versión).
-2. Ventana, barra lateral, cabecera y móvil.
+1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
+2. Ventana, barra lateral, cabecera y móvil. **Hecho** (esta versión).
 3. Vista «Prueba un texto» con sus cinco estados.
 4. Animación del antifaz y entrada.
 5. Las otras cuatro vistas con el mismo lenguaje.
 6. Comprobación final.
 
-Hasta el paso 5, el prototipo ya usa los tokens y las fuentes nuevas, pero la ventana, las vistas y la animación son todavía las anteriores: es normal que se vea a medias.
+Hasta el paso 5, el prototipo ya usa los tokens, las fuentes y la ventana nuevas, pero el contenido de las vistas, la animación del antifaz y la entrada son todavía los anteriores: es normal que se vea a medias.
+
+### Paso 2: la ventana
+
+- **Ventana de vidrio esmerillado**: el color de la ventana al 80 % con un desenfoque de 40 px, sobre la luz ambiental (tres manchas muy suaves que solo se mueven con `transform` y se quedan quietas con «reducir movimiento») y un grano finísimo. Esquinas de 24 px y la sombra `--shadow-window`.
+- **Barra lateral translúcida**: la pestaña activa es una píldora blanca con sombra (`--shadow-pop`) y el icono en índigo. Atajos `1`–`5`; flechas, Inicio y Fin con tabindex itinerante. La marca lleva el logo, «Antifaz» y la versión.
+- **Cabecera**: fija arriba y translúcida, con la ruta (Antifaz · vista), el estado y el botón de tema. El estado es un punto con un anillo que late **y** una palabra: verde «Todo en orden» (vacío, con datos y bloqueo: un bloqueo es la pasarela haciendo su trabajo), ámbar «Anthropic no responde» (error) y rojo «Cadena de evidencias rota». Se esconde al bajar y vuelve al subir (solo `transform` y `opacity`); no se esconde con «reducir movimiento» ni mientras el foco está dentro.
+- **Móvil** (ventana de 640 px o menos, con container queries): una barra fija con la marca, el estado corto y el tema, y las pestañas en una fila con scroll horizontal debajo; la pestaña elegida se mantiene a la vista. La barra se esconde al bajar igual que la cabecera. Sin scroll horizontal de la página (comprobado a 390, 768 y 1280 px, en los cinco estados y las cinco vistas).
+- **Nombres de clase propios** para cada pieza de la ventana (`app-*`, `ambient-*`, `proto-*`): en la referencia, las puertas de la entrada se llamaban `.top` como la cabecera y heredaban su `z-index`.
+- **Logo corregido**: el símbolo del antifaz tiene `viewBox="10 22 52 26"`, así que cada `<svg>` que lo usa con `<use>` lleva `viewBox="0 0 52 26"` (antes salía cortado).
 
 ## La dirección visual
 
@@ -50,7 +59,7 @@ y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o 
 
 ## Controles del prototipo
 
-La fila de arriba, fuera de la ventana, **no es parte del panel**: sirve para enseñar cada caso.
+La fila de arriba, fuera de la ventana y con el borde discontinuo y la etiqueta «Solo prototipo», **no es parte del panel**: sirve para enseñar cada caso.
 
 - **Estado**: vacío, con datos, bloqueo, error y cadena rota.
 - **Móvil (390 px)**: estrecha la ventana a 390 px. Un móvil de verdad ve lo mismo, porque el diseño se adapta al ancho de la ventana (container queries) y no al de la pantalla.
