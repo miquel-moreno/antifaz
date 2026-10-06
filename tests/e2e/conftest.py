@@ -1,10 +1,11 @@
 """End-to-end stack (issue 7a): the real image under Docker Compose with a fake provider.
 
-`make e2e` builds the image with the repository's docker-compose.yml plus
-tests/e2e/docker-compose.e2e.yml, starts it with a throwaway env file (random keys made here,
-base URLs pointing at the fake provider) and stops and removes everything at the end. Your
-.env is never read: the env file is passed both as --env-file and as ANTIFAZ_ENV_FILE.
-Keys are never printed: assertions about them compare booleans with a fixed message.
+`make e2e` builds the image with the repository's docker-compose.yml, compose.build.yml (the
+local build) and tests/e2e/docker-compose.e2e.yml, starts it with a throwaway env file (random
+keys made here, base URLs pointing at the fake provider) and stops and removes everything at
+the end. Your .env is never read: the env file is passed both as --env-file and as
+ANTIFAZ_ENV_FILE. Keys are never printed: assertions about them compare booleans with a fixed
+message.
 """
 
 import os
@@ -22,7 +23,9 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 PROJECT = "antifaz-e2e"
 IMAGE = "antifaz:local"
-COMPOSE_FILES = (REPO / "docker-compose.yml", REPO / "tests" / "e2e" / "docker-compose.e2e.yml")
+# The published-image file, the local build on top (antifaz:local) and the fake provider.
+BASE_FILES = (REPO / "docker-compose.yml", REPO / "compose.build.yml")
+COMPOSE_FILES = (*BASE_FILES, REPO / "tests" / "e2e" / "docker-compose.e2e.yml")
 
 # Filled by the `image_size` test, printed at the end of the run.
 SUMMARY: list[str] = []

@@ -1,10 +1,12 @@
-"""Static checks of the Dockerfile, .dockerignore and docker-compose.yml (issue 7a).
+"""Static checks of the Dockerfile, .dockerignore, docker-compose.yml and compose.build.yml
+(issues 7a and 42).
 
 They run in `make check` without Docker; `make e2e` checks the same things on the running
 container. If one fails, the hardening of the image or of Compose was weakened.
 """
 
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,14 @@ CI: dict[str, Any] = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_tex
 DEPENDABOT: dict[str, Any] = yaml.safe_load(
     (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
 )
+BUILD_OVERRIDE: dict[str, Any] = yaml.safe_load(
+    (REPO / "compose.build.yml").read_text(encoding="utf-8")
+)
+MAKEFILE = (REPO / "Makefile").read_text(encoding="utf-8")
 SERVICE: dict[str, Any] = COMPOSE["services"]["antifaz"]
+VERSION: str = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+    "version"
+]
 
 
 def _instructions(name: str) -> list[str]:
@@ -53,13 +62,14 @@ def test_the_image_has_a_healthcheck_without_curl() -> None:
         assert "apt-get install" not in line and "apk " not in line, line
 
 
-def test_the_server_starts_from_the_factory_without_proxy_headers() -> None:
-    (entrypoint,) = _instructions("ENTRYPOINT")
-    assert '"--factory", "antifaz.api.app:create_app"' in entrypoint
-    assert '"--no-proxy-headers"' in entrypoint
-    # No uvicorn access log (it would hold paths and queries) and no Server header.
-    assert '"--no-access-log"' in entrypoint
-    assert '"--no-server-header"' in entrypoint
+def test_the_image_runs_the_antifaz_command_and_serves_by_default() -> None:
+    # ADR-0017: one command in the image, so the same image runs `init`, `verify` and `serve`.
+    # The uvicorn settings of `serve` are pinned in tests/unit/test_cli_serve.py.
+    assert _instructions("ENTRYPOINT") == ['["antifaz"]']
+    assert _instructions("CMD") == ['["serve"]']
+    final = DOCKERFILE.rsplit("AS runtime", 1)[1]
+    assert final.index("USER 10001:10001") < final.index("ENTRYPOINT")
+    assert "uvicorn" not in " ".join(_instructions("ENTRYPOINT") + _instructions("CMD"))
 
 
 def test_the_final_stage_removes_pip_and_ensurepip() -> None:
@@ -103,6 +113,45 @@ def test_dockerignore_is_an_allowlist_that_keeps_env_files_out() -> None:
     # The allowlist already keeps these out; the explicit rules also cover the allowed folders.
     for never in ("**/.env", "**/.env.*", "**/models", "**/evals", "**/.git", "**/.cache"):
         assert never in rules, never
+
+
+def test_compose_runs_the_published_image_of_this_version() -> None:
+    # ADR-0017: users run the published image, not a local build. The default is the version
+    # in pyproject.toml: on main it is the last release, and the release commit bumps both.
+    assert SERVICE["image"] == f"ghcr.io/miquel-moreno/antifaz:${{ANTIFAZ_VERSION:-{VERSION}}}"
+    assert "build" not in SERVICE
+
+
+def test_compose_keeps_the_image_command() -> None:
+    # No `command:` or `entrypoint:`: the image's own (`antifaz serve`) runs, and the same file
+    # also works with images up to 0.1.0, whose entrypoint was uvicorn itself.
+    assert "command" not in SERVICE and "entrypoint" not in SERVICE
+
+
+def test_the_local_build_lives_in_its_own_override() -> None:
+    assert BUILD_OVERRIDE == {
+        "services": {"antifaz": {"build": {"context": "."}, "image": "antifaz:local"}}
+    }
+
+
+def test_the_makefile_and_ci_build_the_same_local_image() -> None:
+    assert "-f docker-compose.yml -f compose.build.yml" in MAKEFILE
+    (build,) = [s for s in _image_steps() if "docker buildx build" in str(s.get("run", ""))]
+    # The same context (.) and tag as compose.build.yml, so `make e2e` reuses the cached image.
+    assert build["run"].split() == [
+        "docker",
+        "buildx",
+        "build",
+        "--load",
+        "--tag",
+        "antifaz:local",
+        ".",
+    ]
+
+
+def test_the_e2e_tests_use_the_build_override() -> None:
+    conftest = (REPO / "tests/e2e/conftest.py").read_text(encoding="utf-8")
+    assert '"compose.build.yml"' in conftest
 
 
 def test_compose_reads_keys_from_the_env_file_and_never_holds_them() -> None:

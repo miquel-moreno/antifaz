@@ -1,16 +1,23 @@
-# Antifaz with Docker Compose: `cp .env.example .env`, fill in your keys, `docker compose up -d`.
-# The keys are read from .env when the container starts: they are never baked into the image
-# and never written in this file. Details in docs/TECNICO.md ("Docker").
+# Antifaz with Docker Compose, from the published image (ADR-0017). In an empty folder:
+#   docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+#     ghcr.io/miquel-moreno/antifaz:<version> init       # writes .env (needs 0.2.0 or later)
+#   docker compose up -d
+# Or by hand: `cp .env.example .env` and fill in your keys. To build the image from this clone
+# instead: `make up` (adds compose.build.yml). Details in docs/TECNICO.md ("Docker").
 #
-# Tip: keep "$" out of the values in .env (Compose would try to expand it). Hex keys from
-# `openssl rand -hex 32` are fine.
+# The keys are read from .env when the container starts: they are never baked into the image
+# and never written in this file.
+#
+# Tip: keep "$" out of the values in .env (Compose would try to expand it). Keys written by
+# `antifaz init` or made with `openssl rand -hex 32` are fine.
 name: antifaz
 
 services:
   antifaz:
-    build:
-      context: .
-    image: antifaz:local
+    # In the repository: the last release, or ANTIFAZ_VERSION=X.Y.Z. The copy attached to each
+    # GitHub release is pinned by digest instead (image: ...:X.Y.Z@sha256:...).
+    # No `command:`: the image runs `antifaz serve` by default.
+    image: ghcr.io/miquel-moreno/antifaz:${ANTIFAZ_VERSION:-0.1.0}
     env_file:
       # ANTIFAZ_ENV_FILE lets the end-to-end tests use a throwaway file instead of your .env.
       - path: ${ANTIFAZ_ENV_FILE:-.env}

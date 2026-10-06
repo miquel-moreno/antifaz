@@ -1,0 +1,9 @@
+# Build the image from this clone instead of pulling the published one. Always on top of the
+# main file:
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build   (make up)
+# make e2e and the CI use it too. Every setting and all the hardening stay in docker-compose.yml.
+services:
+  antifaz:
+    build:
+      context: .
+    image: antifaz:local
