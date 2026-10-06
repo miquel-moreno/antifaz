@@ -21,3 +21,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0014](0014-normalizacion-previa-del-detector.md) | Normalización previa del detector | Aceptada |
 | [0015](0015-puerta-cerrada-por-defecto.md) | La puerta cerrada por defecto | Aceptada |
 | [0016](0016-ner-en-procesos-aparte.md) | El NER en procesos aparte, con caché y manifiesto | Aceptada |
+| [0017](0017-instalacion-y-secretos-en-la-cli.md) | Instalación y secretos en la CLI (`init`, imagen, `setup`) | Propuesta |
