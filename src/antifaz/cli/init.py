@@ -327,13 +327,13 @@ def _write_all(fd: int, data: bytes) -> None:
         os.close(fd)
 
 
-def _backup(env: Path) -> Path:
-    """Copy `env` to .env.bak-YYYYMMDD-HHMMSS (then -1, -2...), never over another file."""
-    data = env.read_bytes()
+def write_backup(path: Path, data: bytes, prefix: str) -> Path:
+    """Write `data` to <prefix>YYYYMMDD-HHMMSS (then -1, -2...) next to `path`, 0600 and O_EXCL:
+    never over another file. Also used by `antifaz setup claude-code`."""
     stamp = _now().strftime("%Y%m%d-%H%M%S")
     for attempt in range(_BACKUP_TRIES):
-        name = f"{BACKUP_PREFIX}{stamp}" + (f"-{attempt}" if attempt else "")
-        target = env.with_name(name)
+        name = f"{prefix}{stamp}" + (f"-{attempt}" if attempt else "")
+        target = path.with_name(name)
         try:
             fd = _open_new(target)
         except FileExistsError:
@@ -345,6 +345,11 @@ def _backup(env: Path) -> Path:
             raise
         return target
     raise OSError("no free backup name")
+
+
+def _backup(env: Path) -> Path:
+    """Copy `env` to .env.bak-YYYYMMDD-HHMMSS (then -1, -2...), never over another file."""
+    return write_backup(env, env.read_bytes(), BACKUP_PREFIX)
 
 
 def _replace(source: Path, target: Path) -> None:

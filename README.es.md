@@ -116,7 +116,14 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "gpt-4.1-nano", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
 ```
 
-**Claude Code**: pon `ANTHROPIC_BASE_URL=http://localhost:8000` y en `ANTHROPIC_API_KEY` tu `ANTIFAZ_API_KEY`. Todavía no se ha probado con la API real de Anthropic (solo con el SDK oficial y respuestas grabadas).
+**Claude Code**: en la máquina donde lo usas, desde un clon (con [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv run antifaz setup claude-code            # enseña el cambio; no escribe nada
+uv run antifaz setup claude-code --apply    # lo escribe (pregunta antes y guarda una copia)
+```
+
+Solo pone `ANTHROPIC_BASE_URL` en tu configuración de Claude Code (`~/.claude/settings.json`; con `--project`, el `.claude/settings.local.json` de esta carpeta). Nunca escribe una clave: pon tu `ANTIFAZ_API_KEY` en la variable de entorno `ANTHROPIC_AUTH_TOKEN` y reinicia Claude Code. Si Antifaz está caído, Claude Code da un error de conexión y no envía nada a Anthropic. Para deshacerlo: `--uninstall --apply`. Todavía no se ha probado con la API real de Anthropic (solo con el SDK oficial y respuestas grabadas).
 
 Qué funciona en la v0.1: OpenAI Chat Completions y Anthropic Messages (con `count_tokens`), con y sin streaming, llamadas a herramientas y bloques de razonamiento; `GET /v1/models`; y `POST /antifaz/scan`, que dice dónde están los datos personales (tipos y posiciones, nunca los valores). Probado con los SDK oficiales de OpenAI y Anthropic para Python, y una vez con la API real de OpenAI.
 

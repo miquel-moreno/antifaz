@@ -454,7 +454,7 @@ def _print(report: Report, gateway_up: bool, out: TextIO) -> None:
         lines.append("  docker compose up -d            start the gateway (is it running?)")
     lines += [
         "  antifaz verify                  plant fake data and check none reaches a provider",
-        "  antifaz setup claude-code       point Claude Code at Antifaz (coming soon)",
+        "  antifaz setup claude-code       point Claude Code at Antifaz (dry run first)",
         f"  docs: {DOCS_URL}",
     ]
     print("\n".join(lines), file=out)
