@@ -12,23 +12,35 @@ make audit     # vulnerabilidades conocidas en las dependencias (uv audit, exper
 make licenses  # licencias de lo que se distribuye
 make openapi   # regenera docs/openapi.json desde la app (un test comprueba que está al día)
 make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
-make e2e       # extremo a extremo con Docker: imagen real + Compose + proveedor falso
+make e2e       # extremo a extremo con Docker: imagen real + init + Compose + proveedor falso
+make up        # construye la imagen desde el clon y la arranca con Compose (necesita .env)
 ```
 
 ## Docker (issue 7, parte 7a)
 
 ### Ponerlo en marcha desde cero
 
+Desde la v0.2.0, sin clonar (issue 42, ver «Una sola orden en la imagen»):
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+```
+
+A mano, desde un clon (vale también con la 0.1.0):
+
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
 cp .env.example .env
 # En .env: ANTIFAZ_API_KEY con un valor aleatorio (openssl rand -hex 32) y la clave de cada
 # proveedor que uses; borra la línea del proveedor que no uses (sin clave, su ruta da 503).
-docker compose up -d --build
+docker compose up -d                 # la imagen publicada; `make up` la construye desde el clon
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
 ```
 
-Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
+El flujo a mano con `docker compose up -d --build` se comprobó el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5); desde el issue 42 la construcción local va en `compose.build.yml` (`make up`). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
 
 ### Cómo está hecha la imagen
 
@@ -42,13 +54,13 @@ Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con lo
 | `.dockerignore` como lista de permitidos (`pyproject.toml`, `uv.lock`, `README.md`, `LICENSE`, `NOTICE`, `src/`), más exclusiones explícitas (`.env*`, `models/`, `evals/`, `.git`, `.venv`, cachés) por si la lista crece por error | Un `.env`, un modelo, un dataset o un archivo nuevo no entran en la imagen por despiste. Ninguna clave va en la imagen: todas llegan como variables de entorno al arrancar |
 | Sin pip, setuptools, wheel ni `ensurepip`: se borran de la imagen base en la etapa final | La pasarela no instala nada al ejecutarse; un instalador es una herramienta más para un atacante y más paquetes que escanear. Se borran en una capa posterior: no aparecen en el sistema de archivos del contenedor (`make e2e` comprueba que `python -m pip` falla), pero sus bytes siguen en la capa de la imagen base, por eso el tamaño casi no cambia |
 | `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración. No usa nunca un proxy aunque haya `HTTP_PROXY`/`HTTPS_PROXY` en el entorno. Cada comprobación (cada 30 s) deja una línea `INFO` de la petición a `/healthz` en el log de Antifaz: es ruido esperado y no lleva datos |
-| `uvicorn --factory antifaz.api.app:create_app --no-access-log --no-proxy-headers --no-server-header` | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso" |
+| `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`; `antifaz serve` arranca uvicorn con `--factory antifaz.api.app:create_app`, `0.0.0.0:8000`, sin log de acceso, sin `X-Forwarded-*`, sin cabecera `Server` y 20 s de apagado limpio | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso". Hasta la 0.1.0 el `ENTRYPOINT` era el propio `uvicorn` con esos parámetros (ver «Una sola orden en la imagen») |
 
 Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB; la capa de `apt-get upgrade`, 14,4 MB, porque los archivos viejos siguen en la capa de la base) y **60,9 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
 
 ### Compose
 
-`docker-compose.yml` arranca un único servicio `antifaz`:
+`docker-compose.yml` arranca un único servicio `antifaz` con la **imagen publicada** `ghcr.io/miquel-moreno/antifaz:${ANTIFAZ_VERSION:-X.Y.Z}` (por defecto, la versión de `pyproject.toml`, que en `main` es la última publicada; un test lo comprueba). Para construirla desde el clon, `compose.build.yml` añade `build:` e `image: antifaz:local` encima (`make up`, `make e2e`). No hay `command:`: corre el `CMD` de la imagen.
 
 - **Claves**: se leen de `.env` (`env_file`) al arrancar el contenedor; nunca están en la imagen ni en el archivo de Compose. `ANTIFAZ_ENV_FILE` permite usar otro archivo (lo usan los tests de extremo a extremo para no leer nunca tu `.env`).
 - **Puerto**: solo en `127.0.0.1:${ANTIFAZ_PORT:-8000}`. Desde otra máquina no se llega; para eso, un proxy inverso con HTTPS (abajo).
@@ -58,6 +70,33 @@ Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect
 - **Una sola fuente de configuración**: todo sale de `.env`; el archivo de Compose no tiene `environment:` que pueda pisar lo que pone allí el administrador.
 - **Hosts**: `.env.example` trae `ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],antifaz`. `antifaz` es el nombre del servicio, para que otros contenedores de la misma red de Compose lleguen en `http://antifaz:8000`.
 - Healthcheck, reinicio `unless-stopped` (con una configuración rechazada, se reinicia en bucle con espera creciente: ver el motivo con `docker compose logs antifaz`), 25 s para apagarse limpio y logs rotados (3 × 10 MB).
+
+### Una sola orden en la imagen (issue 42, ADR-0017)
+
+La imagen tiene `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`. Sin argumentos sirve; con argumentos, la misma imagen ejecuta otra orden de la CLI:
+
+```bash
+# Escribir .env en la carpeta actual (desde la v0.2.0). En Windows, sin --user;
+# en PowerShell, -v "${PWD}:/work".
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+
+# Servir sin Compose, con el mismo endurecimiento que docker-compose.yml (vale con la 0.1.0)
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
+  ghcr.io/miquel-moreno/antifaz:0.1.0
+```
+
+| Decisión | Por qué |
+|---|---|
+| `antifaz serve` (`src/antifaz/cli/serve.py`) llama a `uvicorn.run` con los parámetros fijos del `ENTRYPOINT` anterior y no acepta opciones | Un test (`tests/unit/test_cli_serve.py`) fija los parámetros y otro compara, valor a valor, lo que habría ejecutado la línea de órdenes de uvicorn con los argumentos antiguos: solo cambian `app_dir` (uvicorn añadía la carpeta actual a `sys.path`; ahora solo se importa el paquete instalado) y `headers` (`[]` frente a `None`: ninguna cabecera extra en los dos casos) |
+| `uvicorn.run` en vez de la línea de órdenes de uvicorn | La línea de órdenes leía variables `UVICORN_*` del entorno (por ejemplo `UVICORN_FORWARDED_ALLOW_IPS`), y el entorno sale de `.env`. Ahora nada de `.env` puede cambiar cómo se sirve. Un test lo comprueba |
+| `docker-compose.yml` sin `command:` | Corre el `CMD` de la imagen, así el mismo archivo vale para la 0.1.0 (cuyo `ENTRYPOINT` era uvicorn y no entiende `serve`) y para las siguientes |
+| Versión por defecto en Compose = la de `pyproject.toml` | En `main` es la última publicada (la 0.2.0 todavía no existe en ghcr.io), y el commit de cada release sube las dos a la vez. Un test las ata. `ANTIFAZ_VERSION=X.Y.Z` elige otra |
+| `init` en el contenedor con `--rm`, `--network none` y `--user` | `--rm`: la clave que imprime `init` queda en el log del contenedor, que desaparece con él. `--network none`: `init` no usa la red. `--user`: en Linux, el `.env` lo crea tu usuario y no el `10001` de la imagen (con `0600`, si no, no podrías leerlo). En Docker Desktop para Windows no hace falta |
+| Las claves por **nombre** de variable (`-e NOMBRE` en docker, sin valor) | Con `docker run -e NOMBRE`, docker toma el valor de su propio entorno: la clave no aparece en los argumentos ni en `ps`. Así lo hace `make e2e` |
 
 ### Proxy inverso (HTTPS)
 
@@ -71,10 +110,11 @@ Antifaz habla HTTP sin cifrar: para usarlo desde otras máquinas, ponlo detrás 
 
 No forma parte de `make check` (necesita Docker y tarda alrededor de un minuto). Hace esto:
 
-1. Construye la imagen con `docker compose build`.
-2. Arranca Compose con `tests/e2e/docker-compose.e2e.yml` encima del archivo principal: añade un **proveedor falso** (`tests/e2e/fake_upstream.py`, solo biblioteca estándar) que corre en la propia imagen de Antifaz (no se descarga ninguna otra), guarda los bytes que recibe y devuelve el texto que le llega.
+1. Construye la imagen con `docker compose build` (`docker-compose.yml` + `compose.build.yml`, la imagen `antifaz:local`).
+2. Arranca Compose con `tests/e2e/docker-compose.e2e.yml` encima de esos dos: añade un **proveedor falso** (`tests/e2e/fake_upstream.py`, solo biblioteca estándar) que corre en la propia imagen de Antifaz (no se descarga ninguna otra), guarda los bytes que recibe y devuelve el texto que le llega.
 3. Las claves son aleatorias y nuevas en cada ejecución, en un archivo temporal que se borra al final; tu `.env` no se lee nunca. Las URL de los proveedores apuntan al falso con `http://` dentro de la red de Compose: las URL base son configuración del administrador y Antifaz no les exige HTTPS.
 4. Comprueba, con un DNI y un email sintéticos, que el proveedor solo ve marcadores y el cliente recibe sus valores (OpenAI Chat y Anthropic Messages, con y sin streaming, con los marcadores partidos entre eventos); que el proveedor recibe su clave y nunca la de Antifaz; que sin clave se responde 401; que el contenedor está `healthy`, corre como `10001`, no puede escribir fuera de `/tmp`, no tiene capacidades y solo publica en `127.0.0.1`; que la imagen no tiene `.env` (ni en `/app` ni en ningún sitio), ni pytest, ni curl, ni wget, ni pip; y que los logs no tienen el DNI, el email ni ninguna clave, tampoco cuando el DNI va en la query (`/v1/models?after_id=…`, 400) o en una ruta inventada (`/v1/<DNI>`, 404).
+5. La instalación en un minuto (issue 42, `tests/e2e/test_image_cli.py`): que la imagen tiene `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`, que `--help` funciona y que `serve` no acepta opciones; ejecuta `init --non-interactive` dentro de la imagen como dice el README (`-v carpeta:/work -w /work`, `--user` en Linux y macOS, `--network none`, `--read-only`, `--cap-drop ALL`), con claves falsas pasadas por nombre (`-e NOMBRE`), en una carpeta temporal que se borra al final; comprueba que ninguna clave sale por pantalla, que el `.env` tiene las claves (y en POSIX es del usuario y `0600`) y que una segunda ejecución sin `--force` no lo toca; y con ese `.env` arranca Compose (otro proyecto, sin proveedor falso) y el `docker run` endurecido de una línea, y los dos responden `/healthz`.
 
 Resultado el 2026-10-01: **15 de 15 tests en verde** (Windows 11, Docker Desktop 29.8).
 
@@ -82,7 +122,7 @@ Los mismos puntos de la imagen y de Compose (digest, usuario, healthcheck, `.doc
 
 ### CI de la imagen
 
-Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (este job no publica nada: lo hace `release.yml`, ver «Publicación»), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen los pone el workflow de publicación (ver «Publicación»).
+Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load --tag antifaz:local .`, con el mismo contexto y etiqueta que `compose.build.yml` (un test lo comprueba), así `make e2e` la reutiliza (este job no publica nada: lo hace `release.yml`, ver «Publicación»), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen los pone el workflow de publicación (ver «Publicación»).
 
 ### Escaneo de la imagen
 
@@ -92,7 +132,7 @@ Grype solo se ejecuta en la CI, no en `make e2e` ni en local. La política:
 |---|---|
 | La CI falla solo con vulnerabilidades **altas o críticas que tienen arreglo** (`only-fixed: true`) | Una vulnerabilidad que Debian no arregla («won't fix» o sin versión corregida) no se puede quitar desde el repo: con ella la CI estaría siempre en rojo y se dejaría de mirar. Las que tienen arreglo sí se pueden quitar, y esas paran el merge |
 | La etapa final hace `apt-get update && apt-get upgrade -y --no-install-recommends` y borra las listas de apt | Recoge los parches de seguridad de Debian publicados después de la imagen base (el 2026-10-01: openssl, libssl3t64 y openssl-provider-legacy 3.5.7-1~deb13u3, libpcre2-8-0 10.46-1~deb13u3). Solo actualiza lo que ya está; no instala nada nuevo. La base sigue fijada por digest |
-| Dependabot (ecosistema `docker`) propone cada digest nuevo de la imagen base | Las reconstrucciones de `python:3.12-slim` traen los parches de Debian ya incluidos. No hay entrada `docker-compose`: los archivos de Compose solo usan `antifaz:local`, que sale de este `Dockerfile` |
+| Dependabot (ecosistema `docker`) propone cada digest nuevo de la imagen base | Las reconstrucciones de `python:3.12-slim` traen los parches de Debian ya incluidos. No hay entrada `docker-compose`: el único servicio usa la imagen de Antifaz, cuya versión sube con cada release (un test la ata a `pyproject.toml`) |
 | El informe completo (todas las vulnerabilidades, con o sin arreglo, en formato tabla) se sube como artefacto `grype-report` en cada ejecución, también cuando la CI falla, y se guarda 30 días | El filtro de la CI no esconde nada: lo que no rompe la CI sigue a la vista |
 | Una sola excepción, en `.github/grype-gate.yaml` (solo la usa el filtro, no el informe): CVE-2026-82049 en Python 3.12.14 | Grype la da por «arreglada» porque existe una versión corregida, pero solo en Python 3.14; no hay arreglo para 3.12. Pasar a 3.14 es otra decisión. Cada excepción lleva motivo y fecha y se revisa al cambiar la imagen base |
 
@@ -115,11 +155,14 @@ Cómo va una release:
 4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
 5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.
 6. Firma una atestación de procedencia SLSA con la identidad OIDC del job (Sigstore) y la sube junto a la imagen.
+7. Job `release-asset` (issue 42), después de `publish-image` y también en el environment `release`: genera el `docker-compose.yml` de la release con `python3 -m scripts.release_compose` (solo biblioteca estándar y sin token: copia el del repo y cambia solo la línea `image:` a `ghcr.io/miquel-moreno/antifaz:X.Y.Z@sha256:…`, con el digest que sale del paso de construcción; falla si la versión o el digest no tienen la forma esperada) y lo sube a la GitHub Release del tag con `gh release upload --clobber`. Si Miquel todavía no ha creado la release, crea un **borrador** (`--draft --prerelease --verify-tag`, nunca un tag nuevo): Miquel escribe las notas (la sección del CHANGELOG) y lo publica. Con el environment protegido, Miquel aprueba los dos jobs.
 
 Comprobar que una imagen salió de este repo y de este workflow:
 
 ```bash
-gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \n  --repo miquel-moreno/antifaz \n  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
+gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \
+  --repo miquel-moreno/antifaz \
+  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
 docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{{ json .SBOM }}"
 ```
 
@@ -129,8 +172,10 @@ docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{
 |---|---|
 | Workflow de publicación separado de la CI y sin escáneres ni herramientas de terceros (solo acciones de GitHub y Docker, fijadas por SHA) | Es el único sitio con permiso para publicar. Un escáner comprometido (como trivy-action en marzo de 2026) no puede tocar la imagen publicada. Los escaneos (Grype, gitleaks, zizmor, CodeQL) ya pasaron en `ci.yml` sobre el mismo commit |
 | Solo `GITHUB_TOKEN` y OIDC, sin tokens guardados | El token dura lo que la ejecución y solo vale para este repo. No hay contraseña del registro que pueda filtrarse |
-| Permisos del job: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
-| La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG) | Crearla desde el workflow pediría `contents: write`, que permite cambiar el repo. Se mantiene el mínimo |
+| Permisos de `publish-image`: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
+| `contents: write` solo en el job pequeño `release-asset`, sin más acciones que `actions/checkout` (sin credenciales guardadas) y el `gh` que trae el runner; el digest le llega como salida del otro job y entra en los scripts por `env`, nunca con `${{ }}` dentro del script | Adjuntar el `docker-compose.yml` necesita escribir en la release. Separado, el job con permisos para el registro y la firma no puede tocar el repo, y el que puede tocarlo no ejecuta nada de terceros. El script del repo se ejecuta sin el token; solo el paso de `gh` lo recibe. zizmor sin hallazgos |
+| La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG); el workflow solo crea un borrador si falta | El workflow no publica releases: un borrador no lo ve nadie hasta que Miquel lo publica |
+| El `docker-compose.yml` de la release fija la imagen por digest | Quien lo descarga ejecuta exactamente la imagen construida, probada y atestada, aunque alguien moviera la etiqueta `X.Y.Z` después |
 | Etiquetas `X.Y.Z` y `X.Y`, sin `latest` | Antifaz es beta (0.x): quien la usa elige versión a propósito y una versión nueva no le llega sin querer. Ojo: `0.1` se mueve con cada `0.1.x` (recibe los parches); `0.1.0` no cambia nunca |
 | Solo se publica un commit que ya está en `main` (`git merge-base --is-ancestor`) | Un tag puesto en una rama sin revisar no llega a la imagen |
 | Anotaciones OCI en el manifiesto y en el índice (`DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index`) | Con el SBOM y la procedencia, buildx crea un índice; así ghcr.io enlaza ambos con el repo |
@@ -427,7 +472,7 @@ Limitaciones de esta primera versión: los valores sembrados son fijos (los mism
 
 ## `antifaz init` (issue 41)
 
-Decisión en [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md) (propuesta). Escribe un `.env` listo para arrancar sin que ninguna clave pase por la línea de órdenes:
+Decisión en [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md) (aceptada). Escribe un `.env` listo para arrancar sin que ninguna clave pase por la línea de órdenes:
 
 ```bash
 uv run antifaz init                       # pregunta las claves de los proveedores (ocultas)
