@@ -82,7 +82,7 @@ Los mismos puntos de la imagen y de Compose (digest, usuario, healthcheck, `.doc
 
 ### CI de la imagen
 
-Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (no se publica: eso será un workflow aparte, parte 7c), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen (`docker buildx --attest`) llegan con la publicación (7c).
+Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (este job no publica nada: lo hace `release.yml`, ver «Publicación»), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen los pone el workflow de publicación (ver «Publicación»).
 
 ### Escaneo de la imagen
 
@@ -97,6 +97,48 @@ Grype solo se ejecuta en la CI, no en `make e2e` ni en local. La política:
 | Una sola excepción, en `.github/grype-gate.yaml` (solo la usa el filtro, no el informe): CVE-2026-82049 en Python 3.12.14 | Grype la da por «arreglada» porque existe una versión corregida, pero solo en Python 3.14; no hay arreglo para 3.12. Pasar a 3.14 es otra decisión. Cada excepción lleva motivo y fecha y se revisa al cambiar la imagen base |
 
 Estado real el 2026-10-01 (CI de la rama `feat/7a-docker`, Grype v0.118.0): después del `apt-get upgrade` el informe sigue listando **13 vulnerabilidades altas sin arreglo en paquetes de sistema de Debian** (unas 50 líneas, porque cada una afecta a varios paquetes: util-linux y su familia, libc, perl, ncurses, zlib, acl y las librerías de gcc) y **una en Python 3.12** que solo está arreglada en 3.14. Ninguna está en el código de Antifaz. La pasarela no ejecuta la mayoría de esas herramientas (mount, login, perl, ncurses…): están porque vienen con Debian. Antes del lanzamiento de la v0.2 está previsto pasar a una imagen distroless, que no lleva esos paquetes.
+
+### Publicación (issue 7, parte 7c)
+
+La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, `.github/workflows/release.yml`, que **solo** arranca con un tag `vX.Y.Z`.
+
+**El primer tag, solo cuando el repo sea público.** En GitHub Free las atestaciones de procedencia necesitan un repo público: con el repo privado la imagen se subiría y el paso de la atestación fallaría, y quedaría una release a medias (imagen publicada sin procedencia). Antes del primer tag, en la configuración del repo (lo hace Miquel):
+
+- environment `release`: Miquel como revisor obligatorio (*required reviewers*), sin saltarse la protección como administrador (*allow administrators to bypass* desactivado) y con *prevent self-review* desactivado, porque hay un solo mantenedor y si no nadie podría aprobar;
+- un *ruleset* de tags que limite quién puede crear tags `v*`.
+
+Cómo va una release:
+
+1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas.
+2. **Miquel** crea y sube el tag (`git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`). Nadie más (ni un agente) crea tags.
+3. El job `publish-image` espera en el environment protegido `release`: solo lo pueden usar tags `v*` y, cuando el repo sea público, pide la aprobación manual de Miquel antes de recibir ningún permiso.
+4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
+5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.
+6. Firma una atestación de procedencia SLSA con la identidad OIDC del job (Sigstore) y la sube junto a la imagen.
+
+Comprobar que una imagen salió de este repo y de este workflow:
+
+```bash
+gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \n  --repo miquel-moreno/antifaz \n  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
+docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{{ json .SBOM }}"
+```
+
+`--repo` y `--signer-workflow` exigen que la firma sea de este repo **y** de `release.yml`, no de cualquier workflow de la cuenta.
+
+| Decisión | Por qué |
+|---|---|
+| Workflow de publicación separado de la CI y sin escáneres ni herramientas de terceros (solo acciones de GitHub y Docker, fijadas por SHA) | Es el único sitio con permiso para publicar. Un escáner comprometido (como trivy-action en marzo de 2026) no puede tocar la imagen publicada. Los escaneos (Grype, gitleaks, zizmor, CodeQL) ya pasaron en `ci.yml` sobre el mismo commit |
+| Solo `GITHUB_TOKEN` y OIDC, sin tokens guardados | El token dura lo que la ejecución y solo vale para este repo. No hay contraseña del registro que pueda filtrarse |
+| Permisos del job: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
+| La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG) | Crearla desde el workflow pediría `contents: write`, que permite cambiar el repo. Se mantiene el mínimo |
+| Etiquetas `X.Y.Z` y `X.Y`, sin `latest` | Antifaz es beta (0.x): quien la usa elige versión a propósito y una versión nueva no le llega sin querer. Ojo: `0.1` se mueve con cada `0.1.x` (recibe los parches); `0.1.0` no cambia nunca |
+| Solo se publica un commit que ya está en `main` (`git merge-base --is-ancestor`) | Un tag puesto en una rama sin revisar no llega a la imagen |
+| Anotaciones OCI en el manifiesto y en el índice (`DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index`) | Con el SBOM y la procedencia, buildx crea un índice; así ghcr.io enlaza ambos con el repo |
+| Solo `linux/amd64` | Es lo único probado (CI y `make e2e`). `arm64` se añadirá cuando tenga pruebas |
+| Sin caché de construcción | Nada de una ejecución anterior (ni de un PR) puede acabar en la imagen publicada |
+| Sin registro de almacenamiento (`create-storage-record: false`) en la atestación | Pediría otro permiso y no cambia la verificación con `gh attestation verify` |
+| Una release cada vez y nunca se cancela a medias (`concurrency` sin cancelación) | Evita dos publicaciones pisándose las etiquetas |
+| PyPI, en la v0.2 (trusted publishing con OIDC, en este mismo workflow) | En la v0.1 se distribuye solo la imagen. La firma con cosign y el Scorecard llegan en la v1.0 |
 
 ## Arquitectura
 
@@ -582,7 +624,7 @@ Antifaz no envía nada a ningún sitio salvo a los proveedores configurados en `
 
 ## Limitaciones
 
-- Docker: la imagen solo se ha probado en `linux/amd64` (en local y en la CI), no en ARM. Todavía no se publica (parte 7c).
+- Docker: la imagen solo se ha probado y se publica en `linux/amd64` (en local y en la CI), no en ARM.
 - Docker: la imagen se basa en Debian y lleva paquetes de sistema con vulnerabilidades altas que Debian no arregla (13 el 2026-10-01, más una de Python 3.12 arreglada solo en 3.14). La CI solo falla con las que tienen arreglo; el informe completo queda como artefacto. La imagen distroless está prevista antes de la v0.2.
 - `POST /antifaz/scan` devuelve posiciones en caracteres Unicode (índices de Python), no en unidades UTF-16 como JavaScript ni en bytes.
 - `GET /v1/models` elige el proveedor por la cabecera `anthropic-version`: un cliente de OpenAI que la mande por error recibe la lista de Anthropic.
