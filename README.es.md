@@ -46,7 +46,7 @@ Lo he diseñado y desarrollado de principio a fin. Desarrollo asistido por IA ba
 
 ## Puesta en marcha
 
-Necesitas Docker con Compose.
+Necesitas Docker con Compose. **Guía de instalación** para empresas, paso a paso (también Windows, Claude Code, actualizaciones y problemas frecuentes): [docs/instalacion.md](docs/instalacion.md) · [in English](docs/install.md).
 
 **Desde la v0.2.0 (todavía no publicada): un minuto, sin clonar.** En una carpeta vacía:
 
