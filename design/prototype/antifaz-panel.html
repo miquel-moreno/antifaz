@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antifaz · Panel (prototipo)</title>
+<link rel="icon" href="../../docs/images/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../tokens.css">
+<style>
+/* Layout: a prototype toolbar on top, then the panel frame (header, side tabs, view).
+   The frame is a size container, so "simular móvil" and a real phone use the same rules. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--color-bg); color: var(--color-text); }
+body {
+  margin: 0;
+  padding-inline: var(--space-4);
+  padding-block: var(--space-4) var(--space-7);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { line-height: var(--leading-tight); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+code, pre, .mono { font-family: var(--font-mono); }
+[hidden] { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.skip-link {
+  position: absolute; left: var(--space-4); top: -100px; z-index: 10;
+  background: var(--color-accent); color: var(--color-on-accent);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+}
+.skip-link:focus { top: var(--space-2); }
+.icon { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- Prototype toolbar (not part of the product) ---------- */
+.proto-bar {
+  max-width: 1200px; margin: 0 auto var(--space-4);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--color-border-strong); border-radius: var(--radius-md);
+  background: var(--color-surface-sunken); font-size: var(--text-sm);
+}
+.proto-bar__title { font-weight: var(--weight-bold); }
+.proto-bar__title span { display: block; font-weight: var(--weight-regular); color: var(--color-text-muted); }
+.proto-bar fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.proto-bar legend { float: left; margin-right: var(--space-2); font-weight: var(--weight-medium); }
+.proto-bar label { display: inline-flex; align-items: center; gap: var(--space-1); cursor: pointer; }
+.proto-states label {
+  padding: 2px var(--space-2); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill); background: var(--color-surface);
+}
+.proto-states input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.proto-states input:checked + span { font-weight: var(--weight-bold); }
+.proto-states label:has(input:checked) { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+.proto-states label:has(input:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.proto-toggles { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.proto-toggles input { accent-color: var(--color-accent); width: 1rem; height: 1rem; }
+
+/* ---------- Panel frame ---------- */
+.stage-wrap { max-width: 1200px; margin-inline: auto; }
+.app {
+  container: app / inline-size;
+  border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  background: var(--color-bg); overflow: clip;
+  transition: max-width var(--duration-slow) var(--ease-standard);
+}
+.stage-wrap.is-mobile .app {
+  max-width: 390px; margin-inline: auto; border-radius: 28px;
+  box-shadow: var(--shadow-2); border-color: var(--color-border-strong);
+}
+.app-header {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface); border-bottom: 1px solid var(--color-border);
+}
+.brand { display: flex; align-items: center; gap: var(--space-2); margin-right: auto; }
+.brand svg { width: 28px; height: 28px; }
+.brand__name { font-weight: var(--weight-bold); font-size: var(--text-lg); letter-spacing: -0.01em; }
+.brand__sub { color: var(--color-text-muted); font-size: var(--text-sm); }
+.brand__ver { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0 var(--space-1); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 36px; padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
+  background: var(--color-surface); color: var(--color-text); cursor: pointer;
+  font-weight: var(--weight-medium); font-size: var(--text-sm);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.btn:hover { background: var(--color-surface-sunken); }
+.btn-primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); }
+.btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.btn-ghost { border-color: transparent; background: transparent; }
+.btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+/* Status pills: icon + word + colour, never colour alone. */
+.pill {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: 2px var(--space-2); border-radius: var(--radius-pill);
+  font-size: var(--text-xs); font-weight: var(--weight-medium); white-space: nowrap;
+}
+.pill .icon { width: 0.95em; height: 0.95em; stroke-width: 2.5; }
+.pill-ok { background: var(--color-ok-soft); color: var(--color-ok); }
+.pill-warn { background: var(--color-warn-soft); color: var(--color-warn); }
+.pill-danger { background: var(--color-danger-soft); color: var(--color-danger); }
+.pill-accent { background: var(--color-accent-soft); color: var(--color-accent-soft-text); }
+.pill-neutral { background: var(--color-surface-sunken); color: var(--color-text-muted); }
+
+/* Banners */
+.banner {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+.banner .icon { width: 1.3em; height: 1.3em; margin-top: 1px; stroke-width: 2.2; }
+.banner strong { display: block; font-size: var(--text-md); }
+.banner ol { margin: var(--space-1) 0 0; padding-left: 1.2em; }
+.banner-danger { background: var(--color-danger-soft); color: var(--color-text); }
+.banner-danger .icon, .banner-danger strong { color: var(--color-danger); }
+.banner-warn { background: var(--color-warn-soft); color: var(--color-text); }
+.banner-warn .icon, .banner-warn strong { color: var(--color-warn); }
+
+.app-body { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 640px; }
+.app-nav { background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4) var(--space-3); }
+.tablist { display: flex; flex-direction: column; gap: 2px; }
+.tab {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); text-align: left; cursor: pointer;
+  font-size: var(--text-md);
+}
+.tab:hover { background: var(--color-surface-sunken); color: var(--color-text); }
+.tab[aria-selected="true"] { background: var(--color-accent-soft); color: var(--color-accent-soft-text); font-weight: var(--weight-medium); }
+.nav-note { margin-top: var(--space-5); padding: 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
+
+.app-main { padding: var(--space-5) var(--space-6) var(--space-6); min-width: 0; }
+.view { display: grid; gap: var(--space-5); }
+.view-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); justify-content: space-between; }
+.view-head h1 { font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -0.01em; }
+.view-head p { color: var(--color-text-muted); max-width: 62ch; margin-top: var(--space-1); }
+.card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-4) var(--space-5); min-width: 0; }
+.card-title { font-size: var(--text-lg); font-weight: var(--weight-bold); }
+.eyebrow { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--color-text-muted); font-weight: var(--weight-medium); }
+.muted { color: var(--color-text-muted); }
+.small { font-size: var(--text-sm); }
+.empty {
+  display: grid; justify-items: center; gap: var(--space-3); text-align: center;
+  padding: var(--space-7) var(--space-5); border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface);
+}
+.empty .icon { width: 2rem; height: 2rem; color: var(--color-text-muted); stroke-width: 1.5; }
+.empty p { max-width: 46ch; color: var(--color-text-muted); }
+
+/* ---------- Playground ---------- */
+.pg-form { display: grid; gap: var(--space-3); }
+.field-label { font-weight: var(--weight-medium); font-size: var(--text-sm); }
+textarea, select {
+  width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
+  background: var(--color-surface); padding: var(--space-2) var(--space-3);
+}
+textarea { min-height: 6.5rem; resize: vertical; line-height: var(--leading-body); }
+select { width: auto; min-height: 36px; }
+.pg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.pg-actions .hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-left: auto; }
+.inline-field { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+
+.panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.pane { display: grid; align-content: start; gap: var(--space-2); }
+.pane-head { display: flex; align-items: center; gap: var(--space-2); }
+.step {
+  display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%;
+  background: var(--color-surface-sunken); color: var(--color-text-muted);
+  font-size: var(--text-xs); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums;
+}
+.pane-title { font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.pane-text { line-height: 1.85; overflow-wrap: anywhere; }
+.pane-foot { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+mark.pii {
+  background: var(--color-pii-bg); color: var(--color-text);
+  border-bottom: 2px dashed var(--color-pii-line); padding: 1px 3px; border-radius: 3px;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.pii-type {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: var(--weight-bold);
+  letter-spacing: 0.03em; vertical-align: 1px; margin-left: 3px; color: var(--color-warn);
+}
+.marker {
+  font-family: var(--font-mono); font-size: 0.82em; white-space: nowrap;
+  background: var(--color-accent-soft); color: var(--color-accent-soft-text);
+  border: 1px solid var(--color-accent-soft-text); border-radius: var(--radius-sm); padding: 0 4px;
+}
+.restored { border-bottom: 2px solid var(--color-ok); padding-bottom: 1px; }
+
+.block-box { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-danger-soft); }
+.block-box strong { color: var(--color-danger); display: flex; align-items: center; gap: var(--space-2); }
+.error-box { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-warn-soft); }
+.error-box strong { color: var(--color-warn); display: flex; align-items: center; gap: var(--space-2); }
+.code { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-surface-sunken); padding: 1px 5px; border-radius: 4px; }
+
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.legend dt { font-size: var(--text-sm); font-weight: var(--weight-medium); margin-right: var(--space-1); }
+.legend dd { margin: 0; }
+.type-chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  border: 1px solid var(--color-border); border-radius: var(--radius-pill);
+  padding: 2px var(--space-3) 2px var(--space-2); font-size: var(--text-sm); background: var(--color-surface);
+}
+.type-chip code { font-size: var(--text-xs); color: var(--color-accent-soft-text); background: var(--color-accent-soft); border-radius: var(--radius-pill); padding: 0 6px; }
+.type-chip b { font-variant-numeric: tabular-nums; }
+.meta-line { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-size: var(--text-sm); color: var(--color-text-muted); }
+
+/* ---------- Mask animation (F3) ---------- */
+.anim-card { display: grid; gap: var(--space-3); }
+.anim-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.mask-stage {
+  display: grid; gap: var(--space-4); padding: var(--space-5);
+  background: var(--color-surface-sunken); border-radius: var(--radius-md);
+}
+.mrow { display: grid; gap: var(--space-1); }
+.mrow-cap { display: grid; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); font-weight: var(--weight-bold); color: var(--color-text-muted); }
+.mrow-cap > span { grid-area: 1 / 1; }
+.wipe { position: relative; display: grid; font-size: var(--text-lg); line-height: 1.8; overflow-wrap: anywhere; }
+.wipe > .layer { grid-area: 1 / 1; }
+.flight { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
+.flight .icon { color: var(--color-accent); }
+
+/* Resting frame = the end of the animation: message masked, answer restored. */
+.layer-before { clip-path: inset(0 0 0 100%); }
+.layer-after { clip-path: inset(0 0 0 0); }
+.cap-before { opacity: 0; }
+.mask-glider {
+  position: absolute; top: 50%; left: 0; width: 56px; height: 100%; min-height: 40px;
+  transform: translate(-50%, -50%); opacity: 0; pointer-events: none;
+  display: grid; place-items: center;
+}
+.mask-glider::before {
+  content: ""; position: absolute; top: -6px; bottom: -6px; left: 50%; width: 2px;
+  background: var(--color-accent); opacity: 0.45; border-radius: 2px;
+}
+.mask-glider svg { position: relative; width: 56px; height: 34px; filter: drop-shadow(0 4px 8px rgb(0 0 0 / 0.25)); }
+
+.is-playing .wipe-req .layer-before { animation: wipe-hide-1 var(--duration-mask) linear both; }
+.is-playing .wipe-req .layer-after { animation: wipe-show-1 var(--duration-mask) linear both; }
+.is-playing .wipe-req .mask-glider { animation: glide-1 var(--duration-mask) linear both, glide-fade-1 var(--duration-mask) linear both; }
+.is-playing .row-req .cap-before { animation: cap-out-1 var(--duration-mask) linear both; }
+.is-playing .row-req .cap-after { animation: cap-in-1 var(--duration-mask) linear both; }
+.is-playing .flight { animation: fade-in-flight var(--duration-mask) linear both; }
+.is-playing .row-res { animation: row-in var(--duration-mask) var(--ease-standard) both; }
+.is-playing .wipe-res .layer-before { animation: wipe-hide-2 var(--duration-mask) linear both; }
+.is-playing .wipe-res .layer-after { animation: wipe-show-2 var(--duration-mask) linear both; }
+.is-playing .wipe-res .mask-glider { animation: glide-2 var(--duration-mask) linear both, glide-fade-2 var(--duration-mask) linear both; }
+.is-playing .row-res .cap-before { animation: cap-out-2 var(--duration-mask) linear both; }
+.is-playing .row-res .cap-after { animation: cap-in-2 var(--duration-mask) linear both; }
+
+@keyframes wipe-hide-1 { 0%, 6% { clip-path: inset(0 0 0 0); } 40%, 100% { clip-path: inset(0 0 0 100%); } }
+@keyframes wipe-show-1 { 0%, 6% { clip-path: inset(0 100% 0 0); } 40%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes glide-1 { 0%, 6% { left: 0%; } 40%, 100% { left: 100%; } }
+@keyframes glide-fade-1 { 0%, 3% { opacity: 0; } 8%, 38% { opacity: 1; } 43%, 100% { opacity: 0; } }
+@keyframes cap-out-1 { 0%, 40% { opacity: 1; } 43%, 100% { opacity: 0; } }
+@keyframes cap-in-1 { 0%, 40% { opacity: 0; } 43%, 100% { opacity: 1; } }
+@keyframes fade-in-flight { 0%, 42% { opacity: 0; } 48%, 100% { opacity: 1; } }
+@keyframes row-in { 0%, 48% { opacity: 0; transform: translateY(6px); } 56%, 100% { opacity: 1; transform: none; } }
+@keyframes wipe-hide-2 { 0%, 62% { clip-path: inset(0 0 0 0); } 92%, 100% { clip-path: inset(0 0 0 100%); } }
+@keyframes wipe-show-2 { 0%, 62% { clip-path: inset(0 100% 0 0); } 92%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes glide-2 { 0%, 62% { left: 0%; } 92%, 100% { left: 100%; } }
+@keyframes glide-fade-2 { 0%, 59% { opacity: 0; } 64%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes cap-out-2 { 0%, 92% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes cap-in-2 { 0%, 92% { opacity: 0; } 95%, 100% { opacity: 1; } }
+
+/* Reduced motion (system setting or the prototype toggle): no animation,
+   the three panes below are the static before/after. */
+.rm-note { display: none; }
+.reduce-motion .anim-card { display: none; }
+.reduce-motion .rm-note { display: flex; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-card { display: none; }
+  .rm-note { display: flex; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+.rm-note { align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
+
+/* ---------- Live view ---------- */
+.live-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); font-size: var(--text-sm); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.stat { display: grid; gap: var(--space-2); align-content: start; }
+.stat-num { font-size: var(--text-2xl); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat-sub { font-size: var(--text-sm); color: var(--color-text-muted); }
+.stat-wide { grid-column: span 2; }
+.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--text-sm); }
+.bars li { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: var(--space-2); }
+.bars .track { height: 8px; border-radius: 4px; background: var(--color-surface-sunken); overflow: hidden; }
+.bars .fill { display: block; height: 100%; background: var(--color-accent); border-radius: 4px; }
+.bars .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: var(--weight-medium); }
+.chain { display: flex; align-items: center; gap: var(--space-2); font-weight: var(--weight-bold); }
+.chain-ok { color: var(--color-ok); }
+.chain-bad { color: var(--color-danger); }
+.chain .icon { width: 1.4em; height: 1.4em; stroke-width: 2.4; }
+
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li {
+  display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3);
+  align-items: baseline; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border);
+}
+.feed li:last-child { border-bottom: 0; }
+.feed time { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.feed .who { font-size: var(--text-sm); color: var(--color-text-muted); }
+.feed .what { font-weight: var(--weight-medium); }
+.feed li.is-new { background: linear-gradient(90deg, var(--color-danger-soft), transparent 70%); }
+.feed-foot { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--text-sm); color: var(--color-text-muted); }
+
+/* ---------- Tables (keys) ---------- */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+th { text-align: left; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--color-text-muted); font-weight: var(--weight-medium); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-strong); }
+td { padding: var(--space-3); border-bottom: 1px solid var(--color-border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+.key-name { font-weight: var(--weight-bold); font-size: var(--text-md); }
+.key-id { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
+tr.is-revoked .key-name { text-decoration: line-through; color: var(--color-text-muted); }
+.note { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--text-sm); color: var(--color-text-muted); }
+.note .icon { margin-top: 2px; }
+
+/* ---------- Policies ---------- */
+.pol-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.pol-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.pol-actions-help { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; font-size: var(--text-sm); }
+.pol-actions-help dt { font-weight: var(--weight-bold); }
+.pol-actions-help dd { margin: 0; color: var(--color-text-muted); }
+.pol-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); }
+.pol-row:last-child { border-bottom: 0; }
+.pol-name { font-weight: var(--weight-medium); }
+.pol-name code { display: block; font-size: var(--text-xs); color: var(--color-text-muted); }
+.seg { border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: 2px; margin: 0; display: inline-grid; grid-template-columns: repeat(4, auto); gap: 2px; background: var(--color-surface); }
+.seg legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.seg label { padding: 3px 10px; border-radius: 4px; font-size: var(--text-sm); cursor: pointer; text-align: center; white-space: nowrap; }
+.seg label:hover { background: var(--color-surface-sunken); }
+.seg input:checked + label { background: var(--color-accent); color: var(--color-on-accent); font-weight: var(--weight-medium); }
+.seg input:focus-visible + label { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.fixed-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); font-size: var(--text-sm); }
+.fixed-rules li { display: flex; gap: var(--space-2); align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+pre.yaml { margin: 0; padding: var(--space-3) var(--space-4); background: var(--color-surface-sunken); border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: 1.6; overflow-x: auto; }
+.save-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+
+/* ---------- Status ---------- */
+.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.status-card { display: grid; gap: var(--space-3); align-content: start; }
+.status-card header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-4); margin: 0; font-size: var(--text-sm); }
+.kv dt { color: var(--color-text-muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.prov { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); font-size: var(--text-sm); }
+.prov li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.ner-states { margin: 0; padding-left: 1.1em; font-size: var(--text-sm); color: var(--color-text-muted); display: grid; gap: 2px; }
+.ner-states b { color: var(--color-text); font-weight: var(--weight-medium); }
+
+/* ---------- Narrow container (phone or "simular móvil") ---------- */
+@container app (max-width: 980px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pol-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@container app (max-width: 820px) {
+  .panes { grid-template-columns: minmax(0, 1fr); }
+  .status-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@container app (max-width: 720px) {
+  .app-body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .app-nav { border-right: 0; border-bottom: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); }
+  .tablist { flex-direction: row; flex-wrap: wrap; gap: var(--space-1); }
+  .tab { width: auto; white-space: nowrap; padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+  .nav-note { display: none; }
+  .app-main { padding: var(--space-4); }
+  .pg-actions .hint { margin-left: 0; flex-basis: 100%; }
+  .mask-stage { padding: var(--space-4); }
+  .wipe { font-size: var(--text-md); }
+}
+@container app (max-width: 560px) {
+  .brand__sub { display: none; }
+  #theme-label { display: none; }
+  .app-header { padding-inline: var(--space-3); }
+  .stats { grid-template-columns: minmax(0, 1fr); }
+  .stat-wide { grid-column: auto; }
+  .bars li { grid-template-columns: 6.5rem minmax(0, 1fr) 2rem; }
+  .feed li { grid-template-columns: 3rem minmax(0, 1fr); }
+  .feed li .pill { grid-column: 2; justify-self: start; }
+  .pol-row { grid-template-columns: minmax(0, 1fr); }
+  .seg { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .pol-actions-help { grid-template-columns: minmax(0, 1fr); }
+  /* Keys table becomes one card per key. */
+  .keys-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .keys-table, .keys-table tbody, .keys-table tr, .keys-table td { display: block; }
+  .keys-table tr { padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
+  .keys-table tr:last-child { border-bottom: 0; }
+  .keys-table td { border: 0; padding: 2px 0; display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-2); }
+  .keys-table td::before { content: attr(data-label); color: var(--color-text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); padding-top: 2px; }
+  .keys-table td.td-name { display: block; }
+  .keys-table td.td-name::before { content: none; }
+}
+
+/* ---------- Logo annex ---------- */
+.annex { max-width: 1200px; margin: var(--space-6) auto 0; display: grid; gap: var(--space-4); }
+.annex h2 { font-size: var(--text-xl); }
+.logo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
+.logo-card { display: grid; gap: var(--space-3); align-content: start; }
+.logo-card h3 { font-size: var(--text-lg); }
+.logo-sizes { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); }
+.logo-sizes figure { margin: 0; display: grid; justify-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
+.logo-sizes svg { display: block; }
+.on-dark { background: #11111c; color: #ecebf5; border-radius: var(--radius-sm); padding: var(--space-2); }
+.on-light { background: #ffffff; color: #1c1b2e; border-radius: var(--radius-sm); padding: var(--space-2); border: 1px solid var(--color-border); }
+.logo-mono { color: var(--color-text); }
+.logo-b { fill: var(--color-accent); }
+</style>
+</head>
+<body>
+
+<!-- Shapes reused across the page. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="logo-current" viewBox="0 0 72 72">
+      <rect x="4" y="4" width="64" height="64" rx="16" fill="#4b3fb8"/>
+      <path d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14z" fill="#ffffff"/>
+      <ellipse cx="25" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/>
+      <ellipse cx="47" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/>
+    </symbol>
+    <!-- The mask from the current logo, eyes cut out, so it takes any fill. -->
+    <symbol id="mask-shape" viewBox="10 22 52 26">
+      <path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0zM41.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0z"/>
+    </symbol>
+    <symbol id="mark-a" viewBox="0 0 32 32">
+      <path fill-rule="evenodd" d="M5 16C5 12.7 7.3 11 10.5 11H13.5C14.8 11 15.3 12 16 12C16.7 12 17.2 11 18.5 11H21.5C24.7 11 27 12.7 27 16C27 19.6 24.6 21.5 21.5 21.5C19.2 21.5 17.8 19.5 16 19.5C14.2 19.5 12.8 21.5 10.5 21.5C7.4 21.5 5 19.6 5 16ZM9 16A2.5 2.2 0 1 0 14 16A2.5 2.2 0 1 0 9 16ZM18 16A2.5 2.2 0 1 0 23 16A2.5 2.2 0 1 0 18 16Z"/>
+    </symbol>
+    <symbol id="mark-b" viewBox="0 0 32 32">
+      <path fill-rule="evenodd" d="M2 12L8 8H24L30 12V19L24 24H19.5L16 21L12.5 24H8L2 19ZM7 13V16.6H13.5V13ZM18.5 13V16.6H25V13Z"/>
+    </symbol>
+    <!-- Line icons (stroke = currentColor). -->
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 15l4 3-4 3z"/></symbol>
+    <symbol id="i-live" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
+    <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-status" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.01"/></symbol>
+    <symbol id="i-block" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+    <symbol id="i-local" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.5M6.5 7.6C4.3 9.2 3 12 3 12s4 6 9 6a8.7 8.7 0 0 0 3.5-.7"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+    <symbol id="i-chain" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  </defs>
+</svg>
+
+<a class="skip-link" href="#main">Saltar al contenido</a>
+
+<section class="proto-bar" aria-labelledby="proto-title">
+  <p class="proto-bar__title" id="proto-title">Prototipo estático · issue #30<span>Estos controles no forman parte del panel.</span></p>
+  <fieldset class="proto-states">
+    <legend>Estado</legend>
+    <label><input type="radio" name="proto-state" value="empty"><span>Vacío</span></label>
+    <label><input type="radio" name="proto-state" value="data" checked><span>Con datos</span></label>
+    <label><input type="radio" name="proto-state" value="blocked"><span>Bloqueo</span></label>
+    <label><input type="radio" name="proto-state" value="error"><span>Error</span></label>
+    <label><input type="radio" name="proto-state" value="broken"><span>Cadena rota</span></label>
+  </fieldset>
+  <div class="proto-toggles">
+    <label for="proto-mobile"><input type="checkbox" id="proto-mobile"> Simular móvil (390 px)</label>
+    <label for="proto-motion"><input type="checkbox" id="proto-motion"> Reducir movimiento</label>
+  </div>
+</section>
+
+<div class="stage-wrap" id="stage-wrap">
+<div class="app" id="app" data-state="data">
+
+  <header class="app-header">
+    <div class="brand">
+      <svg viewBox="0 0 72 72" role="img" aria-label="Logo de Antifaz"><use href="#logo-current"/></svg>
+      <span class="brand__name">Antifaz</span>
+      <span class="brand__sub">Panel</span>
+      <span class="brand__ver" title="Versión de la pasarela">v0.2.0</span>
+    </div>
+    <span class="pill pill-ok" data-only="empty data blocked"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Todo en orden</span>
+    <span class="pill pill-warn" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Anthropic no responde</span>
+    <span class="pill pill-danger" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Cadena de evidencias rota</span>
+    <button class="btn btn-ghost" type="button" id="theme-btn" aria-label="Cambiar a tema oscuro">
+      <svg class="icon" aria-hidden="true"><use href="#i-moon" id="theme-icon"/></svg><span id="theme-label">Oscuro</span>
+    </button>
+  </header>
+
+  <div class="banner banner-warn" role="status" data-only="error" hidden>
+    <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+    <div>
+      <strong>Anthropic no responde</strong>
+      Las peticiones que van a Anthropic fallan con un error 504 y no llega nada a la IA. OpenAI y la IA local funcionan. Antifaz lo vuelve a comprobar cada minuto.
+    </div>
+  </div>
+  <div class="banner banner-danger" role="alert" data-only="broken" hidden>
+    <svg class="icon" aria-hidden="true"><use href="#i-chain"/></svg>
+    <div>
+      <strong>La cadena de evidencias está rota en el registro 18.193</strong>
+      Ese registro no encaja con el anterior: alguien ha cambiado o borrado registros. Lo detectó la verificación de las 10:40. Desde ese punto, el registro ya no sirve como prueba.
+      <ol>
+        <li>No borres ni arregles nada a mano.</li>
+        <li>Ejecuta <span class="code">antifaz audit verify</span> para ver el detalle.</li>
+        <li>Compara con el último punto de control firmado (hoy, 00:00) y avisa a tu responsable de seguridad.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="app-body">
+    <nav class="app-nav" aria-label="Secciones del panel">
+      <div class="tablist" role="tablist" aria-label="Secciones" aria-orientation="vertical">
+        <button class="tab" role="tab" id="tab-playground" aria-controls="panel-playground" aria-selected="true" tabindex="0"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto</button>
+        <button class="tab" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>En directo</button>
+        <button class="tab" role="tab" id="tab-keys" aria-controls="panel-keys" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Claves</button>
+        <button class="tab" role="tab" id="tab-policies" aria-controls="panel-policies" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-policy"/></svg>Políticas</button>
+        <button class="tab" role="tab" id="tab-status" aria-controls="panel-status" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-status"/></svg>Estado</button>
+      </div>
+      <p class="nav-note">Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
+    </nav>
+
+    <main class="app-main" id="main" tabindex="-1">
+
+      <!-- ===================== 1 · Playground ===================== -->
+      <section class="view" role="tabpanel" id="panel-playground" aria-labelledby="tab-playground">
+        <div class="view-head">
+          <div>
+            <h1>Prueba un texto</h1>
+            <p>Pega un texto con datos inventados y mira qué recibiría la IA y qué te devolvería. Lo que pruebas no se guarda.</p>
+          </div>
+        </div>
+
+        <form class="card pg-form" id="pg-form" novalidate>
+          <label class="field-label" for="pg-text">Texto de prueba</label>
+          <textarea id="pg-text" name="pg-text" rows="4" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
+          <div class="pg-actions">
+            <span class="inline-field"><label for="pg-policy">Política</label>
+              <select id="pg-policy" name="pg-policy"><option value="default">default</option><option value="rrhh">rrhh</option></select></span>
+            <button class="btn btn-primary" type="submit">Probar</button>
+            <button class="btn" type="button" id="pg-example">Usar el ejemplo</button>
+            <span class="hint">Usa solo datos inventados. El texto vive en esta petición y se descarta.</span>
+          </div>
+        </form>
+
+        <!-- Empty state -->
+        <div class="empty" data-only="empty" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>
+          <p><strong>Aquí verás tres cosas:</strong> tu texto con los datos encontrados, lo que recibe la IA (con marcadores en lugar de datos) y la respuesta con tus datos de vuelta.</p>
+          <button class="btn" type="button" data-action="example">Usar el ejemplo</button>
+        </div>
+
+        <!-- F3 animation -->
+        <div class="card anim-card" data-only="data broken">
+          <div class="anim-head">
+            <p class="eyebrow">Así viaja tu texto</p>
+            <button class="btn btn-ghost" type="button" id="anim-replay">Ver otra vez</button>
+          </div>
+          <p class="sr-only">Animación: el antifaz pasa por encima del texto y tapa el nombre, el DNI, el email y el IBAN. La IA recibe marcadores. La respuesta vuelve y los datos aparecen otra vez en su sitio. Abajo tienes el mismo contenido sin animación.</p>
+          <div class="mask-stage" id="mask-anim" aria-hidden="true">
+            <div class="mrow row-req">
+              <div class="mrow-cap"><span class="cap-before">Tú escribes</span><span class="cap-after">La IA recibe</span></div>
+              <div class="wipe wipe-req">
+                <div class="layer layer-before">Hola, soy <mark class="pii">Carmen Prueba López</mark>, con DNI <mark class="pii">12345678Z</mark>. Escribid a <mark class="pii">ana.prueba@example.com</mark> y pagad en <mark class="pii">ES9121000418450200051332</mark>.</div>
+                <div class="layer layer-after">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</div>
+                <span class="mask-glider"><svg viewBox="10 22 52 26"><use href="#mask-shape" style="fill: var(--color-accent)"/></svg></span>
+              </div>
+            </div>
+            <p class="flight"><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg>Sale hacia Anthropic sin datos personales · vuelve la respuesta</p>
+            <div class="mrow row-res">
+              <div class="mrow-cap"><span class="cap-before">La IA responde</span><span class="cap-after">Te llega, con tus datos</span></div>
+              <div class="wipe wipe-res">
+                <div class="layer layer-before">Gracias, <span class="marker">[[PERSON_1]]</span>. Enviaremos el recibo a <span class="marker">[[EMAIL_1]]</span> cuando llegue el pago a <span class="marker">[[IBAN_1]]</span>.</div>
+                <div class="layer layer-after">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</div>
+                <span class="mask-glider"><svg viewBox="10 22 52 26"><use href="#mask-shape" style="fill: var(--color-accent)"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="rm-note" data-only="data broken"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>Movimiento reducido: no hay animación. Abajo tienes el antes y el después.</p>
+
+        <!-- The three panes -->
+        <div class="panes" data-only="data blocked error broken">
+          <article class="card pane" aria-labelledby="pane1-t">
+            <div class="pane-head"><span class="step" aria-hidden="true">1</span><h2 class="pane-title" id="pane1-t">Lo que escribes</h2></div>
+            <p class="pane-text">Hola, soy <mark class="pii">Carmen Prueba López<span class="pii-type">NOMBRE</span></mark>, con DNI <mark class="pii">12345678Z<span class="pii-type">DNI</span></mark>. Escribid a mi gestora <mark class="pii">ana.prueba@example.com<span class="pii-type">EMAIL</span></mark> y haced el pago en <mark class="pii">ES9121000418450200051332<span class="pii-type">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="pii-type">SALUD</span></mark> desde el lunes.</span></p>
+            <p class="pane-foot">Fondo resaltado y subrayado discontinuo: dato encontrado, con su tipo al lado.</p>
+          </article>
+
+          <article class="card pane" aria-labelledby="pane2-t">
+            <div class="pane-head"><span class="step" aria-hidden="true">2</span><h2 class="pane-title" id="pane2-t">Lo que recibe la IA</h2></div>
+            <p class="pane-text" data-only="data error broken">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker">[[EMAIL_1]]</span> y haced el pago en <span class="marker">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
+            <div class="block-box" data-only="blocked" hidden>
+              <strong><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado: no se ha enviado nada</strong>
+              <p class="small">El texto habla de salud (categoría especial del RGPD) y la política <b>rrhh</b> bloquea esos textos.</p>
+              <p class="small muted">Motivo: <span class="code">special_category</span> · código <span class="code">antifaz_blocked</span></p>
+            </div>
+            <p class="pane-foot" data-only="data error broken">Recuadro morado: marcador. La IA solo ve esto.</p>
+          </article>
+
+          <article class="card pane" aria-labelledby="pane3-t">
+            <div class="pane-head"><span class="step" aria-hidden="true">3</span><h2 class="pane-title" id="pane3-t">Lo que te vuelve</h2></div>
+            <p class="pane-text" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
+            <p class="pane-foot" data-only="data broken">Subrayado continuo: dato devuelto a su sitio. Respuesta de ejemplo.</p>
+            <div class="error-box" data-only="error" hidden>
+              <strong><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Sin respuesta</strong>
+              <p class="small">Anthropic no ha respondido a tiempo. Tu texto ya iba sin datos personales y no hay nada que restaurar.</p>
+              <p class="small muted">Error <span class="code">504</span> · prueba más tarde o elige otra ruta.</p>
+            </div>
+            <p class="small muted" data-only="blocked" hidden>No hay respuesta: la petición se paró antes de salir.</p>
+          </article>
+        </div>
+
+        <dl class="legend" data-only="data error broken">
+          <dt>Datos encontrados</dt>
+          <dd class="type-chip">Nombre <code>PERSON</code> <b>1</b></dd>
+          <dd class="type-chip">DNI <code>ES_DNI</code> <b>1</b></dd>
+          <dd class="type-chip">Email <code>EMAIL</code> <b>1</b></dd>
+          <dd class="type-chip">IBAN <code>IBAN</code> <b>1</b></dd>
+        </dl>
+        <dl class="legend" data-only="blocked" hidden>
+          <dt>Datos encontrados</dt>
+          <dd class="type-chip">Nombre <code>PERSON</code> <b>1</b></dd>
+          <dd class="type-chip">DNI <code>ES_DNI</code> <b>1</b></dd>
+          <dd class="type-chip">Email <code>EMAIL</code> <b>1</b></dd>
+          <dd class="type-chip">IBAN <code>IBAN</code> <b>1</b></dd>
+          <dd class="type-chip">Salud <code>SPECIAL_CATEGORY</code> <b>1</b></dd>
+        </dl>
+        <p class="meta-line" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política default</span><span>Destino: Anthropic · claude-sonnet-4-5</span></p>
+        <p class="meta-line" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política rrhh</span><span>Nada ha salido de tu red</span></p>
+        <p class="meta-line" data-only="error" hidden><span>4 datos ocultados</span><span>Política default</span><span>Destino: Anthropic (no responde)</span></p>
+      </section>
+
+      <!-- ===================== 2 · En directo ===================== -->
+      <section class="view" role="tabpanel" id="panel-live" aria-labelledby="tab-live" hidden>
+        <div class="view-head">
+          <div>
+            <h1>En directo</h1>
+            <p>Lo que pasa ahora por Antifaz. Solo se ven tipos y cantidades: nunca un dato ni un marcador.</p>
+          </div>
+          <div class="live-bar">
+            <span class="pill pill-ok"><span class="dot" aria-hidden="true"></span>Conectado</span>
+            <span class="muted">Hoy, martes 6 de octubre</span>
+          </div>
+        </div>
+
+        <div class="stats">
+          <article class="card stat stat-wide" aria-labelledby="st-prot">
+            <p class="eyebrow" id="st-prot">Datos protegidos hoy</p>
+            <p class="stat-num" data-only="empty" hidden>0</p>
+            <p class="stat-sub" data-only="empty" hidden>Aún no hay datos.</p>
+            <p class="stat-num" data-only="data blocked error broken">128</p>
+            <ul class="bars" data-only="data blocked error broken" aria-label="Por tipo">
+              <li><span>DNI</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="n">41</span></li>
+              <li><span>Email</span><span class="track"><span class="fill" style="width:90%"></span></span><span class="n">37</span></li>
+              <li><span>Nombre</span><span class="track"><span class="fill" style="width:54%"></span></span><span class="n">22</span></li>
+              <li><span>IBAN</span><span class="track"><span class="fill" style="width:44%"></span></span><span class="n">18</span></li>
+              <li><span>Teléfono</span><span class="track"><span class="fill" style="width:24%"></span></span><span class="n">10</span></li>
+            </ul>
+          </article>
+          <article class="card stat" aria-labelledby="st-block">
+            <p class="eyebrow" id="st-block">Bloqueos</p>
+            <p class="stat-num" data-only="empty" hidden>0</p>
+            <p class="stat-num" data-only="data error broken">3</p>
+            <p class="stat-num" data-only="blocked" hidden>4</p>
+            <p class="stat-sub" data-only="data error broken">2 adjuntos · 1 categoría especial</p>
+            <p class="stat-sub" data-only="blocked" hidden>2 adjuntos · 2 categoría especial</p>
+          </article>
+          <article class="card stat" aria-labelledby="st-local">
+            <p class="eyebrow" id="st-local">Enviadas a IA local</p>
+            <p class="stat-num" data-only="empty" hidden>0</p>
+            <p class="stat-num" data-only="data blocked error broken">2</p>
+            <p class="stat-sub">No salen de tu red (Ollama).</p>
+          </article>
+          <article class="card stat stat-wide" aria-labelledby="st-chain">
+            <p class="eyebrow" id="st-chain">Cadena de evidencias</p>
+            <p class="chain chain-ok" data-only="empty data blocked error"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Íntegra</p>
+            <p class="chain chain-bad" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Rota en el registro 18.193</p>
+            <p class="stat-sub" data-only="data blocked error">Verificada a las 10:40 · 18.204 registros · último punto de control firmado hoy a las 00:00.</p>
+            <p class="stat-sub" data-only="empty" hidden>Verificada a las 10:40 · 0 registros hoy · último punto de control firmado hoy a las 00:00.</p>
+            <p class="stat-sub" data-only="broken" hidden>Verificada a las 10:40. Los registros anteriores al 18.193 siguen siendo válidos.</p>
+          </article>
+        </div>
+
+        <article class="card" aria-labelledby="feed-t">
+          <div class="view-head"><h2 class="card-title" id="feed-t">Últimas peticiones</h2><span class="small muted">Las más nuevas, arriba</span></div>
+          <div class="empty" data-only="empty" hidden style="border:0;padding-block:var(--space-6)">
+            <svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>
+            <p>Hoy aún no ha pasado ninguna petición. Cuando alguien use una clave, lo verás aquí al momento.</p>
+          </div>
+          <ol class="feed" role="log" aria-live="polite" aria-relevant="additions" aria-label="Últimas peticiones" data-only="data blocked error broken">
+            <li data-only="broken" hidden class="is-new"><time>10:40</time><div><p class="who">Verificación automática</p><p class="what">Cadena de evidencias rota en el registro 18.193</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-chain"/></svg>Alerta</span></li>
+            <li data-only="error" hidden><time>10:45</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">Anthropic no responde · no se ha enviado nada</p></div><span class="pill pill-warn"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Error 504</span></li>
+            <li data-only="blocked" hidden class="is-new"><time>10:45</time><div><p class="who">rrhh-nominas · script</p><p class="what">Categoría especial (salud) → bloqueado</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado</span></li>
+            <li><time>10:44</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">1 email y 1 teléfono ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 2</span></li>
+            <li><time>10:43</time><div><p class="who">rrhh-nominas · Open WebUI</p><p class="what">PDF adjunto → bloqueado</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado</span></li>
+            <li><time>10:42</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">2 DNI y 1 IBAN ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 3</span></li>
+            <li><time>10:41</time><div><p class="who">script-facturas</p><p class="what">Categoría especial (salud) → IA local · Ollama</p></div><span class="pill pill-accent"><svg class="icon" aria-hidden="true"><use href="#i-local"/></svg>IA local</span></li>
+            <li><time>10:40</time><div><p class="who">desarrollo · Codex</p><p class="what">Sin datos personales · OpenAI</p></div><span class="pill pill-neutral"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Sin datos</span></li>
+            <li><time>10:38</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">3 nombres ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 3</span></li>
+          </ol>
+        </article>
+
+        <p class="feed-foot"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>Si nadie mira este panel, Antifaz no prepara ni envía nada: 0 % de CPU. El flujo se abre al entrar aquí y se cierra al salir.</p>
+      </section>
+
+      <!-- ===================== 3 · Claves ===================== -->
+      <section class="view" role="tabpanel" id="panel-keys" aria-labelledby="tab-keys" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Claves</h1>
+            <p>Una clave por equipo o aplicación: así sabes quién usa la IA, con qué límites y con qué política.</p>
+          </div>
+          <button class="btn btn-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Crear clave</button>
+        </div>
+
+        <div class="empty" data-only="empty" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>
+          <p>Aún no hay claves. Crea una para cada equipo (por ejemplo, «soporte» o «rrhh») y ponle límites.</p>
+          <button class="btn btn-primary" type="button">Crear la primera clave</button>
+        </div>
+
+        <div class="card table-wrap" data-only="data blocked error broken">
+          <table class="keys-table">
+            <caption class="sr-only">Claves virtuales</caption>
+            <thead><tr><th scope="col">Nombre</th><th scope="col">Puede usar</th><th scope="col">Política</th><th scope="col">Límites</th><th scope="col">Último uso</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
+            <tbody>
+              <tr><td class="td-name"><span class="key-name">equipo-soporte</span><br><span class="key-id">id kid_3f9a</span></td><td data-label="Puede usar">Anthropic · claude-sonnet-4-5</td><td data-label="Política">default</td><td data-label="Límites">60 / min · 5.000 / día</td><td data-label="Último uso">hace 1 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
+              <tr><td class="td-name"><span class="key-name">rrhh-nominas</span><br><span class="key-id">id kid_81c2</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-mini</td><td data-label="Política">rrhh</td><td data-label="Límites">20 / min · 1.000 / día</td><td data-label="Último uso">hace 2 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
+              <tr><td class="td-name"><span class="key-name">desarrollo</span><br><span class="key-id">id kid_c47e</span></td><td data-label="Puede usar">Anthropic y OpenAI · todos los modelos</td><td data-label="Política">default</td><td data-label="Límites">120 / min</td><td data-label="Último uso">hace 5 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
+              <tr><td class="td-name"><span class="key-name">script-facturas</span><br><span class="key-id">id kid_09bd</span></td><td data-label="Puede usar">Ollama (local)</td><td data-label="Política">rrhh</td><td data-label="Límites">30 / min</td><td data-label="Último uso">hace 4 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
+              <tr class="is-revoked"><td class="td-name"><span class="key-name">becarios-2025</span><br><span class="key-id">id kid_5d10</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-nano</td><td data-label="Política">default</td><td data-label="Límites">10 / min</td><td data-label="Último uso">hace 40 días</td><td data-label="Estado"><span class="pill pill-neutral"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Revocada</span></td><td data-label="Acciones"></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>La clave solo se ve una vez, al crearla. Antifaz guarda su huella, no la clave, así que aquí nunca aparece. Si se pierde, revócala y crea otra.</p>
+      </section>
+
+      <!-- ===================== 4 · Políticas ===================== -->
+      <section class="view" role="tabpanel" id="panel-policies" aria-labelledby="tab-policies" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Políticas</h1>
+            <p>Qué hace Antifaz con cada tipo de dato. Cada clave usa una política. Al guardar se crea una revisión nueva y su huella queda en cada evidencia.</p>
+          </div>
+        </div>
+
+        <div class="banner banner-warn" data-only="empty" hidden style="border:0;border-radius:var(--radius-md)">
+          <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>
+          <div><strong>Usas la política por defecto</strong>Oculta todos los datos menos el CIF de empresa. Cámbiala aquí y guárdala con un nombre propio.</div>
+        </div>
+
+        <div class="card pol-head">
+          <span class="inline-field"><label for="pol-select">Política</label>
+            <select id="pol-select" name="pol-select"><option>default</option><option>rrhh</option></select></span>
+          <span class="small muted">Revisión 4 · huella <span class="mono">sha256:3f9c…e21a</span> · la usan 3 claves</span>
+        </div>
+
+        <div class="pol-grid">
+          <div class="card" style="display:grid;gap:var(--space-4)">
+            <dl class="pol-actions-help">
+              <div><dt>Ocultar</dt><dd>Cambia el dato por un marcador y lo devuelve en la respuesta.</dd></div>
+              <div><dt>Permitir</dt><dd>El dato pasa tal cual.</dd></div>
+              <div><dt>Bloquear</dt><dd>No se envía nada a la IA.</dd></div>
+              <div><dt>IA local</dt><dd>La petición entera va a un modelo de tu red (Ollama).</dd></div>
+            </dl>
+            <div id="pol-rows">
+              <!-- rows are plain HTML; the script only reads them to build the YAML -->
+              <div class="pol-row"><span class="pol-name">DNI<code>ES_DNI</code></span><fieldset class="seg"><legend>DNI</legend><input type="radio" id="p-ES_DNI-mask" name="ES_DNI" value="mask" checked><label for="p-ES_DNI-mask">Ocultar</label><input type="radio" id="p-ES_DNI-allow" name="ES_DNI" value="allow"><label for="p-ES_DNI-allow">Permitir</label><input type="radio" id="p-ES_DNI-block" name="ES_DNI" value="block"><label for="p-ES_DNI-block">Bloquear</label><input type="radio" id="p-ES_DNI-route_local" name="ES_DNI" value="route_local"><label for="p-ES_DNI-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">NIE<code>ES_NIE</code></span><fieldset class="seg"><legend>NIE</legend><input type="radio" id="p-ES_NIE-mask" name="ES_NIE" value="mask" checked><label for="p-ES_NIE-mask">Ocultar</label><input type="radio" id="p-ES_NIE-allow" name="ES_NIE" value="allow"><label for="p-ES_NIE-allow">Permitir</label><input type="radio" id="p-ES_NIE-block" name="ES_NIE" value="block"><label for="p-ES_NIE-block">Bloquear</label><input type="radio" id="p-ES_NIE-route_local" name="ES_NIE" value="route_local"><label for="p-ES_NIE-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">CIF de empresa<code>ES_CIF</code></span><fieldset class="seg"><legend>CIF de empresa</legend><input type="radio" id="p-ES_CIF-mask" name="ES_CIF" value="mask"><label for="p-ES_CIF-mask">Ocultar</label><input type="radio" id="p-ES_CIF-allow" name="ES_CIF" value="allow" checked><label for="p-ES_CIF-allow">Permitir</label><input type="radio" id="p-ES_CIF-block" name="ES_CIF" value="block"><label for="p-ES_CIF-block">Bloquear</label><input type="radio" id="p-ES_CIF-route_local" name="ES_CIF" value="route_local"><label for="p-ES_CIF-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Seguridad Social<code>ES_NSS</code></span><fieldset class="seg"><legend>Número de la Seguridad Social</legend><input type="radio" id="p-ES_NSS-mask" name="ES_NSS" value="mask" checked><label for="p-ES_NSS-mask">Ocultar</label><input type="radio" id="p-ES_NSS-allow" name="ES_NSS" value="allow"><label for="p-ES_NSS-allow">Permitir</label><input type="radio" id="p-ES_NSS-block" name="ES_NSS" value="block"><label for="p-ES_NSS-block">Bloquear</label><input type="radio" id="p-ES_NSS-route_local" name="ES_NSS" value="route_local"><label for="p-ES_NSS-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">IBAN<code>IBAN</code></span><fieldset class="seg"><legend>IBAN</legend><input type="radio" id="p-IBAN-mask" name="IBAN" value="mask" checked><label for="p-IBAN-mask">Ocultar</label><input type="radio" id="p-IBAN-allow" name="IBAN" value="allow"><label for="p-IBAN-allow">Permitir</label><input type="radio" id="p-IBAN-block" name="IBAN" value="block"><label for="p-IBAN-block">Bloquear</label><input type="radio" id="p-IBAN-route_local" name="IBAN" value="route_local"><label for="p-IBAN-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Tarjeta de pago<code>CREDIT_CARD</code></span><fieldset class="seg"><legend>Tarjeta de pago</legend><input type="radio" id="p-CREDIT_CARD-mask" name="CREDIT_CARD" value="mask" checked><label for="p-CREDIT_CARD-mask">Ocultar</label><input type="radio" id="p-CREDIT_CARD-allow" name="CREDIT_CARD" value="allow"><label for="p-CREDIT_CARD-allow">Permitir</label><input type="radio" id="p-CREDIT_CARD-block" name="CREDIT_CARD" value="block"><label for="p-CREDIT_CARD-block">Bloquear</label><input type="radio" id="p-CREDIT_CARD-route_local" name="CREDIT_CARD" value="route_local"><label for="p-CREDIT_CARD-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Email<code>EMAIL</code></span><fieldset class="seg"><legend>Email</legend><input type="radio" id="p-EMAIL-mask" name="EMAIL" value="mask" checked><label for="p-EMAIL-mask">Ocultar</label><input type="radio" id="p-EMAIL-allow" name="EMAIL" value="allow"><label for="p-EMAIL-allow">Permitir</label><input type="radio" id="p-EMAIL-block" name="EMAIL" value="block"><label for="p-EMAIL-block">Bloquear</label><input type="radio" id="p-EMAIL-route_local" name="EMAIL" value="route_local"><label for="p-EMAIL-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Teléfono<code>PHONE</code></span><fieldset class="seg"><legend>Teléfono</legend><input type="radio" id="p-PHONE-mask" name="PHONE" value="mask" checked><label for="p-PHONE-mask">Ocultar</label><input type="radio" id="p-PHONE-allow" name="PHONE" value="allow"><label for="p-PHONE-allow">Permitir</label><input type="radio" id="p-PHONE-block" name="PHONE" value="block"><label for="p-PHONE-block">Bloquear</label><input type="radio" id="p-PHONE-route_local" name="PHONE" value="route_local"><label for="p-PHONE-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Dirección postal<code>ADDRESS</code></span><fieldset class="seg"><legend>Dirección postal</legend><input type="radio" id="p-ADDRESS-mask" name="ADDRESS" value="mask" checked><label for="p-ADDRESS-mask">Ocultar</label><input type="radio" id="p-ADDRESS-allow" name="ADDRESS" value="allow"><label for="p-ADDRESS-allow">Permitir</label><input type="radio" id="p-ADDRESS-block" name="ADDRESS" value="block"><label for="p-ADDRESS-block">Bloquear</label><input type="radio" id="p-ADDRESS-route_local" name="ADDRESS" value="route_local"><label for="p-ADDRESS-route_local">IA local</label></fieldset></div>
+              <div class="pol-row"><span class="pol-name">Nombre de persona<code>PERSON · necesita el NER</code></span><fieldset class="seg"><legend>Nombre de persona</legend><input type="radio" id="p-PERSON-mask" name="PERSON" value="mask" checked><label for="p-PERSON-mask">Ocultar</label><input type="radio" id="p-PERSON-allow" name="PERSON" value="allow"><label for="p-PERSON-allow">Permitir</label><input type="radio" id="p-PERSON-block" name="PERSON" value="block"><label for="p-PERSON-block">Bloquear</label><input type="radio" id="p-PERSON-route_local" name="PERSON" value="route_local"><label for="p-PERSON-route_local">IA local</label></fieldset></div>
+            </div>
+          </div>
+
+          <div style="display:grid;gap:var(--space-4);min-width:0">
+            <article class="card" style="display:grid;gap:var(--space-3)" aria-labelledby="fixed-t">
+              <h2 class="card-title" id="fixed-t">Reglas de seguridad</h2>
+              <ul class="fixed-rules">
+                <li><span>Si el detector falla</span><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloquear · fijo</span></li>
+                <li><span>Imágenes, PDF y archivos</span><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloquear · fijo</span></li>
+                <li><span>Campos de texto desconocidos</span><span class="pill pill-accent"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar · fijo</span></li>
+                <li><label for="pol-special">Salud, religión, sindicato… (categorías especiales)</label>
+                  <select id="pol-special" name="pol-special"><option value="route_local">IA local</option><option value="block">Bloquear</option></select></li>
+              </ul>
+              <p class="small muted">Nunca ocultar: <span class="mono">Antifaz</span> · Propios: <span class="mono">CLIENT_CODE</span> (código de cliente) → ocultar</p>
+            </article>
+            <article class="card" style="display:grid;gap:var(--space-3);min-width:0" aria-labelledby="yaml-t">
+              <h2 class="card-title" id="yaml-t">Así queda el archivo</h2>
+              <pre class="yaml" id="yaml-out" tabindex="0" aria-label="Vista previa de la política en YAML"></pre>
+              <div class="save-row">
+                <button class="btn btn-primary" type="button" id="pol-save" disabled>Guardar como revisión 5</button>
+                <span class="small muted" id="pol-dirty" aria-live="polite">Sin cambios</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== 5 · Estado ===================== -->
+      <section class="view" role="tabpanel" id="panel-status" aria-labelledby="tab-status" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Estado</h1>
+            <p>Si una pieza falla, Antifaz bloquea: nunca deja pasar datos sin proteger.</p>
+          </div>
+          <span class="small muted">Comprobado a las 10:44 · <button class="btn btn-ghost" type="button">Comprobar ahora</button></span>
+        </div>
+
+        <div class="status-grid">
+          <article class="card status-card" aria-labelledby="s-gw">
+            <header><h2 class="card-title" id="s-gw">Pasarela</h2><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Funciona</span></header>
+            <dl class="kv">
+              <dt>Versión</dt><dd class="mono">0.2.0</dd>
+              <dt>/healthz</dt><dd><span class="mono">"status": "ok"</span></dd>
+              <dt>Escucha en</dt><dd class="mono">127.0.0.1:8000</dd>
+              <dt>Base de datos</dt><dd>PostgreSQL · conectada</dd>
+            </dl>
+          </article>
+
+          <article class="card status-card" aria-labelledby="s-ner">
+            <header><h2 class="card-title" id="s-ner">Detector de nombres (NER)</h2><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Funcionando</span></header>
+            <p class="small">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido.</p>
+            <ul class="ner-states" aria-label="Estados posibles">
+              <li><b>Funcionando</b> (<span class="mono">ok</span>): busca nombres.</li>
+              <li><b>Arrancando</b> (<span class="mono">starting</span>): carga el modelo; mientras, se bloquea.</li>
+              <li><b>En pausa tras fallos</b> (<span class="mono">circuit_open</span>): bloquea unos segundos y lo vuelve a intentar.</li>
+              <li><b>Parado</b> (<span class="mono">closed</span>): bloquea todo lo que necesite el NER.</li>
+            </ul>
+          </article>
+
+          <article class="card status-card" aria-labelledby="s-prov">
+            <header><h2 class="card-title" id="s-prov">Proveedores de IA</h2>
+              <span class="pill pill-ok" data-only="empty data blocked broken"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Todos responden</span>
+              <span class="pill pill-warn" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>1 no responde</span></header>
+            <ul class="prov">
+              <li><span>Anthropic</span>
+                <span class="pill pill-ok" data-only="empty data blocked broken"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 180 ms</span>
+                <span class="pill pill-danger" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>No responde · tiempo agotado</span></li>
+              <li><span>OpenAI</span><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 240 ms</span></li>
+              <li><span>Ollama (local)</span><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 30 ms</span></li>
+            </ul>
+            <p class="small muted">Desde la terminal: <span class="code">antifaz doctor --providers</span></p>
+          </article>
+
+          <article class="card status-card" aria-labelledby="s-ev">
+            <header><h2 class="card-title" id="s-ev">Evidencias</h2>
+              <span class="pill pill-ok" data-only="empty data blocked error"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Cadena íntegra</span>
+              <span class="pill pill-danger" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Cadena rota</span></header>
+            <dl class="kv">
+              <dt>Registros</dt><dd data-only="empty data blocked error">18.204, encadenados</dd><dd data-only="broken" hidden>Rota en el 18.193 de 18.204</dd>
+              <dt>Última verificación</dt><dd>Hoy, 10:40</dd>
+              <dt>Punto de control</dt><dd>Firmado hoy a las 00:00</dd>
+              <dt>Guarda</dt><dd>Quién, cuándo, qué tipos y cuántos. Nunca los datos.</dd>
+            </dl>
+            <p class="small muted">Desde la terminal: <span class="code">antifaz audit verify</span></p>
+          </article>
+        </div>
+
+        <p class="feed-foot"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>Esta página no se actualiza sola: no hay sondeos en segundo plano. Pulsa «Comprobar ahora» cuando lo necesites.</p>
+      </section>
+    </main>
+  </div>
+</div>
+</div>
+
+<!-- ===================== Logo (prototype annex) ===================== -->
+<section class="annex" aria-labelledby="logo-t">
+  <div>
+    <h2 id="logo-t">Logo</h2>
+    <p class="muted">El actual y dos propuestas. Cada una a 64, 32 y 16 px, sobre claro, sobre oscuro y en un solo color. Decide Miquel.</p>
+  </div>
+  <div class="logo-grid">
+    <article class="card logo-card">
+      <h3>Actual</h3>
+      <p class="small muted">Antifaz redondeado sobre cuadro índigo. Reconocible; a 16 px los ojos casi se pierden.</p>
+      <div class="logo-sizes">
+        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
+        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
+        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
+        <figure class="logo-mono"><svg width="32" height="16" viewBox="10 22 52 26" aria-hidden="true"><use href="#mask-shape" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
+      </div>
+    </article>
+    <article class="card logo-card">
+      <h3>Propuesta A · antifaz geométrico</h3>
+      <p class="small muted">El mismo gesto, más simétrico y con ojos más grandes: se lee mejor a 16 px. Continuidad con lo publicado.</p>
+      <div class="logo-sizes">
+        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>64</figcaption></figure>
+        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>32</figcaption></figure>
+        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>16</figcaption></figure>
+        <figure class="logo-mono"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-a" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
+      </div>
+    </article>
+    <article class="card logo-card">
+      <h3>Propuesta B · ojos de tachado</h3>
+      <p class="small muted">Antifaz anguloso sin fondo; los ojos son dos barras de tachado, el signo de «dato oculto». Más propio, menos parecido a un antifaz de carnaval.</p>
+      <div class="logo-sizes">
+        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#4b3fb8"/></svg><figcaption>64</figcaption></figure>
+        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#4b3fb8"/></svg><figcaption>32</figcaption></figure>
+        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#aaa2ff"/></svg><figcaption>16</figcaption></figure>
+        <figure class="logo-mono"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
+      </div>
+    </article>
+  </div>
+</section>
+
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  var app = document.getElementById("app");
+
+  /* ---- Theme: follows the system until the user picks one ---- */
+  var themeBtn = document.getElementById("theme-btn");
+  var darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  function effectiveTheme() {
+    return root.getAttribute("data-theme") || (darkQuery.matches ? "dark" : "light");
+  }
+  function paintThemeButton() {
+    var next = effectiveTheme() === "dark" ? "light" : "dark";
+    document.getElementById("theme-label").textContent = next === "dark" ? "Oscuro" : "Claro";
+    document.getElementById("theme-icon").setAttribute("href", next === "dark" ? "#i-moon" : "#i-sun");
+    themeBtn.setAttribute("aria-label", next === "dark" ? "Cambiar a tema oscuro" : "Cambiar a tema claro");
+  }
+  themeBtn.addEventListener("click", function () {
+    root.setAttribute("data-theme", effectiveTheme() === "dark" ? "light" : "dark");
+    paintThemeButton();
+  });
+  darkQuery.addEventListener("change", paintThemeButton);
+  paintThemeButton();
+
+  /* ---- Tabs: roving tabindex, arrows, Home and End ---- */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function selectTab(tab, focus) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+    });
+    if (focus) tab.focus();
+    if (tab.id === "tab-playground") playMask();
+  }
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener("click", function () { selectTab(tab, false); });
+    tab.addEventListener("keydown", function (e) {
+      var to = null;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") to = tabs[(i + 1) % tabs.length];
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") to = tabs[(i - 1 + tabs.length) % tabs.length];
+      else if (e.key === "Home") to = tabs[0];
+      else if (e.key === "End") to = tabs[tabs.length - 1];
+      if (to) { e.preventDefault(); selectTab(to, true); }
+    });
+  });
+
+  /* ---- Prototype states ---- */
+  var EXAMPLE = "Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora " +
+    "ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
+  var textByState = {
+    empty: "", data: EXAMPLE, error: EXAMPLE, broken: EXAMPLE,
+    blocked: EXAMPLE + " Está de baja médica desde el lunes."
+  };
+  var pgText = document.getElementById("pg-text");
+  var pgPolicy = document.getElementById("pg-policy");
+  function setState(state) {
+    app.setAttribute("data-state", state);
+    document.querySelectorAll("[data-only]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-only").split(" ").indexOf(state) === -1;
+    });
+    pgText.value = textByState[state];
+    pgPolicy.value = state === "blocked" ? "rrhh" : "default";
+    playMask();
+  }
+  document.querySelectorAll('input[name="proto-state"]').forEach(function (r) {
+    r.addEventListener("change", function () { if (r.checked) setState(r.value); });
+  });
+  function useExample() {
+    document.querySelector('input[name="proto-state"][value="data"]').checked = true;
+    setState("data");
+  }
+  document.getElementById("pg-example").addEventListener("click", useExample);
+  document.querySelector('[data-action="example"]').addEventListener("click", useExample);
+  document.getElementById("pg-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (app.getAttribute("data-state") === "empty") useExample(); else playMask();
+  });
+
+  /* ---- Simulated phone ---- */
+  document.getElementById("proto-mobile").addEventListener("change", function (e) {
+    document.getElementById("stage-wrap").classList.toggle("is-mobile", e.target.checked);
+  });
+
+  /* ---- Reduced motion: system setting, or the toggle to preview it ---- */
+  var motionBox = document.getElementById("proto-motion");
+  var reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function syncMotion() {
+    if (reduceQuery.matches) { motionBox.checked = true; motionBox.disabled = true; }
+    root.classList.toggle("reduce-motion", motionBox.checked);
+  }
+  motionBox.addEventListener("change", function () { syncMotion(); playMask(); });
+  reduceQuery.addEventListener("change", syncMotion);
+  syncMotion();
+
+  /* ---- Mask animation (F3): restart by toggling a class; the CSS does the rest ---- */
+  var stage = document.getElementById("mask-anim");
+  function playMask() {
+    var state = app.getAttribute("data-state");
+    if (root.classList.contains("reduce-motion")) return;
+    if (state !== "data" && state !== "broken") return;
+    if (document.getElementById("panel-playground").hidden) return;
+    stage.classList.remove("is-playing");
+    void stage.offsetWidth;
+    stage.classList.add("is-playing");
+  }
+  document.getElementById("anim-replay").addEventListener("click", playMask);
+
+  /* ---- Policy YAML preview, built from the radios ---- */
+  var yamlOut = document.getElementById("yaml-out");
+  var saveBtn = document.getElementById("pol-save");
+  var dirty = document.getElementById("pol-dirty");
+  var special = document.getElementById("pol-special");
+  var initial = null;
+  function buildYaml() {
+    var lines = ["version: 1", "name: default", "on_detector_error: block",
+      "unknown_text_fields: mask", "attachments: block", "entities:"];
+    document.querySelectorAll("#pol-rows .seg").forEach(function (seg) {
+      var checked = seg.querySelector("input:checked");
+      lines.push("  " + checked.name + ": " + checked.value);
+    });
+    lines.push("special_categories: " + special.value);
+    lines.push('allowlist: ["Antifaz"]');
+    lines.push("custom:", "  - name: CLIENT_CODE", '    regex: "CLI-\\\\d{5}"', "    action: mask");
+    return lines.join("\n");
+  }
+  function renderYaml() {
+    var text = buildYaml();
+    if (initial === null) initial = text;
+    yamlOut.textContent = text;
+    var changed = text !== initial;
+    saveBtn.disabled = !changed;
+    dirty.textContent = changed ? "Cambios sin guardar" : "Sin cambios";
+  }
+  document.getElementById("panel-policies").addEventListener("change", function (e) {
+    if (e.target.matches("#pol-rows input, #pol-special")) renderYaml();
+  });
+  renderYaml();
+
+  setState("data");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+/*
+ * Antifaz design tokens: the single source for colours, type, spacing, radii,
+ * shadows and motion. The panel (v0.2) and the prototype read only these.
+ *
+ * Theme rules:
+ * - Every token is defined first on :root (light).
+ * - Dark comes from prefers-color-scheme, unless the page forces light;
+ *   [data-theme="dark"] forces dark. Both dark blocks hold the same values.
+ * - Components never use a literal colour: only these tokens.
+ * Contrast ratios of the main pairs are listed in design/README.md (WCAG AA).
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Neutrals with a slight indigo bias, taken from the logo. */
+  --color-bg: #f5f5f9;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #ededf4;
+  --color-border: #dadae6;
+  --color-border-strong: #8e8ea6; /* inputs and controls: >= 3:1 on surface */
+  --color-text: #1c1b2e;
+  --color-text-muted: #575670;
+
+  /* Accent: the logo indigo. Used for actions, focus and markers. */
+  --color-accent: #4b3fb8;
+  --color-accent-hover: #3d32a0;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: #ebe9fb;
+  --color-accent-soft-text: #3a2f9e;
+  --color-focus: #4b3fb8;
+
+  /* Semantic colours. Always paired with an icon or a word, never alone. */
+  --color-ok: #17703f;
+  --color-ok-soft: #e2f2e8;
+  --color-warn: #855400;
+  --color-warn-soft: #fbefd6;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fce9e7;
+
+  /* A personal value found in the Playground (only there, synthetic data). */
+  --color-pii-bg: #fff1c7;
+  --color-pii-line: #855400;
+
+  /* Type: system fonts only, no web fonts. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --text-xs: 0.75rem; /* 12px: chips, table captions */
+  --text-sm: 0.8125rem; /* 13px: secondary text */
+  --text-md: 0.9375rem; /* 15px: body */
+  --text-lg: 1.0625rem; /* 17px: card titles */
+  --text-xl: 1.375rem; /* 22px: view titles */
+  --text-2xl: 1.875rem; /* 30px: big counters */
+  --leading-tight: 1.25;
+  --leading-body: 1.55;
+  --weight-regular: 400;
+  --weight-medium: 550;
+  --weight-bold: 680;
+  --tracking-label: 0.06em;
+
+  /* Spacing: 4px grid. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Radii: small for chips and inputs, medium for cards. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* Shadows: only for things that float (menus, the mask). Cards use borders. */
+  --shadow-1: 0 1px 2px rgb(28 27 46 / 0.06), 0 1px 1px rgb(28 27 46 / 0.04);
+  --shadow-2: 0 6px 20px rgb(28 27 46 / 0.12);
+
+  /* Motion. All of it is switched off with prefers-reduced-motion. */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 400ms;
+  --duration-mask: 7s; /* the full Playground animation (F3) */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #11111c;
+    --color-surface: #191927;
+    --color-surface-sunken: #222234;
+    --color-border: #30304a;
+    --color-border-strong: #6e6e8c;
+    --color-text: #ecebf5;
+    --color-text-muted: #a6a5bf;
+    --color-accent: #aaa2ff;
+    --color-accent-hover: #c0baff;
+    --color-on-accent: #15132e;
+    --color-accent-soft: #2a2650;
+    --color-accent-soft-text: #cdc8ff;
+    --color-focus: #aaa2ff;
+    --color-ok: #6dd49a;
+    --color-ok-soft: #13301f;
+    --color-warn: #f2c46b;
+    --color-warn-soft: #33270e;
+    --color-danger: #ff8f86;
+    --color-danger-soft: #3b1715;
+    --color-pii-bg: #3d3216;
+    --color-pii-line: #f2c46b;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 6px 20px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #11111c;
+  --color-surface: #191927;
+  --color-surface-sunken: #222234;
+  --color-border: #30304a;
+  --color-border-strong: #6e6e8c;
+  --color-text: #ecebf5;
+  --color-text-muted: #a6a5bf;
+  --color-accent: #aaa2ff;
+  --color-accent-hover: #c0baff;
+  --color-on-accent: #15132e;
+  --color-accent-soft: #2a2650;
+  --color-accent-soft-text: #cdc8ff;
+  --color-focus: #aaa2ff;
+  --color-ok: #6dd49a;
+  --color-ok-soft: #13301f;
+  --color-warn: #f2c46b;
+  --color-warn-soft: #33270e;
+  --color-danger: #ff8f86;
+  --color-danger-soft: #3b1715;
+  --color-pii-bg: #3d3216;
+  --color-pii-line: #f2c46b;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-2: 0 6px 20px rgb(0 0 0 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
