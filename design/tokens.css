@@ -2,63 +2,108 @@
  * Antifaz design tokens: the single source for colours, type, spacing, radii,
  * shadows and motion. The panel (v0.2) and the prototype read only these.
  *
+ * Direction (chosen by Miquel, issue #30): a macOS-style floating window on a soft
+ * ambient indigo glow. Near-monochrome; indigo only marks actions, focus, the
+ * [[MARKERS]] and the mask itself. Inter (optical sizing) + Geist Mono.
+ *
  * Theme rules:
  * - Every token is defined first on :root (light).
  * - Dark comes from prefers-color-scheme, unless the page forces light;
  *   [data-theme="dark"] forces dark. Both dark blocks hold the same values.
- * - Components never use a literal colour: only these tokens.
- * Contrast ratios of the main pairs are listed in design/README.md (WCAG AA).
+ * - Components never use a literal colour: only these tokens. Exceptions: the
+ *   logo gradient (below, same in both themes) and the fixed light/dark stages of
+ *   the Logo section, which exist to test the logo on both.
+ * Contrast ratios of the text and control pairs are in design/README.md (WCAG AA).
+ * Rule: --color-text-faint is never used on --color-surface-3.
  */
 
 :root {
   color-scheme: light;
 
-  /* Neutrals with a slight indigo bias, taken from the logo. */
-  --color-bg: #f5f5f9;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #ededf4;
-  --color-border: #dadae6;
-  --color-border-strong: #8e8ea6; /* inputs and controls: >= 3:1 on surface */
-  --color-text: #1c1b2e;
-  --color-text-muted: #575670;
+  /* Page and window. The ambient colours are decoration only (a soft glow). */
+  --color-bg: #eeeef3;
+  --color-ambient-1: rgb(120 104 255 / 0.16);
+  --color-ambient-2: rgb(80 160 255 / 0.1);
+  --color-window: #ffffff;
+  --color-sidebar: #f7f7f9;
 
-  /* Accent: the logo indigo. Used for actions, focus and markers. */
-  --color-accent: #4b3fb8;
-  --color-accent-hover: #3d32a0;
+  /* Surfaces, from the card up to the tracks of segmented controls. */
+  --color-surface: #ffffff;
+  --color-surface-2: #f5f5f8;
+  --color-surface-3: #ebebf0;
+  --color-stage: #fbfbfd; /* the stage of the mask animation */
+
+  /* Lines. Hairlines are decoration; --color-control is the 3:1 edge of a control. */
+  --color-line: rgb(29 29 31 / 0.08);
+  --color-line-strong: rgb(29 29 31 / 0.15);
+  --color-control: #7b7b83;
+
+  /* Text: primary, secondary and tertiary (all >= 4.5:1 where they are used). */
+  --color-text: #1d1d1f;
+  --color-text-muted: #5f5f66;
+  --color-text-faint: #6c6c73;
+
+  /* Accent: indigo. Actions, focus, markers and the mask. */
+  --color-accent: #5847e0;
+  --color-accent-ink: #4434c4; /* accent as text (links, markers) */
+  --color-accent-soft: rgb(88 71 224 / 0.1);
   --color-on-accent: #ffffff;
-  --color-accent-soft: #ebe9fb;
-  --color-accent-soft-text: #3a2f9e;
-  --color-focus: #4b3fb8;
+  --color-focus: #5847e0;
+  --color-glow: rgb(88 71 224 / 0.38);
+  --color-edge: rgb(88 71 224 / 0.28);
 
   /* Semantic colours. Always paired with an icon or a word, never alone. */
-  --color-ok: #17703f;
-  --color-ok-soft: #e2f2e8;
-  --color-warn: #855400;
-  --color-warn-soft: #fbefd6;
-  --color-danger: #b3261e;
-  --color-danger-soft: #fce9e7;
+  --color-ok: #1a7f35;
+  --color-ok-soft: rgb(52 199 89 / 0.14);
+  --color-warn: #8f4700;
+  --color-warn-soft: rgb(255 159 10 / 0.15);
+  --color-danger: #c3160e;
+  --color-danger-soft: rgb(255 59 48 / 0.1);
+
+  /* Switch: the "on" track and the knob (>= 3:1 between them). */
+  --color-switch-on: #1a7f35;
+  --color-knob: #ffffff;
 
   /* A personal value found in the Playground (only there, synthetic data). */
-  --color-pii-bg: #fff1c7;
-  --color-pii-line: #855400;
+  --color-pii: #8f4700; /* the type label next to the value */
+  --color-pii-bg: rgb(255 184 64 / 0.26);
+  --color-pii-glow: rgb(255 170 40 / 0.45);
 
-  /* Type: system fonts only, no web fonts. */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    "Noto Sans", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
-  --text-xs: 0.75rem; /* 12px: chips, table captions */
+  /* Logo tile (same in both themes; it is the brand, not the theme). */
+  --logo-from: #7363f7;
+  --logo-to: #3b2db0;
+  --logo-mask: #ffffff;
+
+  /* Shadows: the window floats; cards are a hairline ring plus a soft drop. */
+  --shadow-window: 0 0 0 1px rgb(0 0 0 / 0.05), 0 2px 4px rgb(0 0 0 / 0.03),
+    0 24px 48px -16px rgb(30 24 80 / 0.18), 0 60px 120px -40px rgb(30 24 80 / 0.22);
+  --shadow-card: 0 0 0 1px var(--color-line), 0 1px 2px rgb(0 0 0 / 0.03),
+    0 8px 22px -10px rgb(20 20 40 / 0.1);
+  --shadow-pop: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.08),
+    0 4px 10px -2px rgb(0 0 0 / 0.08);
+
+  /* Type. Inter (optical sizing) and Geist Mono, both SIL OFL 1.1. The real panel
+     self-hosts the woff2 files; the fallbacks keep it usable without them. */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    system-ui, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", "Cascadia Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --text-2xs: 0.6875rem; /* 11px: kbd hints, tiny labels */
+  --text-xs: 0.75rem; /* 12px: captions, eyebrows */
   --text-sm: 0.8125rem; /* 13px: secondary text */
   --text-md: 0.9375rem; /* 15px: body */
   --text-lg: 1.0625rem; /* 17px: card titles */
-  --text-xl: 1.375rem; /* 22px: view titles */
-  --text-2xl: 1.875rem; /* 30px: big counters */
-  --leading-tight: 1.25;
-  --leading-body: 1.55;
+  --text-xl: 1.5rem; /* 24px: view titles on phones */
+  --text-2xl: 2.125rem; /* 34px: view titles */
+  --text-3xl: 2.75rem; /* 44px: big counters */
+  --leading-tight: 1.1;
+  --leading-body: 1.5;
   --weight-regular: 400;
-  --weight-medium: 550;
-  --weight-bold: 680;
-  --tracking-label: 0.06em;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 650;
+  --tracking-tight: -0.011em;
+  --tracking-display: -0.034em;
 
   /* Spacing: 4px grid. */
   --space-1: 0.25rem;
@@ -69,78 +114,102 @@
   --space-6: 2rem;
   --space-7: 3rem;
 
-  /* Radii: small for chips and inputs, medium for cards. */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  /* Radii. */
+  --radius-sm: 7px; /* markers, code */
+  --radius-md: 10px; /* segmented tracks, icon buttons */
+  --radius-lg: 18px; /* cards */
+  --radius-xl: 24px; /* the window */
   --radius-pill: 999px;
 
-  /* Shadows: only for things that float (menus, the mask). Cards use borders. */
-  --shadow-1: 0 1px 2px rgb(28 27 46 / 0.06), 0 1px 1px rgb(28 27 46 / 0.04);
-  --shadow-2: 0 6px 20px rgb(28 27 46 / 0.12);
-
   /* Motion. All of it is switched off with prefers-reduced-motion. */
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
-  --duration-slow: 400ms;
-  --duration-mask: 7s; /* the full Playground animation (F3) */
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --duration-fast: 200ms;
+  --duration-base: 350ms;
+  --duration-slow: 550ms;
+  --duration-mask: 7.2s; /* the full Playground animation (F3) */
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --color-bg: #11111c;
-    --color-surface: #191927;
-    --color-surface-sunken: #222234;
-    --color-border: #30304a;
-    --color-border-strong: #6e6e8c;
-    --color-text: #ecebf5;
-    --color-text-muted: #a6a5bf;
-    --color-accent: #aaa2ff;
-    --color-accent-hover: #c0baff;
-    --color-on-accent: #15132e;
-    --color-accent-soft: #2a2650;
-    --color-accent-soft-text: #cdc8ff;
-    --color-focus: #aaa2ff;
-    --color-ok: #6dd49a;
-    --color-ok-soft: #13301f;
-    --color-warn: #f2c46b;
-    --color-warn-soft: #33270e;
-    --color-danger: #ff8f86;
-    --color-danger-soft: #3b1715;
-    --color-pii-bg: #3d3216;
-    --color-pii-line: #f2c46b;
-    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow-2: 0 6px 20px rgb(0 0 0 / 0.5);
+    --color-bg: #050507;
+    --color-ambient-1: rgb(110 92 255 / 0.2);
+    --color-ambient-2: rgb(40 120 255 / 0.1);
+    --color-window: #0e0e11;
+    --color-sidebar: #131316;
+    --color-surface: #18181c;
+    --color-surface-2: #1e1e23;
+    --color-surface-3: #2a2a30;
+    --color-stage: #111114;
+    --color-line: rgb(255 255 255 / 0.075);
+    --color-line-strong: rgb(255 255 255 / 0.15);
+    --color-control: #7c7c86;
+    --color-text: #f5f5f7;
+    --color-text-muted: #a1a1aa;
+    --color-text-faint: #8e8e97;
+    --color-accent: #9d93ff;
+    --color-accent-ink: #c7c1ff;
+    --color-accent-soft: rgb(157 147 255 / 0.15);
+    --color-on-accent: #0d0b24;
+    --color-focus: #9d93ff;
+    --color-glow: rgb(157 147 255 / 0.5);
+    --color-edge: rgb(157 147 255 / 0.35);
+    --color-ok: #32d74b;
+    --color-ok-soft: rgb(50 215 75 / 0.14);
+    --color-warn: #ffb340;
+    --color-warn-soft: rgb(255 179 64 / 0.14);
+    --color-danger: #ff6b63;
+    --color-danger-soft: rgb(255 107 99 / 0.14);
+    --color-switch-on: #248a3d;
+    --color-knob: #ffffff;
+    --color-pii: #ffcc70;
+    --color-pii-bg: rgb(255 184 64 / 0.18);
+    --color-pii-glow: rgb(255 190 80 / 0.4);
+    --shadow-window: 0 0 0 1px rgb(255 255 255 / 0.07), 0 40px 100px -30px rgb(0 0 0 / 0.95);
+    --shadow-card: 0 0 0 1px var(--color-line), 0 10px 28px -14px rgb(0 0 0 / 0.8);
+    --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 4px 12px -2px rgb(0 0 0 / 0.6);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-bg: #11111c;
-  --color-surface: #191927;
-  --color-surface-sunken: #222234;
-  --color-border: #30304a;
-  --color-border-strong: #6e6e8c;
-  --color-text: #ecebf5;
-  --color-text-muted: #a6a5bf;
-  --color-accent: #aaa2ff;
-  --color-accent-hover: #c0baff;
-  --color-on-accent: #15132e;
-  --color-accent-soft: #2a2650;
-  --color-accent-soft-text: #cdc8ff;
-  --color-focus: #aaa2ff;
-  --color-ok: #6dd49a;
-  --color-ok-soft: #13301f;
-  --color-warn: #f2c46b;
-  --color-warn-soft: #33270e;
-  --color-danger: #ff8f86;
-  --color-danger-soft: #3b1715;
-  --color-pii-bg: #3d3216;
-  --color-pii-line: #f2c46b;
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-2: 0 6px 20px rgb(0 0 0 / 0.5);
+  --color-bg: #050507;
+  --color-ambient-1: rgb(110 92 255 / 0.2);
+  --color-ambient-2: rgb(40 120 255 / 0.1);
+  --color-window: #0e0e11;
+  --color-sidebar: #131316;
+  --color-surface: #18181c;
+  --color-surface-2: #1e1e23;
+  --color-surface-3: #2a2a30;
+  --color-stage: #111114;
+  --color-line: rgb(255 255 255 / 0.075);
+  --color-line-strong: rgb(255 255 255 / 0.15);
+  --color-control: #7c7c86;
+  --color-text: #f5f5f7;
+  --color-text-muted: #a1a1aa;
+  --color-text-faint: #8e8e97;
+  --color-accent: #9d93ff;
+  --color-accent-ink: #c7c1ff;
+  --color-accent-soft: rgb(157 147 255 / 0.15);
+  --color-on-accent: #0d0b24;
+  --color-focus: #9d93ff;
+  --color-glow: rgb(157 147 255 / 0.5);
+  --color-edge: rgb(157 147 255 / 0.35);
+  --color-ok: #32d74b;
+  --color-ok-soft: rgb(50 215 75 / 0.14);
+  --color-warn: #ffb340;
+  --color-warn-soft: rgb(255 179 64 / 0.14);
+  --color-danger: #ff6b63;
+  --color-danger-soft: rgb(255 107 99 / 0.14);
+  --color-switch-on: #248a3d;
+  --color-knob: #ffffff;
+  --color-pii: #ffcc70;
+  --color-pii-bg: rgb(255 184 64 / 0.18);
+  --color-pii-glow: rgb(255 190 80 / 0.4);
+  --shadow-window: 0 0 0 1px rgb(255 255 255 / 0.07), 0 40px 100px -30px rgb(0 0 0 / 0.95);
+  --shadow-card: 0 0 0 1px var(--color-line), 0 10px 28px -14px rgb(0 0 0 / 0.8);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 4px 12px -2px rgb(0 0 0 / 0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {

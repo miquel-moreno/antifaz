@@ -4,1069 +4,1220 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Antifaz · Panel (prototipo)</title>
-<link rel="icon" href="../../docs/images/logo.svg" type="image/svg+xml">
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<!-- PROTOTYPE ONLY: fonts from Google Fonts. The real panel self-hosts the woff2 files (no external requests). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=Geist+Mono:wght@400..600&display=swap">
 <link rel="stylesheet" href="../tokens.css">
 <style>
-/* Layout: a prototype toolbar on top, then the panel frame (header, side tabs, view).
-   The frame is a size container, so "simular móvil" and a real phone use the same rules. */
+/* Layout: a macOS-style window (translucent sidebar + main view) floating on a soft ambient
+   glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
+   The window is a size container, so "Móvil" and a real phone use the same rules.
+   Colours come only from design/tokens.css. */
 
-*, *::before, *::after { box-sizing: border-box; }
-html { background: var(--color-bg); color: var(--color-text); }
-body {
-  margin: 0;
-  padding-inline: var(--space-4);
-  padding-block: var(--space-4) var(--space-7);
-  font-family: var(--font-sans);
-  font-size: var(--text-md);
-  line-height: var(--leading-body);
-  background: var(--color-bg);
-  color: var(--color-text);
-  -webkit-font-smoothing: antialiased;
-}
-h1, h2, h3 { line-height: var(--leading-tight); text-wrap: balance; margin: 0; }
-p { margin: 0; }
-button, input, select, textarea { font: inherit; color: inherit; }
-code, pre, .mono { font-family: var(--font-mono); }
-[hidden] { display: none !important; }
-.sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-}
-:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-.skip-link {
-  position: absolute; left: var(--space-4); top: -100px; z-index: 10;
-  background: var(--color-accent); color: var(--color-on-accent);
-  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
-}
-.skip-link:focus { top: var(--space-2); }
-.icon { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor;
-  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--color-bg)}
+body{margin:0;background-color:var(--color-bg);background-image:radial-gradient(60% 50% at 20% 0%,var(--color-ambient-1),transparent 70%),radial-gradient(50% 40% at 90% 10%,var(--color-ambient-2),transparent 70%);background-repeat:no-repeat;color:var(--color-text);font-family:var(--font-sans);font-optical-sizing:auto;font-size:var(--text-md);line-height:var(--leading-body);letter-spacing:var(--tracking-tight);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:"cv05","cv08"}
+button,input,textarea,select{font:inherit;color:inherit;letter-spacing:inherit}
+h1,h2,h3,p,ol,ul,dl,dd,figure{margin:0}
+ol,ul{padding:0;list-style:none}
+h1,h2,h3{text-wrap:balance}
+:focus-visible{outline:none;box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.ic{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.mono{font-family:var(--font-mono);letter-spacing:0}
+.code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);color:var(--color-text);padding:1px 6px;border-radius:6px;letter-spacing:0;white-space:nowrap}
 
-/* ---------- Prototype toolbar (not part of the product) ---------- */
-.proto-bar {
-  max-width: 1200px; margin: 0 auto var(--space-4);
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5);
-  padding: var(--space-3) var(--space-4);
-  border: 1px dashed var(--color-border-strong); border-radius: var(--radius-md);
-  background: var(--color-surface-sunken); font-size: var(--text-sm);
-}
-.proto-bar__title { font-weight: var(--weight-bold); }
-.proto-bar__title span { display: block; font-weight: var(--weight-regular); color: var(--color-text-muted); }
-.proto-bar fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
-.proto-bar legend { float: left; margin-right: var(--space-2); font-weight: var(--weight-medium); }
-.proto-bar label { display: inline-flex; align-items: center; gap: var(--space-1); cursor: pointer; }
-.proto-states label {
-  padding: 2px var(--space-2); border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-pill); background: var(--color-surface);
-}
-.proto-states input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.proto-states input:checked + span { font-weight: var(--weight-bold); }
-.proto-states label:has(input:checked) { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
-.proto-states label:has(input:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-.proto-toggles { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-.proto-toggles input { accent-color: var(--color-accent); width: 1rem; height: 1rem; }
+.skip{position:absolute;left:16px;top:-60px;z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:top var(--duration-fast) var(--ease-out)}
+.skip:focus{top:12px}
 
-/* ---------- Panel frame ---------- */
-.stage-wrap { max-width: 1200px; margin-inline: auto; }
-.app {
-  container: app / inline-size;
-  border: 1px solid var(--color-border); border-radius: var(--radius-lg);
-  background: var(--color-bg); overflow: clip;
-  transition: max-width var(--duration-slow) var(--ease-standard);
-}
-.stage-wrap.is-mobile .app {
-  max-width: 390px; margin-inline: auto; border-radius: 28px;
-  box-shadow: var(--shadow-2); border-color: var(--color-border-strong);
-}
-.app-header {
-  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-surface); border-bottom: 1px solid var(--color-border);
-}
-.brand { display: flex; align-items: center; gap: var(--space-2); margin-right: auto; }
-.brand svg { width: 28px; height: 28px; }
-.brand__name { font-weight: var(--weight-bold); font-size: var(--text-lg); letter-spacing: -0.01em; }
-.brand__sub { color: var(--color-text-muted); font-size: var(--text-sm); }
-.brand__ver { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0 var(--space-1); }
+.page{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
 
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  min-height: 36px; padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
-  background: var(--color-surface); color: var(--color-text); cursor: pointer;
-  font-weight: var(--weight-medium); font-size: var(--text-sm);
-  transition: background var(--duration-fast) var(--ease-standard);
+/* ---------- Prototype strip (not part of the product) ---------- */
+.proto{display:flex;align-items:center;gap:10px 16px;font-size:var(--text-sm);color:var(--color-text-muted);min-width:0;flex-wrap:wrap}
+.proto-t b{color:var(--color-text);font-weight:var(--weight-semibold)}
+.proto .sp{flex:1}
+.chips{display:flex;gap:2px;padding:3px;border-radius:var(--radius-pill);background:var(--color-surface-3);border:0;margin:0;min-width:0;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.chips input{position:absolute;opacity:0;width:1px;height:1px}
+.chips label{padding:4px 11px;border-radius:var(--radius-pill);cursor:pointer;font-weight:var(--weight-medium);color:var(--color-text-muted);white-space:nowrap;transition:background .3s var(--ease-out),color .2s,box-shadow .3s}
+.chips label:has(input:checked){background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-pop)}
+.chips label:has(input:focus-visible){box-shadow:0 0 0 2px var(--color-focus)}
+.tg{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:var(--weight-medium);white-space:nowrap}
+.tg input{position:absolute;opacity:0;width:1px;height:1px}
+.sw{width:30px;height:18px;border-radius:var(--radius-pill);background:var(--color-surface-3);box-shadow:inset 0 0 0 1px var(--color-control);position:relative;transition:background .25s var(--ease-out),box-shadow .25s;flex:none}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--color-knob);box-shadow:0 0 0 1px var(--color-control),0 1px 2px rgb(0 0 0 / .25);transition:transform .35s var(--ease-spring)}
+.tg input:checked+.sw{background:var(--color-switch-on);box-shadow:none}
+.tg input:checked+.sw::after{transform:translateX(12px);box-shadow:0 1px 2px rgb(0 0 0 / .25)}
+.tg input:focus-visible+.sw{box-shadow:0 0 0 2px var(--color-focus)}
+.tg input:disabled+.sw{opacity:.6}
+
+/* ---------- Window ---------- */
+.window{container:app/inline-size;border-radius:var(--radius-xl);background:var(--color-window);box-shadow:var(--shadow-window);overflow:clip;transition:max-width .55s var(--ease-out)}
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:760px}
+.stage-wrap.is-mobile .window{max-width:390px;margin-inline:auto;border-radius:40px}
+
+.side{background:var(--color-sidebar);border-right:1px solid var(--color-line);padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px}
+.logo{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px rgb(255 255 255 / .2),inset 0 1px 0 rgb(255 255 255 / .25),0 6px 14px -6px var(--color-glow);flex:none}
+.logo svg{width:20px;height:10px;fill:var(--logo-mask)}
+.brand b{font-size:16.5px;font-weight:var(--weight-bold);letter-spacing:-.025em}
+.brand .ver{font-size:var(--text-2xs);color:var(--color-text-faint);font-family:var(--font-mono);margin-left:auto}
+.m-only{display:none}
+.nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px;letter-spacing:.01em}
+.nav{display:flex;flex-direction:column;gap:2px}
+.tab{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:9px;background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font-size:14px;font-weight:450;transition:background .25s var(--ease-out),transform .2s var(--ease-out)}
+.tab .ic{color:var(--color-text-muted);transition:color .2s}
+.tab:hover{background:var(--color-surface-3)}
+.tab:active{transform:scale(.98)}
+.tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:550}
+.tab[aria-selected="true"] .ic{color:var(--color-accent)}
+.tab kbd{margin-left:auto;font-family:var(--font-sans);font-size:var(--text-2xs);color:var(--color-text-faint);opacity:0;transition:opacity .2s}
+.tab:hover kbd,.tab[aria-selected="true"] kbd{opacity:1}
+.tab .tab-dot{width:7px;height:7px;border-radius:50%;margin-left:auto;flex:none}
+.tab .tab-dot.warn{background:var(--color-warn)} .tab .tab-dot.danger{background:var(--color-danger)}
+.tab .tab-dot+kbd{margin-left:6px}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
+.side-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
+.local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
+.dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.local .dot{color:var(--color-ok)}
+.dot.pulse::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
+@keyframes ring{0%{transform:scale(.4);opacity:.6}70%,100%{transform:scale(1.3);opacity:0}}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 28px;background:color-mix(in srgb,var(--color-window) 76%,transparent);backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px);border-bottom:1px solid var(--color-line)}
+.crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;white-space:nowrap}
+.crumb b{color:var(--color-text);font-weight:550}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
+.status.ok{color:var(--color-ok)} .status.warn{color:var(--color-warn)} .status.danger{color:var(--color-danger)} .status.neutral{color:var(--color-text-muted)}
+.iconbtn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:9px;background:transparent;color:var(--color-text-muted);cursor:pointer;transition:background .2s,color .2s,transform .2s var(--ease-out)}
+.iconbtn:hover{background:var(--color-surface-3);color:var(--color-text)}
+.iconbtn:active{transform:scale(.92)}
+.iconbtn .ic{transition:transform .5s var(--ease-spring)}
+.iconbtn:hover .ic{transform:rotate(-20deg)}
+
+.content{padding:36px 44px 52px;display:flex;flex-direction:column;gap:22px;min-width:0}
+.content:focus{outline:none}
+.alerts{display:flex;flex-direction:column;gap:12px}
+.alerts:not(:has(>:not([hidden]))){display:none}
+.view{display:flex;flex-direction:column;gap:22px;min-width:0}
+.view.enter>*{animation:rise .55s var(--ease-out) both;animation-delay:calc(var(--i,0)*45ms)}
+.vh{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
+.vh>div{min-width:0;flex:1 1 320px}
+.vh h1{font-size:var(--text-2xl);font-weight:var(--weight-bold);letter-spacing:var(--tracking-display);line-height:var(--leading-tight)}
+.vh p{margin-top:8px;color:var(--color-text-muted);font-size:15.5px;max-width:62ch;letter-spacing:-.012em}
+.vh-side{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:var(--text-sm);color:var(--color-text-muted)}
+
+/* Intro: an orchestrated first appearance (runs once, ends at the normal resting state) */
+@keyframes rise{from{opacity:0;transform:translateY(12px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+.intro .rv{animation:rise .8s var(--ease-out) both;animation-delay:calc(120ms + var(--i,0)*70ms)}
+.intro .window{animation:win 1s var(--ease-out) both}
+@keyframes win{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
+
+/* Callouts */
+.callout{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:16px 18px;border-radius:16px;font-size:14px}
+.callout>.ic{width:20px;height:20px;grid-row:span 3;margin-top:1px}
+.callout strong{font-weight:var(--weight-semibold)}
+.callout p,.callout ol{color:var(--color-text)}
+.callout ol{margin:6px 0 0;padding-left:1.15em;display:grid;gap:3px;list-style:decimal}
+.callout.warn{background:var(--color-warn-soft)} .callout.warn>.ic,.callout.warn strong{color:var(--color-warn)}
+.callout.danger{background:var(--color-danger-soft)} .callout.danger>.ic,.callout.danger strong{color:var(--color-danger)}
+.callout.info{background:var(--color-accent-soft)} .callout.info>.ic,.callout.info strong{color:var(--color-accent-ink)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 16px;border:0;border-radius:var(--radius-pill);font-size:14px;font-weight:550;cursor:pointer;background:var(--color-surface-3);color:var(--color-text);transition:transform .2s var(--ease-out),background .2s,filter .2s,box-shadow .3s;white-space:nowrap}
+.btn:hover{filter:brightness(.97)}
+.btn:active{transform:scale(.96)}
+.btn:disabled{cursor:not-allowed;opacity:.55;transform:none;filter:none}
+.btn.primary{position:relative;overflow:hidden;background:var(--color-accent);color:var(--color-on-accent);box-shadow:inset 0 1px 0 rgb(255 255 255 / .22),0 6px 16px -6px var(--color-glow)}
+.btn.primary::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgb(255 255 255 / .35) 50%,transparent 70%);transform:translateX(-120%);transition:transform .8s var(--ease-out)}
+.btn.primary:not(:disabled):hover{filter:brightness(1.06);box-shadow:inset 0 1px 0 rgb(255 255 255 / .22),0 10px 22px -8px var(--color-glow)}
+.btn.primary:not(:disabled):hover::after{transform:translateX(120%)}
+.btn.primary:focus-visible{box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.btn.ghost{background:transparent;color:var(--color-accent-ink);padding:0 10px}
+.btn.ghost:hover{background:var(--color-accent-soft)}
+.btn.ghost .ic.spin{transition:transform .6s var(--ease-spring)}
+.btn.ghost:hover .ic.spin{transform:rotate(-180deg)}
+.btn .ic{width:16px;height:16px}
+
+/* Composer (Playground) */
+.composer{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:0 0 0 1px var(--color-control),0 8px 22px -10px rgb(20 20 40 / .1);overflow:hidden;transition:box-shadow .3s var(--ease-out)}
+.composer:focus-within{box-shadow:0 0 0 1.5px var(--color-focus),0 0 0 6px var(--color-accent-soft),0 10px 28px -12px var(--color-glow)}
+.composer textarea:focus-visible{box-shadow:none}
+.composer label.cap{display:block;padding:16px 20px 0;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.composer textarea{display:block;width:100%;min-height:92px;border:0;outline:none;resize:vertical;background:transparent;padding:6px 20px 14px;font-size:16px;line-height:1.6;color:var(--color-text)}
+.composer textarea::placeholder{color:var(--color-text-faint)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:11px 12px 11px 20px;border-top:1px solid var(--color-line);background:var(--color-surface-2)}
+.bar .lbl{font-size:var(--text-sm);color:var(--color-text-muted)}
+.bar .sp{flex:1}
+#pg-example .short{display:none}
+.kh{font-size:var(--text-xs);color:var(--color-text-faint);white-space:nowrap}
+.kh kbd{font-family:var(--font-sans);font-size:var(--text-2xs);padding:1px 5px;border-radius:5px;background:var(--color-surface);box-shadow:var(--shadow-pop);color:var(--color-text-muted)}
+.hint{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px;margin-top:-8px}
+.hint .ic{width:15px;height:15px}
+
+/* Segmented control with a spring thumb. --n options; the thumb follows the checked one.
+   The thumb has a 3:1 ring (--color-control) so the selected option is visible without colour. */
+.seg{--n:2;--k:0;position:relative;display:inline-grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));padding:3px;border-radius:var(--radius-md);background:var(--color-surface-3);margin:0;border:0;min-width:0}
+.seg legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/var(--n));border-radius:8px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-control),var(--shadow-pop);transform:translateX(calc(100% * var(--k)));transition:transform .45s var(--ease-spring)}
+.seg:has(input:nth-of-type(2):checked){--k:1}
+.seg:has(input:nth-of-type(3):checked){--k:2}
+.seg:has(input:nth-of-type(4):checked){--k:3}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg label{position:relative;z-index:1;padding:4px 14px;font-size:12.5px;font-weight:var(--weight-medium);text-align:center;cursor:pointer;color:var(--color-text-muted);transition:color .25s;white-space:nowrap;border-radius:8px}
+.seg.mono-l label{font-family:var(--font-mono);letter-spacing:0}
+.seg input:checked+label{color:var(--color-text);font-weight:var(--weight-semibold)}
+.seg input:focus-visible+label{box-shadow:0 0 0 2px var(--color-focus)}
+
+/* Empty states */
+.empty{display:grid;justify-items:center;text-align:center;gap:14px;padding:52px 24px;border-radius:var(--radius-lg);background:var(--color-surface-2)}
+.orb{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;background:var(--color-surface);box-shadow:var(--shadow-card);color:var(--color-accent)}
+.orb .ic{width:26px;height:26px}
+.empty p{max-width:48ch;color:var(--color-text-muted)}
+.empty p b{color:var(--color-text);font-weight:var(--weight-semibold)}
+
+/* ---------- The journey (mask animation, F3) ---------- */
+.journey{position:relative;border-radius:20px;padding:20px 26px 26px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid transparent;background:linear-gradient(var(--color-stage),var(--color-stage)) padding-box,linear-gradient(135deg,var(--color-edge),transparent 35%,transparent 65%,var(--color-edge)) border-box;box-shadow:0 10px 30px -16px var(--color-glow)}
+.journey::before{content:"";position:absolute;inset:-60% 0 auto;height:80%;background:radial-gradient(45% 60% at 50% 0%,var(--color-accent-soft),transparent 70%);pointer-events:none}
+.jhead{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.eyebrow{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+#mask-anim{--sweep:cubic-bezier(.45,.05,.35,1);display:flex;flex-direction:column;gap:16px}
+.mrow{position:relative;display:grid;gap:6px}
+.mcap{display:grid;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
+.mcap>span{grid-area:1/1}
+.wipe{position:relative;display:grid;font-size:19px;line-height:1.8;letter-spacing:-.016em;overflow-wrap:anywhere}
+.wipe>.layer{grid-area:1/1}
+.layer-before{clip-path:inset(0 0 0 100%)}
+.cap-before{opacity:0}
+.glider{position:absolute;top:-10px;bottom:-10px;left:100%;width:2px;transform:translateX(-50%);opacity:0;pointer-events:none}
+.glider::before{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(180deg,transparent,var(--color-accent) 18%,var(--color-accent) 82%,transparent);box-shadow:0 0 16px 3px var(--color-glow)}
+.glider::after{content:"";position:absolute;top:8%;bottom:8%;right:1px;width:90px;background:linear-gradient(90deg,transparent,var(--color-accent-soft));filter:blur(2px)}
+.glider svg{position:absolute;top:50%;left:50%;width:50px;height:25px;transform:translate(-50%,-50%);fill:var(--color-accent);filter:drop-shadow(0 0 12px var(--color-glow)) drop-shadow(0 4px 8px rgb(0 0 0 / .25))}
+.flight{position:relative;display:flex;align-items:center;gap:12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.flight span{white-space:nowrap}
+.flight .track{position:relative;flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent);transform-origin:left}
+.flight .track i{position:absolute;top:-3px;left:0;width:7px;height:7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 12px 2px var(--color-glow);opacity:0}
+
+/* Tokens in text */
+mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;border-radius:6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.ptype{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:var(--weight-semibold);letter-spacing:.04em;color:var(--color-pii);margin-left:5px;vertical-align:1px}
+.marker{display:inline-block;font-family:var(--font-mono);font-size:.78em;font-weight:var(--weight-medium);letter-spacing:0;line-height:1.45;white-space:nowrap;background:var(--color-accent-soft);color:var(--color-accent-ink);border-radius:var(--radius-sm);padding:0 6px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent);vertical-align:1px}
+.restored{background:linear-gradient(var(--color-ok),var(--color-ok)) 0 100%/100% 1.5px no-repeat;padding-bottom:1px}
+
+/* Timeline: scan → mask sweeps → markers pop as it passes → flight → reply → data comes back */
+.play .scan{animation:scan .9s var(--ease-out) both;animation-delay:var(--d)}
+.play .w1 .layer-before{animation:hide 2.1s var(--sweep) 1.3s both}
+.play .w1 .layer-after{animation:show 2.1s var(--sweep) 1.3s both}
+.play .w1 .glider{animation:glide 2.1s var(--sweep) 1.3s both,gfade 2.1s linear 1.3s both}
+.play .w1 .marker{animation:pop .7s var(--ease-spring) both;animation-delay:var(--d)}
+.play .r1 .cap-before{animation:out .35s var(--ease-out) 3.3s both}
+.play .r1 .cap-after{animation:in .5s var(--ease-out) 3.35s both}
+.play .flight{animation:in .5s var(--ease-out) 3.4s both}
+.play .flight .track{animation:draw .6s var(--ease-out) 3.5s both}
+.play .flight .track i{animation:fly 1s cubic-bezier(.5,0,.3,1) both}
+.play .flight .track i:nth-child(1){animation-delay:3.75s}
+.play .flight .track i:nth-child(2){animation-delay:3.87s}
+.play .flight .track i:nth-child(3){animation-delay:3.99s}
+.play .r2{animation:rise .7s var(--ease-out) 4.6s both}
+.play .w2 .layer-before{animation:hide 1.9s var(--sweep) 5.3s both}
+.play .w2 .layer-after{animation:show 1.9s var(--sweep) 5.3s both}
+.play .w2 .glider{animation:glide 1.9s var(--sweep) 5.3s both,gfade 1.9s linear 5.3s both}
+.play .w2 .restored{animation:under .7s var(--ease-out) both,okglow 1.2s var(--ease-out) both;animation-delay:var(--d),var(--d)}
+.play .r2 .cap-before{animation:out .35s var(--ease-out) 7.15s both}
+.play .r2 .cap-after{animation:in .5s var(--ease-out) 7.2s both}
+@keyframes scan{0%{box-shadow:0 0 0 0 transparent}40%{box-shadow:0 0 0 4px var(--color-pii-glow)}100%{box-shadow:0 0 0 0 transparent}}
+@keyframes hide{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 0 100%)}}
+@keyframes show{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes glide{from{left:0%}to{left:100%}}
+@keyframes gfade{0%{opacity:0}8%,90%{opacity:1}100%{opacity:0}}
+@keyframes pop{0%{opacity:0;transform:scale(.55);filter:blur(5px)}60%{opacity:1;transform:scale(1.08);filter:none;box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px 2px var(--color-glow)}100%{opacity:1;transform:none}}
+@keyframes out{from{opacity:1;transform:none;filter:none}to{opacity:0;transform:translateY(-4px);filter:blur(3px)}}
+@keyframes in{from{opacity:0;transform:translateY(4px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
+@keyframes draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes fly{0%{left:0;opacity:0}12%{opacity:1}85%{opacity:1}100%{left:calc(100% - 7px);opacity:0}}
+@keyframes under{from{background-size:0% 1.5px}to{background-size:100% 1.5px}}
+@keyframes okglow{0%{text-shadow:none}35%{text-shadow:0 0 14px var(--color-ok)}100%{text-shadow:none}}
+
+.rm-note{display:none;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.reduce-motion .journey{display:none}
+.reduce-motion .rm-note{display:flex}
+
+/* Three panes as one surface with hairlines */
+.pswitch{display:none}
+.panes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
+.pane{display:flex;flex-direction:column;gap:10px;padding:18px 20px 20px;min-width:0}
+.pane+.pane{border-left:1px solid var(--color-line)}
+.ph{display:flex;align-items:center;gap:9px}
+.num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:var(--text-2xs);font-weight:var(--weight-bold);background:var(--color-surface-3);color:var(--color-text-muted);font-variant-numeric:tabular-nums;flex:none}
+.ph h2{font-size:14px;font-weight:var(--weight-semibold);letter-spacing:-.012em}
+.ptext{font-size:14.5px;line-height:1.85;overflow-wrap:anywhere}
+.pfoot{margin-top:auto;font-size:var(--text-xs);color:var(--color-text-faint)}
+.note{display:grid;gap:6px;padding:14px 16px;border-radius:14px;font-size:13.5px}
+.note strong{display:flex;align-items:center;gap:8px;font-weight:var(--weight-semibold)}
+.note.danger{background:var(--color-danger-soft)} .note.danger strong{color:var(--color-danger)}
+.note.warn{background:var(--color-warn-soft)} .note.warn strong{color:var(--color-warn)}
+.note .sub{color:var(--color-text-muted);font-size:12.5px}
+
+.summary{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 18px}
+.found{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;min-width:0}
+.found dt{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:4px}
+.found dd{margin:0;display:inline-flex;align-items:center;gap:7px;padding:4px 5px 4px 11px;border-radius:var(--radius-pill);background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line);font-size:var(--text-sm);white-space:nowrap}
+.found dd b{min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);display:grid;place-items:center;background:var(--color-surface);font-size:11.5px;font-weight:var(--weight-bold);font-variant-numeric:tabular-nums;box-shadow:var(--shadow-pop)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+
+/* ---------- Shared: surfaces, badges, foot notes ---------- */
+.surface{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);min-width:0}
+.sh{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:16px 20px 12px}
+.sh h2{font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:-.014em}
+.sh .aside{font-size:var(--text-xs);color:var(--color-text-faint)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border-radius:var(--radius-pill);font-size:var(--text-xs);font-weight:var(--weight-semibold);white-space:nowrap;background:var(--color-surface-2);color:var(--color-text-muted);box-shadow:inset 0 0 0 1px var(--color-line)}
+.badge .ic{width:14px;height:14px}
+.badge.accent{background:var(--color-accent-soft);color:var(--color-accent-ink);box-shadow:none}
+.badge.ok{background:var(--color-ok-soft);color:var(--color-ok);box-shadow:none}
+.badge.warn{background:var(--color-warn-soft);color:var(--color-warn);box-shadow:none}
+.badge.danger{background:var(--color-danger-soft);color:var(--color-danger);box-shadow:none}
+.foot{display:flex;align-items:flex-start;gap:9px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px}
+.foot .ic{width:16px;height:16px;margin-top:2px}
+
+/* ---------- En directo ---------- */
+.live-pill{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border-radius:var(--radius-pill);background:var(--color-surface);box-shadow:var(--shadow-pop);font-size:var(--text-sm);font-weight:var(--weight-medium);color:var(--color-text)}
+.live-pill .dot{color:var(--color-ok)}
+.stats{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr);gap:1px;background:var(--color-line);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
+.stat{background:var(--color-surface);padding:18px 20px 20px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.stat.big{grid-row:span 2}
+.stat.wide{grid-column:span 2}
+.stat-num{font-size:var(--text-3xl);font-weight:var(--weight-bold);letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.stat .stat-num.sm{font-size:32px}
+.stat-sub{font-size:var(--text-sm);color:var(--color-text-muted)}
+.bars{display:grid;gap:9px;margin-top:12px}
+.bars li{display:grid;grid-template-columns:76px minmax(0,1fr) 34px;align-items:center;gap:10px;font-size:var(--text-sm)}
+.bars .track{height:6px;border-radius:var(--radius-pill);background:var(--color-surface-3);overflow:hidden}
+.bars .fill{display:block;height:100%;border-radius:inherit;background:var(--color-text-muted);transition:width .6s var(--ease-out)}
+.bars .n{text-align:right;font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold)}
+.chain{display:flex;align-items:center;gap:10px;font-size:var(--text-lg);font-weight:var(--weight-semibold);letter-spacing:-.015em}
+.chain .ic{width:20px;height:20px}
+.chain.ok{color:var(--color-ok)} .chain.bad{color:var(--color-danger)}
+.chain-links{display:flex;align-items:center;gap:4px;margin-top:6px}
+.chain-links i{width:18px;height:8px;border-radius:var(--radius-pill);box-shadow:inset 0 0 0 1.5px var(--color-text-muted)}
+.chain-links i.cut{box-shadow:inset 0 0 0 1.5px var(--color-danger);background:var(--color-danger-soft)}
+.feed{display:flex;flex-direction:column}
+.ev{display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:6px 14px;padding:12px 20px;border-top:1px solid var(--color-line)}
+.ev time{font-family:var(--font-mono);font-size:12.5px;color:var(--color-text-faint);letter-spacing:0;font-variant-numeric:tabular-nums}
+.ev-main{display:flex;flex-direction:column;min-width:0}
+.ev-who{font-size:14px;font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-who span{font-weight:var(--weight-regular);color:var(--color-text-muted)}
+.ev-what{font-size:var(--text-sm);color:var(--color-text-muted)}
+.ev.is-new{animation:evin .6s var(--ease-out) both}
+@keyframes evin{from{opacity:0;transform:translateY(-8px);background:var(--color-accent-soft)}60%{background:var(--color-accent-soft)}to{opacity:1;transform:none;background:transparent}}
+.feed-empty{padding:30px 20px 34px;border-top:1px solid var(--color-line);text-align:center;color:var(--color-text-muted);font-size:14px}
+
+/* ---------- Claves ---------- */
+.keys{width:100%;border-collapse:collapse;font-size:14px}
+.keys th{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted);text-align:left;padding:12px 16px;border-bottom:1px solid var(--color-line);white-space:nowrap}
+.keys td{padding:14px 16px;border-top:1px solid var(--color-line);vertical-align:middle}
+.keys tbody tr:first-child td{border-top:0}
+.keys th:first-child,.keys td:first-child{padding-left:20px}
+.keys th:last-child,.keys td:last-child{padding-right:14px;text-align:right}
+.k-name{font-weight:var(--weight-semibold)}
+.k-id{display:block;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-faint);letter-spacing:0}
+.k-pol{font-family:var(--font-mono);font-size:12.5px;letter-spacing:0;padding:2px 8px;border-radius:var(--radius-pill);background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line)}
+.k-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.k-muted{color:var(--color-text-muted)}
+.keys tr.revoked td:not(:last-child){color:var(--color-text-muted)}
+.keys tr.revoked .k-name{text-decoration:line-through;text-decoration-thickness:1px}
+
+/* ---------- Políticas ---------- */
+.pol-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:12px 14px 12px 20px}
+.pol-bar .lbl{font-size:var(--text-sm);color:var(--color-text-muted)}
+.pol-bar .meta{margin-left:auto}
+.help{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.help div{display:grid;gap:2px;padding:12px 14px;border-radius:14px;background:var(--color-surface-2)}
+.help dt{display:flex;align-items:center;gap:7px;font-size:var(--text-sm);font-weight:var(--weight-semibold)}
+.help dt .ic{width:15px;height:15px;color:var(--color-text-muted)}
+.help dd{font-size:12.5px;color:var(--color-text-muted)}
+.pol-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}
+.pol-col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.rows{display:flex;flex-direction:column}
+.prow{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;padding:11px 14px 11px 20px;border-top:1px solid var(--color-line)}
+.prow .nm{display:flex;flex-direction:column;min-width:0}
+.prow .nm b{font-size:14px;font-weight:var(--weight-semibold)}
+.prow .nm span{font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-faint);letter-spacing:0}
+.prow .seg label{padding:4px 10px}
+.prow.changed{background:linear-gradient(90deg,var(--color-accent-soft),transparent 60%)}
+.rules{display:flex;flex-direction:column}
+.rules li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 20px;border-top:1px solid var(--color-line);font-size:14px;flex-wrap:wrap}
+.rules li .what{min-width:0}
+.rules .fixed{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.rules .fixed .ic{width:14px;height:14px}
+.rules-foot{padding:12px 20px 16px;border-top:1px solid var(--color-line);font-size:12.5px;color:var(--color-text-muted)}
+.yaml{margin:0 12px;padding:14px 16px;border-radius:14px;background:var(--color-surface-2);font-family:var(--font-mono);font-size:12.5px;line-height:1.7;letter-spacing:0;overflow-x:auto;color:var(--color-text);tab-size:2}
+.yaml .ln{display:block;padding:0 6px;margin:0 -6px;border-radius:5px;white-space:pre}
+.yaml .k{color:var(--color-text-muted)}
+.yaml .ln.chg{background:var(--color-accent-soft)}
+.yaml .ln.chg .v{color:var(--color-accent-ink);font-weight:var(--weight-semibold)}
+.save{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px 18px}
+.save .msg{font-size:var(--text-sm);color:var(--color-text-muted)}
+
+/* ---------- Estado ---------- */
+.sgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.scard{display:flex;flex-direction:column}
+.scard .sh{padding-bottom:6px}
+.scard .desc{padding:0 20px 12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);margin:0 20px 6px}
+.kv dt,.kv dd{padding:9px 0;border-top:1px solid var(--color-line);font-size:var(--text-sm)}
+.kv dt{color:var(--color-text-muted);padding-right:16px}
+.kv dd{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.scard .cmd{margin-top:auto;padding:10px 20px 16px;font-size:12.5px;color:var(--color-text-muted)}
+.ner{display:flex;flex-direction:column;gap:4px;padding:0 12px 14px}
+.ner li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:2px 10px;padding:8px 10px;border-radius:12px;font-size:var(--text-sm)}
+.ner li .dot{margin-top:7px}
+.ner li.now{background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line)}
+.ner b{font-weight:var(--weight-semibold)}
+.ner .mono{font-size:11.5px;color:var(--color-text-faint)}
+.ner p{grid-column:2/4;color:var(--color-text-muted);font-size:12.5px}
+.ner .dot.ok{color:var(--color-ok)} .ner .dot.warn{color:var(--color-warn)} .ner .dot.danger{color:var(--color-danger)}
+.prov{display:flex;flex-direction:column;padding:0 20px 8px}
+.prov li{display:grid;grid-template-columns:minmax(0,1fr) 90px auto;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--color-line);font-size:14px}
+.prov .nm{display:flex;flex-direction:column;min-width:0}
+.prov .nm span{font-size:var(--text-xs);color:var(--color-text-faint)}
+.lat{height:6px;border-radius:var(--radius-pill);background:var(--color-surface-3);overflow:hidden}
+.lat i{display:block;height:100%;border-radius:inherit;background:var(--color-text-muted)}
+.prov .status{justify-self:end;font-size:var(--text-sm)}
+.prov .status b{font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold);color:var(--color-text)}
+
+/* ---------- Logo (prototype annex, outside the panel) ---------- */
+.annex{display:flex;flex-direction:column;gap:18px;padding:26px 28px 30px;border-radius:var(--radius-xl);background:var(--color-window);box-shadow:var(--shadow-window)}
+.annex h2{font-size:var(--text-xl);font-weight:var(--weight-bold);letter-spacing:-.025em}
+.annex>header p{margin-top:6px;color:var(--color-text-muted);font-size:14px;max-width:70ch}
+.lrow{display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;align-items:center;padding-top:18px;border-top:1px solid var(--color-line)}
+.lrow h3{font-size:var(--text-md);font-weight:var(--weight-semibold)}
+.lrow p{font-size:12.5px;color:var(--color-text-muted);margin-top:4px}
+.lsets{display:flex;flex-wrap:wrap;gap:12px}
+.lset{display:flex;align-items:flex-end;gap:16px;padding:16px 18px 10px;border-radius:16px;box-shadow:inset 0 0 0 1px var(--color-line)}
+/* Fixed stages: the logo is tested on light and dark whatever the page theme (documented exception). */
+.lset.on-light{background:#ffffff;color:#1d1d1f}
+.lset.on-dark{background:#0e0e11;color:#f5f5f7}
+.lset figure{display:grid;justify-items:center;gap:6px}
+.lset figcaption{font-size:var(--text-2xs);font-family:var(--font-mono);opacity:.75}
+.lset svg{display:block}
+
+/* ---------- Medium: panes and grids stack ---------- */
+@container app (max-width: 980px){
+  .content{padding:30px 30px 44px}
+  .panes{grid-template-columns:minmax(0,1fr)}
+  .pane+.pane{border-left:0;border-top:1px solid var(--color-line)}
+  .pol-grid{grid-template-columns:minmax(0,1fr)}
+  .help{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
-.btn:hover { background: var(--color-surface-sunken); }
-.btn-primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); }
-.btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
-.btn-ghost { border-color: transparent; background: transparent; }
-.btn[disabled] { opacity: 0.55; cursor: not-allowed; }
-
-/* Status pills: icon + word + colour, never colour alone. */
-.pill {
-  display: inline-flex; align-items: center; gap: var(--space-1);
-  padding: 2px var(--space-2); border-radius: var(--radius-pill);
-  font-size: var(--text-xs); font-weight: var(--weight-medium); white-space: nowrap;
+@container app (max-width: 800px){
+  .sgrid{grid-template-columns:minmax(0,1fr)}
+  .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .stat.big{grid-row:auto;grid-column:span 2}
 }
-.pill .icon { width: 0.95em; height: 0.95em; stroke-width: 2.5; }
-.pill-ok { background: var(--color-ok-soft); color: var(--color-ok); }
-.pill-warn { background: var(--color-warn-soft); color: var(--color-warn); }
-.pill-danger { background: var(--color-danger-soft); color: var(--color-danger); }
-.pill-accent { background: var(--color-accent-soft); color: var(--color-accent-soft-text); }
-.pill-neutral { background: var(--color-surface-sunken); color: var(--color-text-muted); }
-
-/* Banners */
-.banner {
-  display: flex; gap: var(--space-3); align-items: flex-start;
-  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-sm);
+/* ---------- Phone (or simulated phone): compact, little scrolling ---------- */
+@container app (max-width: 640px){
+  .shell{grid-template-columns:minmax(0,1fr);min-height:0}
+  .side{position:sticky;top:0;z-index:6;border-right:0;border-bottom:1px solid var(--color-line);padding:12px 12px 10px;gap:10px;background:color-mix(in srgb,var(--color-sidebar) 82%,transparent);backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px)}
+  .brand{padding:0 4px}
+  .brand .ver{display:none}
+  .m-only{display:flex;align-items:center;gap:6px;margin-left:auto}
+  .m-only .status{font-size:var(--text-xs)}
+  .nav{flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px}
+  .nav::-webkit-scrollbar{display:none}
+  .nav-label,.side-foot,.top,.tab kbd{display:none}
+  .tab{width:auto;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm)}
+  .tab .ic{width:15px;height:15px}
+  .tab .tab-dot{margin-left:2px}
+  .content{padding:18px 14px 24px;gap:14px}
+  .view{gap:14px}
+  .vh h1{font-size:var(--text-xl)}
+  .vh p{font-size:13.5px;margin-top:4px}
+  .composer{border-radius:16px}
+  .composer label.cap{display:none}
+  .composer textarea{min-height:0;height:74px;font-size:14.5px;line-height:1.5;padding:12px 14px 8px;resize:none}
+  .bar{padding:8px 8px 8px 12px;gap:8px;flex-wrap:nowrap}
+  .bar .lbl,.kh{display:none}
+  .btn{min-height:32px;padding:0 13px;font-size:var(--text-sm)}
+  #pg-example .full{display:none}
+  #pg-example .short{display:inline}
+  .seg label{padding:4px 9px}
+  .hint{font-size:var(--text-xs);margin-top:-6px}
+  .journey{padding:14px 14px 16px;gap:10px;border-radius:16px}
+  .wipe{font-size:14.5px;line-height:1.7}
+  .glider svg{width:38px;height:19px}
+  .flight{font-size:11.5px;gap:8px}
+  .flight .lbl2{display:none}
+  .callout{padding:12px 14px;font-size:var(--text-sm)}
+  .pswitch{display:grid;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
+  .pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-control),var(--shadow-pop);transition:transform .45s var(--ease-spring)}
+  .pswitch[data-p="2"] .thumb{transform:translateX(100%)}
+  .pswitch[data-p="3"] .thumb{transform:translateX(200%)}
+  .pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:550;color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
+  .pswitch button[aria-pressed="true"]{color:var(--color-text);font-weight:var(--weight-semibold)}
+  .pane+.pane{border-top:0}
+  .panes[data-p="1"] .pane:not(.p1),.panes[data-p="2"] .pane:not(.p2),.panes[data-p="3"] .pane:not(.p3){display:none}
+  .panes .ph{display:none}
+  .pane{padding:14px 16px;animation:rise .4s var(--ease-out)}
+  .ptext{font-size:13.5px;line-height:1.75}
+  .pfoot{font-size:11.5px}
+  .found{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+  .found::-webkit-scrollbar{display:none}
+  .found dt{display:none}
+  .meta{font-size:11.5px;gap:2px 12px}
+  /* En directo */
+  .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .stat{padding:14px 16px 16px}
+  .stat-num{font-size:34px}
+  .stat .stat-num.sm{font-size:26px}
+  .bars li{grid-template-columns:64px minmax(0,1fr) 28px;font-size:12.5px}
+  .ev{grid-template-columns:minmax(0,1fr) auto;padding:11px 16px;gap:2px 10px}
+  .ev time{grid-column:1/-1;font-size:11.5px}
+  .sh{padding:14px 16px 10px}
+  /* Claves: the table turns into cards */
+  .keys thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .keys,.keys tbody,.keys tr,.keys td{display:block;width:100%}
+  .keys tr{padding:12px 16px;border-top:1px solid var(--color-line)}
+  .keys tbody tr:first-child{border-top:0}
+  .keys td,.keys td:first-child,.keys td:last-child{border:0;padding:3px 0;text-align:left;display:flex;justify-content:space-between;gap:12px;font-size:var(--text-sm)}
+  .keys td[data-label]::before{content:attr(data-label);color:var(--color-text-muted)}
+  .keys td:first-child{display:block;margin-bottom:4px;font-size:14px}
+  .keys td:last-child:empty{display:none}
+  /* Políticas */
+  .pol-bar{padding:12px 14px}
+  .pol-bar .meta{margin-left:0}
+  .help{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .help div{padding:10px 12px}
+  .prow{flex-direction:column;align-items:stretch;padding:12px 16px}
+  .prow .seg{width:100%}
+  .prow .seg label{padding:5px 2px;font-size:12px}
+  .rules li{padding:11px 16px}
+  .rules-foot,.save{padding-inline:16px}
+  .yaml{margin:0 10px;font-size:11.5px}
+  /* Estado */
+  .kv{margin:0 16px 6px}
+  .scard .desc,.scard .cmd{padding-inline:16px}
+  .prov{padding:0 16px 8px}
+  .prov li{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}
+  .prov .lat{grid-column:1/-1;grid-row:2}
 }
-.banner .icon { width: 1.3em; height: 1.3em; margin-top: 1px; stroke-width: 2.2; }
-.banner strong { display: block; font-size: var(--text-md); }
-.banner ol { margin: var(--space-1) 0 0; padding-left: 1.2em; }
-.banner-danger { background: var(--color-danger-soft); color: var(--color-text); }
-.banner-danger .icon, .banner-danger strong { color: var(--color-danger); }
-.banner-warn { background: var(--color-warn-soft); color: var(--color-text); }
-.banner-warn .icon, .banner-warn strong { color: var(--color-warn); }
-
-.app-body { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 640px; }
-.app-nav { background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4) var(--space-3); }
-.tablist { display: flex; flex-direction: column; gap: 2px; }
-.tab {
-  display: flex; align-items: center; gap: var(--space-3); width: 100%;
-  padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm);
-  background: transparent; color: var(--color-text-muted); text-align: left; cursor: pointer;
-  font-size: var(--text-md);
-}
-.tab:hover { background: var(--color-surface-sunken); color: var(--color-text); }
-.tab[aria-selected="true"] { background: var(--color-accent-soft); color: var(--color-accent-soft-text); font-weight: var(--weight-medium); }
-.nav-note { margin-top: var(--space-5); padding: 0 var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); }
-
-.app-main { padding: var(--space-5) var(--space-6) var(--space-6); min-width: 0; }
-.view { display: grid; gap: var(--space-5); }
-.view-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); justify-content: space-between; }
-.view-head h1 { font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -0.01em; }
-.view-head p { color: var(--color-text-muted); max-width: 62ch; margin-top: var(--space-1); }
-.card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-4) var(--space-5); min-width: 0; }
-.card-title { font-size: var(--text-lg); font-weight: var(--weight-bold); }
-.eyebrow { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--color-text-muted); font-weight: var(--weight-medium); }
-.muted { color: var(--color-text-muted); }
-.small { font-size: var(--text-sm); }
-.empty {
-  display: grid; justify-items: center; gap: var(--space-3); text-align: center;
-  padding: var(--space-7) var(--space-5); border: 1px dashed var(--color-border-strong);
-  border-radius: var(--radius-md); background: var(--color-surface);
-}
-.empty .icon { width: 2rem; height: 2rem; color: var(--color-text-muted); stroke-width: 1.5; }
-.empty p { max-width: 46ch; color: var(--color-text-muted); }
-
-/* ---------- Playground ---------- */
-.pg-form { display: grid; gap: var(--space-3); }
-.field-label { font-weight: var(--weight-medium); font-size: var(--text-sm); }
-textarea, select {
-  width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
-  background: var(--color-surface); padding: var(--space-2) var(--space-3);
-}
-textarea { min-height: 6.5rem; resize: vertical; line-height: var(--leading-body); }
-select { width: auto; min-height: 36px; }
-.pg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-.pg-actions .hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-left: auto; }
-.inline-field { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-
-.panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
-.pane { display: grid; align-content: start; gap: var(--space-2); }
-.pane-head { display: flex; align-items: center; gap: var(--space-2); }
-.step {
-  display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%;
-  background: var(--color-surface-sunken); color: var(--color-text-muted);
-  font-size: var(--text-xs); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums;
-}
-.pane-title { font-size: var(--text-sm); font-weight: var(--weight-bold); }
-.pane-text { line-height: 1.85; overflow-wrap: anywhere; }
-.pane-foot { font-size: var(--text-xs); color: var(--color-text-muted); }
-
-mark.pii {
-  background: var(--color-pii-bg); color: var(--color-text);
-  border-bottom: 2px dashed var(--color-pii-line); padding: 1px 3px; border-radius: 3px;
-  -webkit-box-decoration-break: clone; box-decoration-break: clone;
-}
-.pii-type {
-  font-family: var(--font-mono); font-size: 0.68rem; font-weight: var(--weight-bold);
-  letter-spacing: 0.03em; vertical-align: 1px; margin-left: 3px; color: var(--color-warn);
-}
-.marker {
-  font-family: var(--font-mono); font-size: 0.82em; white-space: nowrap;
-  background: var(--color-accent-soft); color: var(--color-accent-soft-text);
-  border: 1px solid var(--color-accent-soft-text); border-radius: var(--radius-sm); padding: 0 4px;
-}
-.restored { border-bottom: 2px solid var(--color-ok); padding-bottom: 1px; }
-
-.block-box { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-danger-soft); }
-.block-box strong { color: var(--color-danger); display: flex; align-items: center; gap: var(--space-2); }
-.error-box { display: grid; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-warn-soft); }
-.error-box strong { color: var(--color-warn); display: flex; align-items: center; gap: var(--space-2); }
-.code { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-surface-sunken); padding: 1px 5px; border-radius: 4px; }
-
-.legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.legend dt { font-size: var(--text-sm); font-weight: var(--weight-medium); margin-right: var(--space-1); }
-.legend dd { margin: 0; }
-.type-chip {
-  display: inline-flex; align-items: center; gap: var(--space-2);
-  border: 1px solid var(--color-border); border-radius: var(--radius-pill);
-  padding: 2px var(--space-3) 2px var(--space-2); font-size: var(--text-sm); background: var(--color-surface);
-}
-.type-chip code { font-size: var(--text-xs); color: var(--color-accent-soft-text); background: var(--color-accent-soft); border-radius: var(--radius-pill); padding: 0 6px; }
-.type-chip b { font-variant-numeric: tabular-nums; }
-.meta-line { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-size: var(--text-sm); color: var(--color-text-muted); }
-
-/* ---------- Mask animation (F3) ---------- */
-.anim-card { display: grid; gap: var(--space-3); }
-.anim-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-.mask-stage {
-  display: grid; gap: var(--space-4); padding: var(--space-5);
-  background: var(--color-surface-sunken); border-radius: var(--radius-md);
-}
-.mrow { display: grid; gap: var(--space-1); }
-.mrow-cap { display: grid; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); font-weight: var(--weight-bold); color: var(--color-text-muted); }
-.mrow-cap > span { grid-area: 1 / 1; }
-.wipe { position: relative; display: grid; font-size: var(--text-lg); line-height: 1.8; overflow-wrap: anywhere; }
-.wipe > .layer { grid-area: 1 / 1; }
-.flight { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
-.flight .icon { color: var(--color-accent); }
-
-/* Resting frame = the end of the animation: message masked, answer restored. */
-.layer-before { clip-path: inset(0 0 0 100%); }
-.layer-after { clip-path: inset(0 0 0 0); }
-.cap-before { opacity: 0; }
-.mask-glider {
-  position: absolute; top: 50%; left: 0; width: 56px; height: 100%; min-height: 40px;
-  transform: translate(-50%, -50%); opacity: 0; pointer-events: none;
-  display: grid; place-items: center;
-}
-.mask-glider::before {
-  content: ""; position: absolute; top: -6px; bottom: -6px; left: 50%; width: 2px;
-  background: var(--color-accent); opacity: 0.45; border-radius: 2px;
-}
-.mask-glider svg { position: relative; width: 56px; height: 34px; filter: drop-shadow(0 4px 8px rgb(0 0 0 / 0.25)); }
-
-.is-playing .wipe-req .layer-before { animation: wipe-hide-1 var(--duration-mask) linear both; }
-.is-playing .wipe-req .layer-after { animation: wipe-show-1 var(--duration-mask) linear both; }
-.is-playing .wipe-req .mask-glider { animation: glide-1 var(--duration-mask) linear both, glide-fade-1 var(--duration-mask) linear both; }
-.is-playing .row-req .cap-before { animation: cap-out-1 var(--duration-mask) linear both; }
-.is-playing .row-req .cap-after { animation: cap-in-1 var(--duration-mask) linear both; }
-.is-playing .flight { animation: fade-in-flight var(--duration-mask) linear both; }
-.is-playing .row-res { animation: row-in var(--duration-mask) var(--ease-standard) both; }
-.is-playing .wipe-res .layer-before { animation: wipe-hide-2 var(--duration-mask) linear both; }
-.is-playing .wipe-res .layer-after { animation: wipe-show-2 var(--duration-mask) linear both; }
-.is-playing .wipe-res .mask-glider { animation: glide-2 var(--duration-mask) linear both, glide-fade-2 var(--duration-mask) linear both; }
-.is-playing .row-res .cap-before { animation: cap-out-2 var(--duration-mask) linear both; }
-.is-playing .row-res .cap-after { animation: cap-in-2 var(--duration-mask) linear both; }
-
-@keyframes wipe-hide-1 { 0%, 6% { clip-path: inset(0 0 0 0); } 40%, 100% { clip-path: inset(0 0 0 100%); } }
-@keyframes wipe-show-1 { 0%, 6% { clip-path: inset(0 100% 0 0); } 40%, 100% { clip-path: inset(0 0 0 0); } }
-@keyframes glide-1 { 0%, 6% { left: 0%; } 40%, 100% { left: 100%; } }
-@keyframes glide-fade-1 { 0%, 3% { opacity: 0; } 8%, 38% { opacity: 1; } 43%, 100% { opacity: 0; } }
-@keyframes cap-out-1 { 0%, 40% { opacity: 1; } 43%, 100% { opacity: 0; } }
-@keyframes cap-in-1 { 0%, 40% { opacity: 0; } 43%, 100% { opacity: 1; } }
-@keyframes fade-in-flight { 0%, 42% { opacity: 0; } 48%, 100% { opacity: 1; } }
-@keyframes row-in { 0%, 48% { opacity: 0; transform: translateY(6px); } 56%, 100% { opacity: 1; transform: none; } }
-@keyframes wipe-hide-2 { 0%, 62% { clip-path: inset(0 0 0 0); } 92%, 100% { clip-path: inset(0 0 0 100%); } }
-@keyframes wipe-show-2 { 0%, 62% { clip-path: inset(0 100% 0 0); } 92%, 100% { clip-path: inset(0 0 0 0); } }
-@keyframes glide-2 { 0%, 62% { left: 0%; } 92%, 100% { left: 100%; } }
-@keyframes glide-fade-2 { 0%, 59% { opacity: 0; } 64%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
-@keyframes cap-out-2 { 0%, 92% { opacity: 1; } 95%, 100% { opacity: 0; } }
-@keyframes cap-in-2 { 0%, 92% { opacity: 0; } 95%, 100% { opacity: 1; } }
-
-/* Reduced motion (system setting or the prototype toggle): no animation,
-   the three panes below are the static before/after. */
-.rm-note { display: none; }
-.reduce-motion .anim-card { display: none; }
-.reduce-motion .rm-note { display: flex; }
-@media (prefers-reduced-motion: reduce) {
-  .anim-card { display: none; }
-  .rm-note { display: flex; }
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-.rm-note { align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
-
-/* ---------- Live view ---------- */
-.live-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); font-size: var(--text-sm); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
-.stat { display: grid; gap: var(--space-2); align-content: start; }
-.stat-num { font-size: var(--text-2xl); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; line-height: 1.1; }
-.stat-sub { font-size: var(--text-sm); color: var(--color-text-muted); }
-.stat-wide { grid-column: span 2; }
-.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--text-sm); }
-.bars li { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: var(--space-2); }
-.bars .track { height: 8px; border-radius: 4px; background: var(--color-surface-sunken); overflow: hidden; }
-.bars .fill { display: block; height: 100%; background: var(--color-accent); border-radius: 4px; }
-.bars .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: var(--weight-medium); }
-.chain { display: flex; align-items: center; gap: var(--space-2); font-weight: var(--weight-bold); }
-.chain-ok { color: var(--color-ok); }
-.chain-bad { color: var(--color-danger); }
-.chain .icon { width: 1.4em; height: 1.4em; stroke-width: 2.4; }
-
-.feed { list-style: none; margin: 0; padding: 0; }
-.feed li {
-  display: grid; grid-template-columns: 3.5rem minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3);
-  align-items: baseline; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border);
-}
-.feed li:last-child { border-bottom: 0; }
-.feed time { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.feed .who { font-size: var(--text-sm); color: var(--color-text-muted); }
-.feed .what { font-weight: var(--weight-medium); }
-.feed li.is-new { background: linear-gradient(90deg, var(--color-danger-soft), transparent 70%); }
-.feed-foot { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--text-sm); color: var(--color-text-muted); }
-
-/* ---------- Tables (keys) ---------- */
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-th { text-align: left; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--color-text-muted); font-weight: var(--weight-medium); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-strong); }
-td { padding: var(--space-3); border-bottom: 1px solid var(--color-border); vertical-align: top; }
-tr:last-child td { border-bottom: 0; }
-.key-name { font-weight: var(--weight-bold); font-size: var(--text-md); }
-.key-id { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
-tr.is-revoked .key-name { text-decoration: line-through; color: var(--color-text-muted); }
-.note { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--text-sm); color: var(--color-text-muted); }
-.note .icon { margin-top: 2px; }
-
-/* ---------- Policies ---------- */
-.pol-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
-.pol-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
-.pol-actions-help { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; font-size: var(--text-sm); }
-.pol-actions-help dt { font-weight: var(--weight-bold); }
-.pol-actions-help dd { margin: 0; color: var(--color-text-muted); }
-.pol-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); }
-.pol-row:last-child { border-bottom: 0; }
-.pol-name { font-weight: var(--weight-medium); }
-.pol-name code { display: block; font-size: var(--text-xs); color: var(--color-text-muted); }
-.seg { border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: 2px; margin: 0; display: inline-grid; grid-template-columns: repeat(4, auto); gap: 2px; background: var(--color-surface); }
-.seg legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.seg label { padding: 3px 10px; border-radius: 4px; font-size: var(--text-sm); cursor: pointer; text-align: center; white-space: nowrap; }
-.seg label:hover { background: var(--color-surface-sunken); }
-.seg input:checked + label { background: var(--color-accent); color: var(--color-on-accent); font-weight: var(--weight-medium); }
-.seg input:focus-visible + label { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.fixed-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); font-size: var(--text-sm); }
-.fixed-rules li { display: flex; gap: var(--space-2); align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
-pre.yaml { margin: 0; padding: var(--space-3) var(--space-4); background: var(--color-surface-sunken); border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: 1.6; overflow-x: auto; }
-.save-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-
-/* ---------- Status ---------- */
-.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.status-card { display: grid; gap: var(--space-3); align-content: start; }
-.status-card header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
-.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-4); margin: 0; font-size: var(--text-sm); }
-.kv dt { color: var(--color-text-muted); }
-.kv dd { margin: 0; overflow-wrap: anywhere; }
-.prov { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); font-size: var(--text-sm); }
-.prov li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
-.ner-states { margin: 0; padding-left: 1.1em; font-size: var(--text-sm); color: var(--color-text-muted); display: grid; gap: 2px; }
-.ner-states b { color: var(--color-text); font-weight: var(--weight-medium); }
-
-/* ---------- Narrow container (phone or "simular móvil") ---------- */
-@container app (max-width: 980px) {
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pol-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@container app (max-width: 820px) {
-  .panes { grid-template-columns: minmax(0, 1fr); }
-  .status-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@container app (max-width: 720px) {
-  .app-body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .app-nav { border-right: 0; border-bottom: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); }
-  .tablist { flex-direction: row; flex-wrap: wrap; gap: var(--space-1); }
-  .tab { width: auto; white-space: nowrap; padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
-  .nav-note { display: none; }
-  .app-main { padding: var(--space-4); }
-  .pg-actions .hint { margin-left: 0; flex-basis: 100%; }
-  .mask-stage { padding: var(--space-4); }
-  .wipe { font-size: var(--text-md); }
-}
-@container app (max-width: 560px) {
-  .brand__sub { display: none; }
-  #theme-label { display: none; }
-  .app-header { padding-inline: var(--space-3); }
-  .stats { grid-template-columns: minmax(0, 1fr); }
-  .stat-wide { grid-column: auto; }
-  .bars li { grid-template-columns: 6.5rem minmax(0, 1fr) 2rem; }
-  .feed li { grid-template-columns: 3rem minmax(0, 1fr); }
-  .feed li .pill { grid-column: 2; justify-self: start; }
-  .pol-row { grid-template-columns: minmax(0, 1fr); }
-  .seg { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .pol-actions-help { grid-template-columns: minmax(0, 1fr); }
-  /* Keys table becomes one card per key. */
-  .keys-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .keys-table, .keys-table tbody, .keys-table tr, .keys-table td { display: block; }
-  .keys-table tr { padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
-  .keys-table tr:last-child { border-bottom: 0; }
-  .keys-table td { border: 0; padding: 2px 0; display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: var(--space-2); }
-  .keys-table td::before { content: attr(data-label); color: var(--color-text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); padding-top: 2px; }
-  .keys-table td.td-name { display: block; }
-  .keys-table td.td-name::before { content: none; }
+@media (max-width:640px){
+  .proto-t,.proto .sp{display:none}
+  .chips{flex:1 1 100%}
+  .chips label{padding:4px 8px;font-size:var(--text-xs)}
+  .annex{padding:20px 16px 22px;border-radius:20px}
+  .lrow{grid-template-columns:minmax(0,1fr)}
+  .lset{gap:12px;padding:14px 14px 8px}
 }
 
-/* ---------- Logo annex ---------- */
-.annex { max-width: 1200px; margin: var(--space-6) auto 0; display: grid; gap: var(--space-4); }
-.annex h2 { font-size: var(--text-xl); }
-.logo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
-.logo-card { display: grid; gap: var(--space-3); align-content: start; }
-.logo-card h3 { font-size: var(--text-lg); }
-.logo-sizes { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); }
-.logo-sizes figure { margin: 0; display: grid; justify-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
-.logo-sizes svg { display: block; }
-.on-dark { background: #11111c; color: #ecebf5; border-radius: var(--radius-sm); padding: var(--space-2); }
-.on-light { background: #ffffff; color: #1c1b2e; border-radius: var(--radius-sm); padding: var(--space-2); border: 1px solid var(--color-border); }
-.logo-mono { color: var(--color-text); }
-.logo-b { fill: var(--color-accent); }
+/* Reduced motion: the system setting, or the prototype toggle that previews it */
+.reduce-motion *,.reduce-motion *::before,.reduce-motion *::after{animation:none!important;transition:none!important}
+@media (prefers-reduced-motion: reduce){
+  .journey{display:none}
+  .rm-note{display:flex}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
 </style>
 </head>
 <body>
 
-<!-- Shapes reused across the page. -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-  <defs>
-    <symbol id="logo-current" viewBox="0 0 72 72">
-      <rect x="4" y="4" width="64" height="64" rx="16" fill="#4b3fb8"/>
-      <path d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14z" fill="#ffffff"/>
-      <ellipse cx="25" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/>
-      <ellipse cx="47" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/>
-    </symbol>
-    <!-- The mask from the current logo, eyes cut out, so it takes any fill. -->
-    <symbol id="mask-shape" viewBox="10 22 52 26">
-      <path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0zM41.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0z"/>
-    </symbol>
-    <symbol id="mark-a" viewBox="0 0 32 32">
-      <path fill-rule="evenodd" d="M5 16C5 12.7 7.3 11 10.5 11H13.5C14.8 11 15.3 12 16 12C16.7 12 17.2 11 18.5 11H21.5C24.7 11 27 12.7 27 16C27 19.6 24.6 21.5 21.5 21.5C19.2 21.5 17.8 19.5 16 19.5C14.2 19.5 12.8 21.5 10.5 21.5C7.4 21.5 5 19.6 5 16ZM9 16A2.5 2.2 0 1 0 14 16A2.5 2.2 0 1 0 9 16ZM18 16A2.5 2.2 0 1 0 23 16A2.5 2.2 0 1 0 18 16Z"/>
-    </symbol>
-    <symbol id="mark-b" viewBox="0 0 32 32">
-      <path fill-rule="evenodd" d="M2 12L8 8H24L30 12V19L24 24H19.5L16 21L12.5 24H8L2 19ZM7 13V16.6H13.5V13ZM18.5 13V16.6H25V13Z"/>
-    </symbol>
-    <!-- Line icons (stroke = currentColor). -->
-    <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 15l4 3-4 3z"/></symbol>
-    <symbol id="i-live" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
-    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
-    <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
-    <symbol id="i-status" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
-    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
-    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.01"/></symbol>
-    <symbol id="i-block" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
-    <symbol id="i-local" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
-    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.5M6.5 7.6C4.3 9.2 3 12 3 12s4 6 9 6a8.7 8.7 0 0 0 3.5-.7"/></symbol>
-    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
-    <symbol id="i-chain" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
-    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
-    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
-    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5"/></symbol>
-    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
-    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
-  </defs>
-</svg>
+<!-- Shapes reused across the page -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <!-- The mask: one path with the eyes cut out (evenodd), so it takes any fill. -->
+  <symbol id="mask" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
+  <!-- New primary logo: the mask in a rounded tile with the indigo gradient (same as design/logo.svg). -->
+  <linearGradient id="logo-grad" x1="0.29" y1="0.05" x2="0.71" y2="0.95"><stop offset="0" style="stop-color:var(--logo-from)"/><stop offset="1" style="stop-color:var(--logo-to)"/></linearGradient>
+  <symbol id="logo-new" viewBox="0 0 32 32"><rect width="32" height="32" rx="9.6" fill="url(#logo-grad)"/><rect x="0.5" y="0.5" width="31" height="31" rx="9.1" fill="none" stroke="#ffffff" stroke-opacity="0.2"/><path transform="translate(0.08 0.52) scale(0.4423)" fill="#ffffff" fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
+  <!-- Current published logo (docs/images/logo.svg), for comparison only. -->
+  <symbol id="logo-current" viewBox="0 0 72 72"><rect x="4" y="4" width="64" height="64" rx="16" fill="#4b3fb8"/><path d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14z" fill="#ffffff"/><ellipse cx="25" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/><ellipse cx="47" cy="34" rx="5.5" ry="4" fill="#4b3fb8"/></symbol>
+  <symbol id="mask-current" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0zM41.5 34a5.5 4 0 1 0 11 0a5.5 4 0 1 0-11 0z"/></symbol>
+  <!-- Line icons (stroke = currentColor) -->
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 15l4 3-4 3z"/></symbol>
+  <symbol id="i-live" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
+  <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-status" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 15l3-3 3 2 4-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2L2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17v.01"/></symbol>
+  <symbol id="i-block" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.5M6.5 7.6C4.3 9.2 3 12 3 12s4 6 9 6a8.7 8.7 0 0 0 3.5-.7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M3 12s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-local" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2.5"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+  <symbol id="i-chain" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</defs></svg>
 
-<a class="skip-link" href="#main">Saltar al contenido</a>
+<a class="skip" href="#main">Saltar al contenido</a>
 
-<section class="proto-bar" aria-labelledby="proto-title">
-  <p class="proto-bar__title" id="proto-title">Prototipo estático · issue #30<span>Estos controles no forman parte del panel.</span></p>
-  <fieldset class="proto-states">
-    <legend>Estado</legend>
-    <label><input type="radio" name="proto-state" value="empty"><span>Vacío</span></label>
-    <label><input type="radio" name="proto-state" value="data" checked><span>Con datos</span></label>
-    <label><input type="radio" name="proto-state" value="blocked"><span>Bloqueo</span></label>
-    <label><input type="radio" name="proto-state" value="error"><span>Error</span></label>
-    <label><input type="radio" name="proto-state" value="broken"><span>Cadena rota</span></label>
-  </fieldset>
-  <div class="proto-toggles">
-    <label for="proto-mobile"><input type="checkbox" id="proto-mobile"> Simular móvil (390 px)</label>
-    <label for="proto-motion"><input type="checkbox" id="proto-motion"> Reducir movimiento</label>
-  </div>
-</section>
+<div class="page" lang="es">
+  <section class="proto rv" style="--i:0" aria-label="Controles del prototipo">
+    <span class="proto-t"><b>Prototipo · issue #30</b> · estos controles no son parte del panel</span>
+    <span class="sp"></span>
+    <fieldset class="chips">
+      <legend>Estado de ejemplo</legend>
+      <label><input type="radio" name="proto-state" id="st-empty" value="empty">Vacío</label>
+      <label><input type="radio" name="proto-state" id="st-data" value="data" checked>Con datos</label>
+      <label><input type="radio" name="proto-state" id="st-blocked" value="blocked">Bloqueo</label>
+      <label><input type="radio" name="proto-state" id="st-error" value="error">Error</label>
+      <label><input type="radio" name="proto-state" id="st-broken" value="broken">Cadena rota</label>
+    </fieldset>
+    <label class="tg" for="proto-mobile"><input type="checkbox" id="proto-mobile"><span class="sw"></span>Móvil (390 px)</label>
+    <label class="tg" for="proto-motion"><input type="checkbox" id="proto-motion"><span class="sw"></span>Menos movimiento</label>
+  </section>
 
-<div class="stage-wrap" id="stage-wrap">
-<div class="app" id="app" data-state="data">
-
-  <header class="app-header">
-    <div class="brand">
-      <svg viewBox="0 0 72 72" role="img" aria-label="Logo de Antifaz"><use href="#logo-current"/></svg>
-      <span class="brand__name">Antifaz</span>
-      <span class="brand__sub">Panel</span>
-      <span class="brand__ver" title="Versión de la pasarela">v0.2.0</span>
-    </div>
-    <span class="pill pill-ok" data-only="empty data blocked"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Todo en orden</span>
-    <span class="pill pill-warn" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Anthropic no responde</span>
-    <span class="pill pill-danger" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Cadena de evidencias rota</span>
-    <button class="btn btn-ghost" type="button" id="theme-btn" aria-label="Cambiar a tema oscuro">
-      <svg class="icon" aria-hidden="true"><use href="#i-moon" id="theme-icon"/></svg><span id="theme-label">Oscuro</span>
-    </button>
-  </header>
-
-  <div class="banner banner-warn" role="status" data-only="error" hidden>
-    <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
-    <div>
-      <strong>Anthropic no responde</strong>
-      Las peticiones que van a Anthropic fallan con un error 504 y no llega nada a la IA. OpenAI y la IA local funcionan. Antifaz lo vuelve a comprobar cada minuto.
-    </div>
-  </div>
-  <div class="banner banner-danger" role="alert" data-only="broken" hidden>
-    <svg class="icon" aria-hidden="true"><use href="#i-chain"/></svg>
-    <div>
-      <strong>La cadena de evidencias está rota en el registro 18.193</strong>
-      Ese registro no encaja con el anterior: alguien ha cambiado o borrado registros. Lo detectó la verificación de las 10:40. Desde ese punto, el registro ya no sirve como prueba.
-      <ol>
-        <li>No borres ni arregles nada a mano.</li>
-        <li>Ejecuta <span class="code">antifaz audit verify</span> para ver el detalle.</li>
-        <li>Compara con el último punto de control firmado (hoy, 00:00) y avisa a tu responsable de seguridad.</li>
-      </ol>
-    </div>
-  </div>
-
-  <div class="app-body">
-    <nav class="app-nav" aria-label="Secciones del panel">
-      <div class="tablist" role="tablist" aria-label="Secciones" aria-orientation="vertical">
-        <button class="tab" role="tab" id="tab-playground" aria-controls="panel-playground" aria-selected="true" tabindex="0"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto</button>
-        <button class="tab" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>En directo</button>
-        <button class="tab" role="tab" id="tab-keys" aria-controls="panel-keys" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Claves</button>
-        <button class="tab" role="tab" id="tab-policies" aria-controls="panel-policies" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-policy"/></svg>Políticas</button>
-        <button class="tab" role="tab" id="tab-status" aria-controls="panel-status" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-status"/></svg>Estado</button>
+  <div class="stage-wrap" id="stage-wrap">
+  <div class="window" id="app" data-state="data"><div class="shell">
+    <aside class="side">
+      <div class="brand rv" style="--i:1">
+        <span class="logo" aria-hidden="true"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span><b>Antifaz</b><span class="ver">v0.2.0</span>
+        <span class="m-only">
+          <span class="status ok" data-only="empty data blocked"><span class="dot"></span>Todo en orden</span>
+          <span class="status warn" data-only="error" hidden><span class="dot"></span>Sin respuesta</span>
+          <span class="status danger" data-only="broken" hidden><span class="dot"></span>Cadena rota</span>
+          <button class="iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+        </span>
       </div>
-      <p class="nav-note">Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
-    </nav>
+      <p class="nav-label rv" style="--i:2" id="nav-label">Panel</p>
+      <nav class="nav" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
+        <button class="tab rv" style="--i:2" role="tab" id="tab-playground" data-name="Prueba un texto" aria-controls="panel-playground" aria-selected="true" tabindex="0"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto<kbd aria-hidden="true">1</kbd></button>
+        <button class="tab rv" style="--i:3" role="tab" id="tab-live" data-name="En directo" aria-controls="panel-live" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg>En directo<kbd aria-hidden="true">2</kbd></button>
+        <button class="tab rv" style="--i:4" role="tab" id="tab-keys" data-name="Claves" aria-controls="panel-keys" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Claves<kbd aria-hidden="true">3</kbd></button>
+        <button class="tab rv" style="--i:5" role="tab" id="tab-policies" data-name="Políticas" aria-controls="panel-policies" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-policy"/></svg>Políticas<kbd aria-hidden="true">4</kbd></button>
+        <button class="tab rv" style="--i:6" role="tab" id="tab-status" data-name="Estado" aria-controls="panel-status" aria-selected="false" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-status"/></svg>Estado<span class="tab-dot warn" data-only="error" hidden><span class="sr-only"> (aviso)</span></span><span class="tab-dot danger" data-only="broken" hidden><span class="sr-only"> (alerta)</span></span><kbd aria-hidden="true">5</kbd></button>
+      </nav>
+      <div class="side-foot rv" style="--i:7">
+        <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
+        <span class="local"><span class="dot pulse"></span>Todo se procesa en tu red</span>
+      </div>
+    </aside>
 
-    <main class="app-main" id="main" tabindex="-1">
+    <div class="main">
+      <header class="top">
+        <span class="crumb">Antifaz · <b id="crumb-name">Prueba un texto</b></span>
+        <span class="status ok" data-only="empty data blocked"><span class="dot"></span>Todo en orden</span>
+        <span class="status warn" data-only="error" hidden><span class="dot pulse"></span>Anthropic no responde</span>
+        <span class="status danger" data-only="broken" hidden><span class="dot pulse"></span>Cadena de evidencias rota</span>
+        <button class="iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+      </header>
 
-      <!-- ===================== 1 · Playground ===================== -->
-      <section class="view" role="tabpanel" id="panel-playground" aria-labelledby="tab-playground">
-        <div class="view-head">
-          <div>
+      <main class="content" id="main" tabindex="-1">
+        <!-- Alerts shown in every view -->
+        <div class="alerts">
+          <div class="callout warn" role="status" data-only="error" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>
+            <strong>Anthropic no responde</strong>
+            <p>Las peticiones a Anthropic fallan con un error 504 y no llega nada a la IA. OpenAI y la IA local funcionan. Antifaz lo vuelve a comprobar cada minuto.</p>
+          </div>
+          <div class="callout danger" role="alert" data-only="broken" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-chain"/></svg>
+            <strong>La cadena de evidencias está rota en el registro 18.193</strong>
+            <p>Ese registro no encaja con el anterior: alguien ha cambiado o borrado registros. Lo detectó la verificación de las 10:40. Desde ese punto, el registro ya no sirve como prueba.</p>
+            <ol>
+              <li>No borres ni arregles nada a mano.</li>
+              <li>Ejecuta <span class="code">antifaz audit verify</span> para ver el detalle.</li>
+              <li>Compara con el último punto de control firmado (hoy, 00:00) y avisa a tu responsable de seguridad.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- ===================== 1 · Prueba un texto ===================== -->
+        <section class="view" id="panel-playground" role="tabpanel" aria-labelledby="tab-playground">
+          <div class="vh rv" style="--i:3"><div>
             <h1>Prueba un texto</h1>
             <p>Pega un texto con datos inventados y mira qué recibiría la IA y qué te devolvería. Lo que pruebas no se guarda.</p>
-          </div>
-        </div>
+          </div></div>
 
-        <form class="card pg-form" id="pg-form" novalidate>
-          <label class="field-label" for="pg-text">Texto de prueba</label>
-          <textarea id="pg-text" name="pg-text" rows="4" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
-          <div class="pg-actions">
-            <span class="inline-field"><label for="pg-policy">Política</label>
-              <select id="pg-policy" name="pg-policy"><option value="default">default</option><option value="rrhh">rrhh</option></select></span>
-            <button class="btn btn-primary" type="submit">Probar</button>
-            <button class="btn" type="button" id="pg-example">Usar el ejemplo</button>
-            <span class="hint">Usa solo datos inventados. El texto vive en esta petición y se descarta.</span>
-          </div>
-        </form>
+          <form class="composer rv" style="--i:4" id="pg-form" novalidate>
+            <label class="cap" for="pg-text">Texto de prueba</label>
+            <textarea id="pg-text" name="pg-text" rows="3" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
+            <div class="bar">
+              <span class="lbl" aria-hidden="true">Política</span>
+              <fieldset class="seg mono-l" style="--n:2">
+                <legend>Política</legend>
+                <span class="thumb" aria-hidden="true"></span>
+                <input type="radio" name="pg-policy" id="pg-pol-default" value="default" checked><label for="pg-pol-default">default</label>
+                <input type="radio" name="pg-policy" id="pg-pol-rrhh" value="rrhh"><label for="pg-pol-rrhh">rrhh</label>
+              </fieldset>
+              <span class="sp"></span>
+              <span class="kh"><kbd>Ctrl</kbd> <kbd>↵</kbd> para probar</span>
+              <button class="btn" type="button" id="pg-example"><span><span class="full">Usar el e</span><span class="short">E</span>jemplo</span></button>
+              <button class="btn primary" type="submit">Probar</button>
+            </div>
+          </form>
+          <p class="hint rv" style="--i:5"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Usa solo datos inventados. El texto se descarta al terminar.</p>
 
-        <!-- Empty state -->
-        <div class="empty" data-only="empty" hidden>
-          <svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>
-          <p><strong>Aquí verás tres cosas:</strong> tu texto con los datos encontrados, lo que recibe la IA (con marcadores en lugar de datos) y la respuesta con tus datos de vuelta.</p>
-          <button class="btn" type="button" data-action="example">Usar el ejemplo</button>
-        </div>
-
-        <!-- F3 animation -->
-        <div class="card anim-card" data-only="data broken">
-          <div class="anim-head">
-            <p class="eyebrow">Así viaja tu texto</p>
-            <button class="btn btn-ghost" type="button" id="anim-replay">Ver otra vez</button>
+          <div class="empty" data-only="empty" hidden>
+            <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg></span>
+            <p><b>Aquí verás tres cosas:</b> tu texto con los datos encontrados, lo que recibe la IA (con marcadores en lugar de datos) y la respuesta con tus datos de vuelta.</p>
+            <button class="btn primary" type="button" data-action="example">Usar el ejemplo</button>
           </div>
-          <p class="sr-only">Animación: el antifaz pasa por encima del texto y tapa el nombre, el DNI, el email y el IBAN. La IA recibe marcadores. La respuesta vuelve y los datos aparecen otra vez en su sitio. Abajo tienes el mismo contenido sin animación.</p>
-          <div class="mask-stage" id="mask-anim" aria-hidden="true">
-            <div class="mrow row-req">
-              <div class="mrow-cap"><span class="cap-before">Tú escribes</span><span class="cap-after">La IA recibe</span></div>
-              <div class="wipe wipe-req">
-                <div class="layer layer-before">Hola, soy <mark class="pii">Carmen Prueba López</mark>, con DNI <mark class="pii">12345678Z</mark>. Escribid a <mark class="pii">ana.prueba@example.com</mark> y pagad en <mark class="pii">ES9121000418450200051332</mark>.</div>
-                <div class="layer layer-after">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</div>
-                <span class="mask-glider"><svg viewBox="10 22 52 26"><use href="#mask-shape" style="fill: var(--color-accent)"/></svg></span>
+
+          <section class="journey rv" style="--i:6" data-only="data broken" aria-labelledby="j-t">
+            <div class="jhead">
+              <h2 class="eyebrow" id="j-t">Así viaja tu texto</h2>
+              <button class="btn ghost" type="button" id="anim-replay"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
+            </div>
+            <p class="sr-only">Animación: el antifaz pasa por encima del texto y tapa el nombre, el DNI, el email y el IBAN. La IA recibe marcadores. La respuesta vuelve y los datos aparecen otra vez en su sitio. Abajo tienes el mismo contenido sin animación.</p>
+            <div id="mask-anim" aria-hidden="true">
+              <div class="mrow r1">
+                <div class="mcap"><span class="cap-before">Tú escribes</span><span class="cap-after">La IA recibe</span></div>
+                <div class="wipe w1">
+                  <div class="layer layer-before">Hola, soy <mark class="pii scan">Carmen Prueba López</mark>, con DNI <mark class="pii scan">12345678Z</mark>. Escribid a <mark class="pii scan">ana.prueba@example.com</mark> y pagad en <mark class="pii scan">ES9121000418450200051332</mark>.</div>
+                  <div class="layer layer-after">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</div>
+                  <span class="glider"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span>
+                </div>
+              </div>
+              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"><i></i><i></i><i></i></span><span class="lbl2">vuelve la respuesta</span></div>
+              <div class="mrow r2">
+                <div class="mcap"><span class="cap-before">La IA responde</span><span class="cap-after">Te llega, con tus datos</span></div>
+                <div class="wipe w2">
+                  <div class="layer layer-before">Gracias, <span class="marker">[[PERSON_1]]</span>. Enviaremos el recibo a <span class="marker">[[EMAIL_1]]</span> cuando llegue el pago a <span class="marker">[[IBAN_1]]</span>.</div>
+                  <div class="layer layer-after">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</div>
+                  <span class="glider"><svg viewBox="10 22 52 26"><use href="#mask"/></svg></span>
+                </div>
               </div>
             </div>
-            <p class="flight"><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg>Sale hacia Anthropic sin datos personales · vuelve la respuesta</p>
-            <div class="mrow row-res">
-              <div class="mrow-cap"><span class="cap-before">La IA responde</span><span class="cap-after">Te llega, con tus datos</span></div>
-              <div class="wipe wipe-res">
-                <div class="layer layer-before">Gracias, <span class="marker">[[PERSON_1]]</span>. Enviaremos el recibo a <span class="marker">[[EMAIL_1]]</span> cuando llegue el pago a <span class="marker">[[IBAN_1]]</span>.</div>
-                <div class="layer layer-after">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</div>
-                <span class="mask-glider"><svg viewBox="10 22 52 26"><use href="#mask-shape" style="fill: var(--color-accent)"/></svg></span>
+          </section>
+          <p class="rm-note" data-only="data broken"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Movimiento reducido: no hay animación. Abajo tienes el antes y el después.</p>
+
+          <div class="pswitch" role="group" aria-label="Qué columna ver" data-p="2" data-only="data blocked error broken">
+            <span class="thumb" aria-hidden="true"></span>
+            <button type="button" data-p="1" aria-pressed="false">Escribes</button>
+            <button type="button" data-p="2" aria-pressed="true">Recibe la IA</button>
+            <button type="button" data-p="3" aria-pressed="false">Te vuelve</button>
+          </div>
+          <div class="panes rv" style="--i:7" data-p="2" data-only="data blocked error broken">
+            <article class="pane p1" aria-labelledby="pane1-t">
+              <div class="ph"><span class="num" aria-hidden="true">1</span><h2 id="pane1-t">Lo que escribes</h2></div>
+              <p class="ptext">Hola, soy <mark class="pii">Carmen Prueba López<span class="ptype">NOMBRE</span></mark>, con DNI <mark class="pii">12345678Z<span class="ptype">DNI</span></mark>. Escribid a mi gestora <mark class="pii">ana.prueba@example.com<span class="ptype">EMAIL</span></mark> y haced el pago en <mark class="pii">ES9121000418450200051332<span class="ptype">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="ptype">SALUD</span></mark> desde el lunes.</span></p>
+              <p class="pfoot">Resaltado: dato encontrado, con su tipo al lado.</p>
+            </article>
+            <article class="pane p2" aria-labelledby="pane2-t">
+              <div class="ph"><span class="num" aria-hidden="true">2</span><h2 id="pane2-t">Lo que recibe la IA</h2></div>
+              <p class="ptext" data-only="data error broken">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker">[[EMAIL_1]]</span> y haced el pago en <span class="marker">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
+              <div class="note danger" data-only="blocked" hidden>
+                <strong><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado: no se ha enviado nada</strong>
+                <p>El texto habla de salud (categoría especial del RGPD) y la política <b>rrhh</b> bloquea esos textos.</p>
+                <p class="sub">Motivo <span class="code">special_category</span> · código <span class="code">antifaz_blocked</span></p>
               </div>
+              <p class="pfoot" data-only="data error broken">Marcador: la IA solo ve esto.</p>
+            </article>
+            <article class="pane p3" aria-labelledby="pane3-t">
+              <div class="ph"><span class="num" aria-hidden="true">3</span><h2 id="pane3-t">Lo que te vuelve</h2></div>
+              <p class="ptext" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
+              <p class="pfoot" data-only="data broken">Subrayado verde: dato devuelto a su sitio. Respuesta de ejemplo.</p>
+              <div class="note warn" data-only="error" hidden>
+                <strong><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>Sin respuesta</strong>
+                <p>Anthropic no ha respondido a tiempo. Tu texto ya iba sin datos personales y no hay nada que restaurar.</p>
+                <p class="sub">Error <span class="code">504</span> · prueba más tarde o elige otra ruta.</p>
+              </div>
+              <p class="pfoot" data-only="blocked" hidden>No hay respuesta: la petición se paró antes de salir.</p>
+            </article>
+          </div>
+
+          <div class="summary rv" style="--i:8" data-only="data blocked error broken">
+            <dl class="found">
+              <dt>Datos encontrados</dt>
+              <dd>Nombre <b>1</b></dd><dd>DNI <b>1</b></dd><dd>Email <b>1</b></dd><dd>IBAN <b>1</b></dd>
+              <dd data-only="blocked" hidden>Salud <b>1</b></dd>
+            </dl>
+            <p class="meta" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política default</span><span>Anthropic · claude-sonnet-4-5</span></p>
+            <p class="meta" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política rrhh</span><span>Nada ha salido de tu red</span></p>
+            <p class="meta" data-only="error" hidden><span>4 datos ocultados</span><span>Política default</span><span>Anthropic no responde</span></p>
+          </div>
+        </section>
+
+        <!-- ===================== 2 · En directo ===================== -->
+        <section class="view" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
+          <div class="vh">
+            <div>
+              <h1>En directo</h1>
+              <p>Lo que pasa ahora por Antifaz. Solo tipos y cantidades: nunca un dato ni un marcador.</p>
             </div>
+            <span class="live-pill"><span class="dot pulse" aria-hidden="true"></span>Conectado · hoy, martes 6 de octubre</span>
           </div>
-        </div>
-        <p class="rm-note" data-only="data broken"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>Movimiento reducido: no hay animación. Abajo tienes el antes y el después.</p>
 
-        <!-- The three panes -->
-        <div class="panes" data-only="data blocked error broken">
-          <article class="card pane" aria-labelledby="pane1-t">
-            <div class="pane-head"><span class="step" aria-hidden="true">1</span><h2 class="pane-title" id="pane1-t">Lo que escribes</h2></div>
-            <p class="pane-text">Hola, soy <mark class="pii">Carmen Prueba López<span class="pii-type">NOMBRE</span></mark>, con DNI <mark class="pii">12345678Z<span class="pii-type">DNI</span></mark>. Escribid a mi gestora <mark class="pii">ana.prueba@example.com<span class="pii-type">EMAIL</span></mark> y haced el pago en <mark class="pii">ES9121000418450200051332<span class="pii-type">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="pii-type">SALUD</span></mark> desde el lunes.</span></p>
-            <p class="pane-foot">Fondo resaltado y subrayado discontinuo: dato encontrado, con su tipo al lado.</p>
+          <div class="stats">
+            <article class="stat big" aria-labelledby="st-prot">
+              <h2 class="eyebrow" id="st-prot">Datos protegidos hoy</h2>
+              <p class="stat-num" id="st-total">128</p>
+              <p class="stat-sub" data-only="empty" hidden>Aún no hay datos. Cuando pase la primera petición, verás aquí cuántos datos de cada tipo se han protegido.</p>
+              <ul class="bars" id="st-bars" aria-label="Por tipo" data-only="data blocked error broken"></ul>
+            </article>
+            <article class="stat" aria-labelledby="st-block">
+              <h2 class="eyebrow" id="st-block">Bloqueos</h2>
+              <p class="stat-num sm" id="st-blocks">3</p>
+              <p class="stat-sub" id="st-blocks-sub">2 adjuntos · 1 categoría especial</p>
+            </article>
+            <article class="stat" aria-labelledby="st-local">
+              <h2 class="eyebrow" id="st-local">Enviadas a IA local</h2>
+              <p class="stat-num sm" id="st-locals">2</p>
+              <p class="stat-sub">No salen de tu red (Ollama).</p>
+            </article>
+            <article class="stat wide" aria-labelledby="st-chain">
+              <h2 class="eyebrow" id="st-chain">Cadena de evidencias</h2>
+              <p class="chain ok" data-only="empty data blocked error"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Íntegra</p>
+              <p class="chain bad" data-only="broken" hidden><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Rota en el registro 18.193</p>
+              <span class="chain-links" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i class="cut" data-only="broken" hidden></i><i></i><i></i></span>
+              <p class="stat-sub" data-only="data blocked error">Verificada a las 10:40 · 18.204 registros · último punto de control firmado hoy a las 00:00.</p>
+              <p class="stat-sub" data-only="empty" hidden>Verificada a las 10:40 · 0 registros hoy · último punto de control firmado hoy a las 00:00.</p>
+              <p class="stat-sub" data-only="broken" hidden>Verificada a las 10:40. Los registros anteriores al 18.193 siguen siendo válidos.</p>
+            </article>
+          </div>
+
+          <article class="surface" aria-labelledby="feed-t">
+            <div class="sh"><h2 id="feed-t">Últimas peticiones</h2><span class="aside">Las más nuevas, arriba</span></div>
+            <p class="feed-empty" data-only="empty" hidden>Hoy aún no ha pasado ninguna petición. Cuando alguien use una clave, lo verás aquí al momento.</p>
+            <ol class="feed" id="feed" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="feed-t" data-only="data blocked error broken"></ol>
           </article>
 
-          <article class="card pane" aria-labelledby="pane2-t">
-            <div class="pane-head"><span class="step" aria-hidden="true">2</span><h2 class="pane-title" id="pane2-t">Lo que recibe la IA</h2></div>
-            <p class="pane-text" data-only="data error broken">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker">[[EMAIL_1]]</span> y haced el pago en <span class="marker">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
-            <div class="block-box" data-only="blocked" hidden>
-              <strong><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado: no se ha enviado nada</strong>
-              <p class="small">El texto habla de salud (categoría especial del RGPD) y la política <b>rrhh</b> bloquea esos textos.</p>
-              <p class="small muted">Motivo: <span class="code">special_category</span> · código <span class="code">antifaz_blocked</span></p>
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Si nadie mira este panel, Antifaz no prepara ni envía nada: 0 % de CPU. El flujo se abre al entrar aquí y se cierra al salir.</p>
+        </section>
+
+        <!-- ===================== 3 · Claves ===================== -->
+        <section class="view" id="panel-keys" role="tabpanel" aria-labelledby="tab-keys" hidden>
+          <div class="vh">
+            <div>
+              <h1>Claves</h1>
+              <p>Una clave por equipo o aplicación: así sabes quién usa la IA, con qué límites y con qué política.</p>
             </div>
-            <p class="pane-foot" data-only="data error broken">Recuadro morado: marcador. La IA solo ve esto.</p>
-          </article>
-
-          <article class="card pane" aria-labelledby="pane3-t">
-            <div class="pane-head"><span class="step" aria-hidden="true">3</span><h2 class="pane-title" id="pane3-t">Lo que te vuelve</h2></div>
-            <p class="pane-text" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
-            <p class="pane-foot" data-only="data broken">Subrayado continuo: dato devuelto a su sitio. Respuesta de ejemplo.</p>
-            <div class="error-box" data-only="error" hidden>
-              <strong><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Sin respuesta</strong>
-              <p class="small">Anthropic no ha respondido a tiempo. Tu texto ya iba sin datos personales y no hay nada que restaurar.</p>
-              <p class="small muted">Error <span class="code">504</span> · prueba más tarde o elige otra ruta.</p>
-            </div>
-            <p class="small muted" data-only="blocked" hidden>No hay respuesta: la petición se paró antes de salir.</p>
-          </article>
-        </div>
-
-        <dl class="legend" data-only="data error broken">
-          <dt>Datos encontrados</dt>
-          <dd class="type-chip">Nombre <code>PERSON</code> <b>1</b></dd>
-          <dd class="type-chip">DNI <code>ES_DNI</code> <b>1</b></dd>
-          <dd class="type-chip">Email <code>EMAIL</code> <b>1</b></dd>
-          <dd class="type-chip">IBAN <code>IBAN</code> <b>1</b></dd>
-        </dl>
-        <dl class="legend" data-only="blocked" hidden>
-          <dt>Datos encontrados</dt>
-          <dd class="type-chip">Nombre <code>PERSON</code> <b>1</b></dd>
-          <dd class="type-chip">DNI <code>ES_DNI</code> <b>1</b></dd>
-          <dd class="type-chip">Email <code>EMAIL</code> <b>1</b></dd>
-          <dd class="type-chip">IBAN <code>IBAN</code> <b>1</b></dd>
-          <dd class="type-chip">Salud <code>SPECIAL_CATEGORY</code> <b>1</b></dd>
-        </dl>
-        <p class="meta-line" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política default</span><span>Destino: Anthropic · claude-sonnet-4-5</span></p>
-        <p class="meta-line" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política rrhh</span><span>Nada ha salido de tu red</span></p>
-        <p class="meta-line" data-only="error" hidden><span>4 datos ocultados</span><span>Política default</span><span>Destino: Anthropic (no responde)</span></p>
-      </section>
-
-      <!-- ===================== 2 · En directo ===================== -->
-      <section class="view" role="tabpanel" id="panel-live" aria-labelledby="tab-live" hidden>
-        <div class="view-head">
-          <div>
-            <h1>En directo</h1>
-            <p>Lo que pasa ahora por Antifaz. Solo se ven tipos y cantidades: nunca un dato ni un marcador.</p>
+            <button class="btn primary" type="button" data-only="data blocked error broken"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Crear clave</button>
           </div>
-          <div class="live-bar">
-            <span class="pill pill-ok"><span class="dot" aria-hidden="true"></span>Conectado</span>
-            <span class="muted">Hoy, martes 6 de octubre</span>
+
+          <div class="empty" data-only="empty" hidden>
+            <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg></span>
+            <p><b>Aún no hay claves.</b> Crea una para cada equipo (por ejemplo, «soporte» o «rrhh») y ponle límites y una política.</p>
+            <button class="btn primary" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Crear la primera clave</button>
           </div>
-        </div>
 
-        <div class="stats">
-          <article class="card stat stat-wide" aria-labelledby="st-prot">
-            <p class="eyebrow" id="st-prot">Datos protegidos hoy</p>
-            <p class="stat-num" data-only="empty" hidden>0</p>
-            <p class="stat-sub" data-only="empty" hidden>Aún no hay datos.</p>
-            <p class="stat-num" data-only="data blocked error broken">128</p>
-            <ul class="bars" data-only="data blocked error broken" aria-label="Por tipo">
-              <li><span>DNI</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="n">41</span></li>
-              <li><span>Email</span><span class="track"><span class="fill" style="width:90%"></span></span><span class="n">37</span></li>
-              <li><span>Nombre</span><span class="track"><span class="fill" style="width:54%"></span></span><span class="n">22</span></li>
-              <li><span>IBAN</span><span class="track"><span class="fill" style="width:44%"></span></span><span class="n">18</span></li>
-              <li><span>Teléfono</span><span class="track"><span class="fill" style="width:24%"></span></span><span class="n">10</span></li>
-            </ul>
-          </article>
-          <article class="card stat" aria-labelledby="st-block">
-            <p class="eyebrow" id="st-block">Bloqueos</p>
-            <p class="stat-num" data-only="empty" hidden>0</p>
-            <p class="stat-num" data-only="data error broken">3</p>
-            <p class="stat-num" data-only="blocked" hidden>4</p>
-            <p class="stat-sub" data-only="data error broken">2 adjuntos · 1 categoría especial</p>
-            <p class="stat-sub" data-only="blocked" hidden>2 adjuntos · 2 categoría especial</p>
-          </article>
-          <article class="card stat" aria-labelledby="st-local">
-            <p class="eyebrow" id="st-local">Enviadas a IA local</p>
-            <p class="stat-num" data-only="empty" hidden>0</p>
-            <p class="stat-num" data-only="data blocked error broken">2</p>
-            <p class="stat-sub">No salen de tu red (Ollama).</p>
-          </article>
-          <article class="card stat stat-wide" aria-labelledby="st-chain">
-            <p class="eyebrow" id="st-chain">Cadena de evidencias</p>
-            <p class="chain chain-ok" data-only="empty data blocked error"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Íntegra</p>
-            <p class="chain chain-bad" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Rota en el registro 18.193</p>
-            <p class="stat-sub" data-only="data blocked error">Verificada a las 10:40 · 18.204 registros · último punto de control firmado hoy a las 00:00.</p>
-            <p class="stat-sub" data-only="empty" hidden>Verificada a las 10:40 · 0 registros hoy · último punto de control firmado hoy a las 00:00.</p>
-            <p class="stat-sub" data-only="broken" hidden>Verificada a las 10:40. Los registros anteriores al 18.193 siguen siendo válidos.</p>
-          </article>
-        </div>
-
-        <article class="card" aria-labelledby="feed-t">
-          <div class="view-head"><h2 class="card-title" id="feed-t">Últimas peticiones</h2><span class="small muted">Las más nuevas, arriba</span></div>
-          <div class="empty" data-only="empty" hidden style="border:0;padding-block:var(--space-6)">
-            <svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>
-            <p>Hoy aún no ha pasado ninguna petición. Cuando alguien use una clave, lo verás aquí al momento.</p>
+          <div class="surface" data-only="data blocked error broken">
+            <table class="keys">
+              <caption class="sr-only">Claves virtuales</caption>
+              <thead><tr><th scope="col">Nombre</th><th scope="col">Puede usar</th><th scope="col">Política</th><th scope="col">Límites</th><th scope="col">Último uso</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
+              <tbody>
+                <tr><td><span class="k-name">equipo-soporte</span><span class="k-id">id kid_3f9a</span></td><td data-label="Puede usar">Anthropic · claude-sonnet-4-5</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">60/min · 5.000/día</td><td data-label="Último uso" class="k-muted">hace 1 min</td><td data-label="Estado"><span class="status ok"><span class="dot"></span>Activa</span></td><td><button class="btn ghost" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
+                <tr><td><span class="k-name">rrhh-nominas</span><span class="k-id">id kid_81c2</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-mini</td><td data-label="Política"><span class="k-pol">rrhh</span></td><td data-label="Límites" class="k-num">20/min · 1.000/día</td><td data-label="Último uso" class="k-muted">hace 2 min</td><td data-label="Estado"><span class="status ok"><span class="dot"></span>Activa</span></td><td><button class="btn ghost" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
+                <tr><td><span class="k-name">desarrollo</span><span class="k-id">id kid_c47e</span></td><td data-label="Puede usar">Anthropic y OpenAI · todos</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">120/min</td><td data-label="Último uso" class="k-muted">hace 5 min</td><td data-label="Estado"><span class="status ok"><span class="dot"></span>Activa</span></td><td><button class="btn ghost" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
+                <tr><td><span class="k-name">script-facturas</span><span class="k-id">id kid_09bd</span></td><td data-label="Puede usar">Ollama (local)</td><td data-label="Política"><span class="k-pol">rrhh</span></td><td data-label="Límites" class="k-num">30/min</td><td data-label="Último uso" class="k-muted">hace 4 min</td><td data-label="Estado"><span class="status ok"><span class="dot"></span>Activa</span></td><td><button class="btn ghost" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
+                <tr class="revoked"><td><span class="k-name">becarios-2025</span><span class="k-id">id kid_5d10</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-nano</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">10/min</td><td data-label="Último uso" class="k-muted">hace 40 días</td><td data-label="Estado"><span class="status neutral"><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Revocada</span></td><td></td></tr>
+              </tbody>
+            </table>
           </div>
-          <ol class="feed" role="log" aria-live="polite" aria-relevant="additions" aria-label="Últimas peticiones" data-only="data blocked error broken">
-            <li data-only="broken" hidden class="is-new"><time>10:40</time><div><p class="who">Verificación automática</p><p class="what">Cadena de evidencias rota en el registro 18.193</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-chain"/></svg>Alerta</span></li>
-            <li data-only="error" hidden><time>10:45</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">Anthropic no responde · no se ha enviado nada</p></div><span class="pill pill-warn"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Error 504</span></li>
-            <li data-only="blocked" hidden class="is-new"><time>10:45</time><div><p class="who">rrhh-nominas · script</p><p class="what">Categoría especial (salud) → bloqueado</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado</span></li>
-            <li><time>10:44</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">1 email y 1 teléfono ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 2</span></li>
-            <li><time>10:43</time><div><p class="who">rrhh-nominas · Open WebUI</p><p class="what">PDF adjunto → bloqueado</p></div><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado</span></li>
-            <li><time>10:42</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">2 DNI y 1 IBAN ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 3</span></li>
-            <li><time>10:41</time><div><p class="who">script-facturas</p><p class="what">Categoría especial (salud) → IA local · Ollama</p></div><span class="pill pill-accent"><svg class="icon" aria-hidden="true"><use href="#i-local"/></svg>IA local</span></li>
-            <li><time>10:40</time><div><p class="who">desarrollo · Codex</p><p class="what">Sin datos personales · OpenAI</p></div><span class="pill pill-neutral"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Sin datos</span></li>
-            <li><time>10:38</time><div><p class="who">equipo-soporte · Claude Code</p><p class="what">3 nombres ocultados · Anthropic</p></div><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultados 3</span></li>
-          </ol>
-        </article>
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>La clave solo se ve una vez, al crearla. Antifaz guarda su huella, no la clave, así que aquí nunca aparece (ni un trozo). Si se pierde, revócala y crea otra.</p>
+        </section>
 
-        <p class="feed-foot"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>Si nadie mira este panel, Antifaz no prepara ni envía nada: 0 % de CPU. El flujo se abre al entrar aquí y se cierra al salir.</p>
-      </section>
-
-      <!-- ===================== 3 · Claves ===================== -->
-      <section class="view" role="tabpanel" id="panel-keys" aria-labelledby="tab-keys" hidden>
-        <div class="view-head">
-          <div>
-            <h1>Claves</h1>
-            <p>Una clave por equipo o aplicación: así sabes quién usa la IA, con qué límites y con qué política.</p>
-          </div>
-          <button class="btn btn-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Crear clave</button>
-        </div>
-
-        <div class="empty" data-only="empty" hidden>
-          <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>
-          <p>Aún no hay claves. Crea una para cada equipo (por ejemplo, «soporte» o «rrhh») y ponle límites.</p>
-          <button class="btn btn-primary" type="button">Crear la primera clave</button>
-        </div>
-
-        <div class="card table-wrap" data-only="data blocked error broken">
-          <table class="keys-table">
-            <caption class="sr-only">Claves virtuales</caption>
-            <thead><tr><th scope="col">Nombre</th><th scope="col">Puede usar</th><th scope="col">Política</th><th scope="col">Límites</th><th scope="col">Último uso</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
-            <tbody>
-              <tr><td class="td-name"><span class="key-name">equipo-soporte</span><br><span class="key-id">id kid_3f9a</span></td><td data-label="Puede usar">Anthropic · claude-sonnet-4-5</td><td data-label="Política">default</td><td data-label="Límites">60 / min · 5.000 / día</td><td data-label="Último uso">hace 1 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
-              <tr><td class="td-name"><span class="key-name">rrhh-nominas</span><br><span class="key-id">id kid_81c2</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-mini</td><td data-label="Política">rrhh</td><td data-label="Límites">20 / min · 1.000 / día</td><td data-label="Último uso">hace 2 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
-              <tr><td class="td-name"><span class="key-name">desarrollo</span><br><span class="key-id">id kid_c47e</span></td><td data-label="Puede usar">Anthropic y OpenAI · todos los modelos</td><td data-label="Política">default</td><td data-label="Límites">120 / min</td><td data-label="Último uso">hace 5 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
-              <tr><td class="td-name"><span class="key-name">script-facturas</span><br><span class="key-id">id kid_09bd</span></td><td data-label="Puede usar">Ollama (local)</td><td data-label="Política">rrhh</td><td data-label="Límites">30 / min</td><td data-label="Último uso">hace 4 min</td><td data-label="Estado"><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Activa</span></td><td data-label="Acciones"><button class="btn btn-ghost" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
-              <tr class="is-revoked"><td class="td-name"><span class="key-name">becarios-2025</span><br><span class="key-id">id kid_5d10</span></td><td data-label="Puede usar">OpenAI · gpt-4.1-nano</td><td data-label="Política">default</td><td data-label="Límites">10 / min</td><td data-label="Último uso">hace 40 días</td><td data-label="Estado"><span class="pill pill-neutral"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Revocada</span></td><td data-label="Acciones"></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>La clave solo se ve una vez, al crearla. Antifaz guarda su huella, no la clave, así que aquí nunca aparece. Si se pierde, revócala y crea otra.</p>
-      </section>
-
-      <!-- ===================== 4 · Políticas ===================== -->
-      <section class="view" role="tabpanel" id="panel-policies" aria-labelledby="tab-policies" hidden>
-        <div class="view-head">
-          <div>
+        <!-- ===================== 4 · Políticas ===================== -->
+        <section class="view" id="panel-policies" role="tabpanel" aria-labelledby="tab-policies" hidden>
+          <div class="vh"><div>
             <h1>Políticas</h1>
             <p>Qué hace Antifaz con cada tipo de dato. Cada clave usa una política. Al guardar se crea una revisión nueva y su huella queda en cada evidencia.</p>
+          </div></div>
+
+          <div class="callout info" data-only="empty" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
+            <strong>Usas la política por defecto</strong>
+            <p>Oculta todos los datos menos el CIF de empresa. Cámbiala aquí y guárdala con un nombre propio.</p>
           </div>
-        </div>
 
-        <div class="banner banner-warn" data-only="empty" hidden style="border:0;border-radius:var(--radius-md)">
-          <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>
-          <div><strong>Usas la política por defecto</strong>Oculta todos los datos menos el CIF de empresa. Cámbiala aquí y guárdala con un nombre propio.</div>
-        </div>
+          <div class="surface pol-bar">
+            <span class="lbl" aria-hidden="true">Política</span>
+            <fieldset class="seg mono-l" style="--n:2" id="pol-pick">
+              <legend>Política que editas</legend>
+              <span class="thumb" aria-hidden="true"></span>
+              <input type="radio" name="pol-pick" id="pol-pick-default" value="default" checked><label for="pol-pick-default">default</label>
+              <input type="radio" name="pol-pick" id="pol-pick-rrhh" value="rrhh"><label for="pol-pick-rrhh">rrhh</label>
+            </fieldset>
+            <p class="meta" id="pol-meta"></p>
+          </div>
 
-        <div class="card pol-head">
-          <span class="inline-field"><label for="pol-select">Política</label>
-            <select id="pol-select" name="pol-select"><option>default</option><option>rrhh</option></select></span>
-          <span class="small muted">Revisión 4 · huella <span class="mono">sha256:3f9c…e21a</span> · la usan 3 claves</span>
-        </div>
+          <dl class="help" aria-label="Qué significa cada opción">
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar</dt><dd>Cambia el dato por un marcador y lo devuelve en la respuesta.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg>Permitir</dt><dd>El dato pasa tal cual.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</dt><dd>No se envía nada a la IA.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-local"/></svg>IA local</dt><dd>La petición entera va a un modelo de tu red (Ollama).</dd></div>
+          </dl>
 
-        <div class="pol-grid">
-          <div class="card" style="display:grid;gap:var(--space-4)">
-            <dl class="pol-actions-help">
-              <div><dt>Ocultar</dt><dd>Cambia el dato por un marcador y lo devuelve en la respuesta.</dd></div>
-              <div><dt>Permitir</dt><dd>El dato pasa tal cual.</dd></div>
-              <div><dt>Bloquear</dt><dd>No se envía nada a la IA.</dd></div>
-              <div><dt>IA local</dt><dd>La petición entera va a un modelo de tu red (Ollama).</dd></div>
-            </dl>
-            <div id="pol-rows">
-              <!-- rows are plain HTML; the script only reads them to build the YAML -->
-              <div class="pol-row"><span class="pol-name">DNI<code>ES_DNI</code></span><fieldset class="seg"><legend>DNI</legend><input type="radio" id="p-ES_DNI-mask" name="ES_DNI" value="mask" checked><label for="p-ES_DNI-mask">Ocultar</label><input type="radio" id="p-ES_DNI-allow" name="ES_DNI" value="allow"><label for="p-ES_DNI-allow">Permitir</label><input type="radio" id="p-ES_DNI-block" name="ES_DNI" value="block"><label for="p-ES_DNI-block">Bloquear</label><input type="radio" id="p-ES_DNI-route_local" name="ES_DNI" value="route_local"><label for="p-ES_DNI-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">NIE<code>ES_NIE</code></span><fieldset class="seg"><legend>NIE</legend><input type="radio" id="p-ES_NIE-mask" name="ES_NIE" value="mask" checked><label for="p-ES_NIE-mask">Ocultar</label><input type="radio" id="p-ES_NIE-allow" name="ES_NIE" value="allow"><label for="p-ES_NIE-allow">Permitir</label><input type="radio" id="p-ES_NIE-block" name="ES_NIE" value="block"><label for="p-ES_NIE-block">Bloquear</label><input type="radio" id="p-ES_NIE-route_local" name="ES_NIE" value="route_local"><label for="p-ES_NIE-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">CIF de empresa<code>ES_CIF</code></span><fieldset class="seg"><legend>CIF de empresa</legend><input type="radio" id="p-ES_CIF-mask" name="ES_CIF" value="mask"><label for="p-ES_CIF-mask">Ocultar</label><input type="radio" id="p-ES_CIF-allow" name="ES_CIF" value="allow" checked><label for="p-ES_CIF-allow">Permitir</label><input type="radio" id="p-ES_CIF-block" name="ES_CIF" value="block"><label for="p-ES_CIF-block">Bloquear</label><input type="radio" id="p-ES_CIF-route_local" name="ES_CIF" value="route_local"><label for="p-ES_CIF-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Seguridad Social<code>ES_NSS</code></span><fieldset class="seg"><legend>Número de la Seguridad Social</legend><input type="radio" id="p-ES_NSS-mask" name="ES_NSS" value="mask" checked><label for="p-ES_NSS-mask">Ocultar</label><input type="radio" id="p-ES_NSS-allow" name="ES_NSS" value="allow"><label for="p-ES_NSS-allow">Permitir</label><input type="radio" id="p-ES_NSS-block" name="ES_NSS" value="block"><label for="p-ES_NSS-block">Bloquear</label><input type="radio" id="p-ES_NSS-route_local" name="ES_NSS" value="route_local"><label for="p-ES_NSS-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">IBAN<code>IBAN</code></span><fieldset class="seg"><legend>IBAN</legend><input type="radio" id="p-IBAN-mask" name="IBAN" value="mask" checked><label for="p-IBAN-mask">Ocultar</label><input type="radio" id="p-IBAN-allow" name="IBAN" value="allow"><label for="p-IBAN-allow">Permitir</label><input type="radio" id="p-IBAN-block" name="IBAN" value="block"><label for="p-IBAN-block">Bloquear</label><input type="radio" id="p-IBAN-route_local" name="IBAN" value="route_local"><label for="p-IBAN-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Tarjeta de pago<code>CREDIT_CARD</code></span><fieldset class="seg"><legend>Tarjeta de pago</legend><input type="radio" id="p-CREDIT_CARD-mask" name="CREDIT_CARD" value="mask" checked><label for="p-CREDIT_CARD-mask">Ocultar</label><input type="radio" id="p-CREDIT_CARD-allow" name="CREDIT_CARD" value="allow"><label for="p-CREDIT_CARD-allow">Permitir</label><input type="radio" id="p-CREDIT_CARD-block" name="CREDIT_CARD" value="block"><label for="p-CREDIT_CARD-block">Bloquear</label><input type="radio" id="p-CREDIT_CARD-route_local" name="CREDIT_CARD" value="route_local"><label for="p-CREDIT_CARD-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Email<code>EMAIL</code></span><fieldset class="seg"><legend>Email</legend><input type="radio" id="p-EMAIL-mask" name="EMAIL" value="mask" checked><label for="p-EMAIL-mask">Ocultar</label><input type="radio" id="p-EMAIL-allow" name="EMAIL" value="allow"><label for="p-EMAIL-allow">Permitir</label><input type="radio" id="p-EMAIL-block" name="EMAIL" value="block"><label for="p-EMAIL-block">Bloquear</label><input type="radio" id="p-EMAIL-route_local" name="EMAIL" value="route_local"><label for="p-EMAIL-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Teléfono<code>PHONE</code></span><fieldset class="seg"><legend>Teléfono</legend><input type="radio" id="p-PHONE-mask" name="PHONE" value="mask" checked><label for="p-PHONE-mask">Ocultar</label><input type="radio" id="p-PHONE-allow" name="PHONE" value="allow"><label for="p-PHONE-allow">Permitir</label><input type="radio" id="p-PHONE-block" name="PHONE" value="block"><label for="p-PHONE-block">Bloquear</label><input type="radio" id="p-PHONE-route_local" name="PHONE" value="route_local"><label for="p-PHONE-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Dirección postal<code>ADDRESS</code></span><fieldset class="seg"><legend>Dirección postal</legend><input type="radio" id="p-ADDRESS-mask" name="ADDRESS" value="mask" checked><label for="p-ADDRESS-mask">Ocultar</label><input type="radio" id="p-ADDRESS-allow" name="ADDRESS" value="allow"><label for="p-ADDRESS-allow">Permitir</label><input type="radio" id="p-ADDRESS-block" name="ADDRESS" value="block"><label for="p-ADDRESS-block">Bloquear</label><input type="radio" id="p-ADDRESS-route_local" name="ADDRESS" value="route_local"><label for="p-ADDRESS-route_local">IA local</label></fieldset></div>
-              <div class="pol-row"><span class="pol-name">Nombre de persona<code>PERSON · necesita el NER</code></span><fieldset class="seg"><legend>Nombre de persona</legend><input type="radio" id="p-PERSON-mask" name="PERSON" value="mask" checked><label for="p-PERSON-mask">Ocultar</label><input type="radio" id="p-PERSON-allow" name="PERSON" value="allow"><label for="p-PERSON-allow">Permitir</label><input type="radio" id="p-PERSON-block" name="PERSON" value="block"><label for="p-PERSON-block">Bloquear</label><input type="radio" id="p-PERSON-route_local" name="PERSON" value="route_local"><label for="p-PERSON-route_local">IA local</label></fieldset></div>
+          <div class="pol-grid">
+            <article class="surface" aria-labelledby="types-t">
+              <div class="sh"><h2 id="types-t">Tipos de dato</h2><span class="aside">10 tipos · ES y UE</span></div>
+              <div class="rows" id="pol-rows"></div>
+            </article>
+
+            <div class="pol-col">
+              <article class="surface" aria-labelledby="fixed-t">
+                <div class="sh"><h2 id="fixed-t">Reglas de seguridad</h2></div>
+                <ul class="rules">
+                  <li><span class="what">Si el detector falla</span><span class="badge danger"><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what">Imágenes, PDF y archivos</span><span class="badge danger"><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what">Campos de texto desconocidos</span><span class="badge accent"><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what" id="special-t">Salud, religión, sindicato… (categorías especiales)</span>
+                    <fieldset class="seg" style="--n:2" id="pol-special" aria-labelledby="special-t">
+                      <span class="thumb" aria-hidden="true"></span>
+                      <input type="radio" name="pol-special" id="pol-special-local" value="route_local" checked><label for="pol-special-local">IA local</label>
+                      <input type="radio" name="pol-special" id="pol-special-block" value="block"><label for="pol-special-block">Bloquear</label>
+                    </fieldset></li>
+                </ul>
+                <p class="rules-foot">Nunca ocultar: <span class="code">Antifaz</span> · Propios: <span class="code">CLIENT_CODE</span> (código de cliente) → ocultar</p>
+              </article>
+
+              <article class="surface" aria-labelledby="yaml-t">
+                <div class="sh"><h2 id="yaml-t">Así queda el archivo</h2><span class="aside">policies/<span id="yaml-name">default</span>.yaml</span></div>
+                <pre class="yaml" id="yaml-out" tabindex="0" aria-label="Vista previa de la política en YAML"></pre>
+                <div class="save">
+                  <button class="btn primary" type="button" id="pol-save" disabled>Guardar como revisión 5</button>
+                  <span class="msg" id="pol-dirty" role="status">Sin cambios</span>
+                </div>
+              </article>
             </div>
           </div>
+        </section>
 
-          <div style="display:grid;gap:var(--space-4);min-width:0">
-            <article class="card" style="display:grid;gap:var(--space-3)" aria-labelledby="fixed-t">
-              <h2 class="card-title" id="fixed-t">Reglas de seguridad</h2>
-              <ul class="fixed-rules">
-                <li><span>Si el detector falla</span><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloquear · fijo</span></li>
-                <li><span>Imágenes, PDF y archivos</span><span class="pill pill-danger"><svg class="icon" aria-hidden="true"><use href="#i-block"/></svg>Bloquear · fijo</span></li>
-                <li><span>Campos de texto desconocidos</span><span class="pill pill-accent"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar · fijo</span></li>
-                <li><label for="pol-special">Salud, religión, sindicato… (categorías especiales)</label>
-                  <select id="pol-special" name="pol-special"><option value="route_local">IA local</option><option value="block">Bloquear</option></select></li>
+        <!-- ===================== 5 · Estado ===================== -->
+        <section class="view" id="panel-status" role="tabpanel" aria-labelledby="tab-status" hidden>
+          <div class="vh">
+            <div>
+              <h1>Estado</h1>
+              <p>Si una pieza falla, Antifaz bloquea: nunca deja pasar datos sin proteger.</p>
+            </div>
+            <span class="vh-side"><span id="check-time" role="status">Comprobado a las 10:44</span><button class="btn ghost" type="button" id="check-now"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Comprobar ahora</button></span>
+          </div>
+
+          <div class="sgrid">
+            <article class="surface scard" aria-labelledby="s-gw">
+              <div class="sh"><h2 id="s-gw">Pasarela</h2><span class="status ok"><span class="dot"></span>Funciona</span></div>
+              <dl class="kv">
+                <dt>Versión</dt><dd class="mono">0.2.0</dd>
+                <dt>/healthz</dt><dd class="mono">"status": "ok"</dd>
+                <dt>Escucha en</dt><dd class="mono">127.0.0.1:8000</dd>
+                <dt>Base de datos</dt><dd>PostgreSQL · conectada</dd>
+                <dt>En marcha desde</dt><dd>hace 3 días</dd>
+              </dl>
+            </article>
+
+            <article class="surface scard" aria-labelledby="s-ner">
+              <div class="sh"><h2 id="s-ner">Detector de nombres (NER)</h2><span class="status ok"><span class="dot"></span>Funcionando</span></div>
+              <p class="desc">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido. Sus cuatro estados:</p>
+              <ul class="ner" aria-label="Estados posibles del detector">
+                <li class="now"><span class="dot ok" aria-hidden="true"></span><b>Funcionando</b><span class="badge accent">Ahora</span><p><span class="mono">ok</span> · busca nombres.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>Arrancando</b><span></span><p><span class="mono">starting</span> · carga el modelo; mientras, se bloquea.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>En pausa tras fallos</b><span></span><p><span class="mono">circuit_open</span> · bloquea unos segundos y lo vuelve a intentar.</p></li>
+                <li><span class="dot danger" aria-hidden="true"></span><b>Parado</b><span></span><p><span class="mono">closed</span> · bloquea todo lo que necesite el NER.</p></li>
               </ul>
-              <p class="small muted">Nunca ocultar: <span class="mono">Antifaz</span> · Propios: <span class="mono">CLIENT_CODE</span> (código de cliente) → ocultar</p>
             </article>
-            <article class="card" style="display:grid;gap:var(--space-3);min-width:0" aria-labelledby="yaml-t">
-              <h2 class="card-title" id="yaml-t">Así queda el archivo</h2>
-              <pre class="yaml" id="yaml-out" tabindex="0" aria-label="Vista previa de la política en YAML"></pre>
-              <div class="save-row">
-                <button class="btn btn-primary" type="button" id="pol-save" disabled>Guardar como revisión 5</button>
-                <span class="small muted" id="pol-dirty" aria-live="polite">Sin cambios</span>
-              </div>
+
+            <article class="surface scard" aria-labelledby="s-prov">
+              <div class="sh"><h2 id="s-prov">Proveedores de IA</h2>
+                <span class="status ok" data-only="empty data blocked broken"><span class="dot"></span>Todos responden</span>
+                <span class="status warn" data-only="error" hidden><span class="dot"></span>1 no responde</span></div>
+              <ul class="prov">
+                <li><span class="nm">Anthropic<span>api.anthropic.com</span></span>
+                  <span class="lat" data-only="empty data blocked broken" aria-hidden="true"><i style="width:60%"></i></span>
+                  <span class="status ok" data-only="empty data blocked broken"><span class="dot"></span><span>Responde · <b>180 ms</b></span></span>
+                  <span class="lat" data-only="error" hidden aria-hidden="true"></span>
+                  <span class="status danger" data-only="error" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>No responde · tiempo agotado</span></li>
+                <li><span class="nm">OpenAI<span>api.openai.com</span></span><span class="lat" aria-hidden="true"><i style="width:80%"></i></span><span class="status ok"><span class="dot"></span><span>Responde · <b>240 ms</b></span></span></li>
+                <li><span class="nm">Ollama (local)<span>127.0.0.1:11434</span></span><span class="lat" aria-hidden="true"><i style="width:10%"></i></span><span class="status ok"><span class="dot"></span><span>Responde · <b>30 ms</b></span></span></li>
+              </ul>
+              <p class="cmd">Desde la terminal: <span class="code">antifaz doctor --providers</span></p>
+            </article>
+
+            <article class="surface scard" aria-labelledby="s-ev">
+              <div class="sh"><h2 id="s-ev">Evidencias</h2>
+                <span class="status ok" data-only="empty data blocked error"><span class="dot"></span>Cadena íntegra</span>
+                <span class="status danger" data-only="broken" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Cadena rota</span></div>
+              <dl class="kv">
+                <dt>Registros</dt><dd data-only="data blocked error">18.204, encadenados</dd><dd data-only="empty" hidden>0 hoy</dd><dd data-only="broken" hidden>Rota en el 18.193 de 18.204</dd>
+                <dt>Última verificación</dt><dd>Hoy, 10:40</dd>
+                <dt>Punto de control</dt><dd>Firmado hoy a las 00:00</dd>
+                <dt>Guarda</dt><dd>Quién, cuándo, qué tipos y cuántos. Nunca los datos.</dd>
+              </dl>
+              <p class="cmd">Desde la terminal: <span class="code">antifaz audit verify</span></p>
             </article>
           </div>
-        </div>
-      </section>
 
-      <!-- ===================== 5 · Estado ===================== -->
-      <section class="view" role="tabpanel" id="panel-status" aria-labelledby="tab-status" hidden>
-        <div class="view-head">
-          <div>
-            <h1>Estado</h1>
-            <p>Si una pieza falla, Antifaz bloquea: nunca deja pasar datos sin proteger.</p>
-          </div>
-          <span class="small muted">Comprobado a las 10:44 · <button class="btn btn-ghost" type="button">Comprobar ahora</button></span>
-        </div>
-
-        <div class="status-grid">
-          <article class="card status-card" aria-labelledby="s-gw">
-            <header><h2 class="card-title" id="s-gw">Pasarela</h2><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Funciona</span></header>
-            <dl class="kv">
-              <dt>Versión</dt><dd class="mono">0.2.0</dd>
-              <dt>/healthz</dt><dd><span class="mono">"status": "ok"</span></dd>
-              <dt>Escucha en</dt><dd class="mono">127.0.0.1:8000</dd>
-              <dt>Base de datos</dt><dd>PostgreSQL · conectada</dd>
-            </dl>
-          </article>
-
-          <article class="card status-card" aria-labelledby="s-ner">
-            <header><h2 class="card-title" id="s-ner">Detector de nombres (NER)</h2><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Funcionando</span></header>
-            <p class="small">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido.</p>
-            <ul class="ner-states" aria-label="Estados posibles">
-              <li><b>Funcionando</b> (<span class="mono">ok</span>): busca nombres.</li>
-              <li><b>Arrancando</b> (<span class="mono">starting</span>): carga el modelo; mientras, se bloquea.</li>
-              <li><b>En pausa tras fallos</b> (<span class="mono">circuit_open</span>): bloquea unos segundos y lo vuelve a intentar.</li>
-              <li><b>Parado</b> (<span class="mono">closed</span>): bloquea todo lo que necesite el NER.</li>
-            </ul>
-          </article>
-
-          <article class="card status-card" aria-labelledby="s-prov">
-            <header><h2 class="card-title" id="s-prov">Proveedores de IA</h2>
-              <span class="pill pill-ok" data-only="empty data blocked broken"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Todos responden</span>
-              <span class="pill pill-warn" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>1 no responde</span></header>
-            <ul class="prov">
-              <li><span>Anthropic</span>
-                <span class="pill pill-ok" data-only="empty data blocked broken"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 180 ms</span>
-                <span class="pill pill-danger" data-only="error" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>No responde · tiempo agotado</span></li>
-              <li><span>OpenAI</span><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 240 ms</span></li>
-              <li><span>Ollama (local)</span><span class="pill pill-ok"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Responde · 30 ms</span></li>
-            </ul>
-            <p class="small muted">Desde la terminal: <span class="code">antifaz doctor --providers</span></p>
-          </article>
-
-          <article class="card status-card" aria-labelledby="s-ev">
-            <header><h2 class="card-title" id="s-ev">Evidencias</h2>
-              <span class="pill pill-ok" data-only="empty data blocked error"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Cadena íntegra</span>
-              <span class="pill pill-danger" data-only="broken" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Cadena rota</span></header>
-            <dl class="kv">
-              <dt>Registros</dt><dd data-only="empty data blocked error">18.204, encadenados</dd><dd data-only="broken" hidden>Rota en el 18.193 de 18.204</dd>
-              <dt>Última verificación</dt><dd>Hoy, 10:40</dd>
-              <dt>Punto de control</dt><dd>Firmado hoy a las 00:00</dd>
-              <dt>Guarda</dt><dd>Quién, cuándo, qué tipos y cuántos. Nunca los datos.</dd>
-            </dl>
-            <p class="small muted">Desde la terminal: <span class="code">antifaz audit verify</span></p>
-          </article>
-        </div>
-
-        <p class="feed-foot"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>Esta página no se actualiza sola: no hay sondeos en segundo plano. Pulsa «Comprobar ahora» cuando lo necesites.</p>
-      </section>
-    </main>
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Esta página no se actualiza sola: no hay sondeos en segundo plano. Pulsa «Comprobar ahora» cuando lo necesites.</p>
+        </section>
+      </main>
+    </div>
+  </div></div>
   </div>
+
+  <!-- ===================== Logo (prototype annex, outside the panel) ===================== -->
+  <section class="annex" aria-labelledby="logo-t">
+    <header>
+      <h2 id="logo-t">Logo</h2>
+      <p>Propuesta principal: el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color. Debajo, el publicado ahora, para comparar. Decide Miquel; hasta entonces no se cambia el publicado.</p>
+    </header>
+    <div class="lrow">
+      <div><h3>Nuevo · propuesta</h3><p><span class="code">design/logo.svg</span> y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
+      <div class="lsets">
+        <div class="lset on-light">
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 32 px, sobre claro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 16 px, sobre claro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-dark">
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 64 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 32 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo nuevo, 16 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-light">
+          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-dark">
+          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="10 22 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </div>
+    <div class="lrow">
+      <div><h3>Actual · publicado</h3><p><span class="code">docs/images/logo.svg</span> · cuadro índigo plano; a 16 px los ojos casi se pierden</p></div>
+      <div class="lsets">
+        <div class="lset on-light">
+          <figure><svg width="64" height="64" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 64 px, sobre claro"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 32 px, sobre claro"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 16 px, sobre claro"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-dark">
+          <figure><svg width="64" height="64" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 64 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 32 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 72 72" role="img" aria-label="Logo actual, 16 px, sobre oscuro"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-light">
+          <figure><svg width="48" height="24" viewBox="10 22 52 26" role="img" aria-label="Antifaz actual en un color" fill="currentColor"><use href="#mask-current"/></svg><figcaption>1 color</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
-</div>
-
-<!-- ===================== Logo (prototype annex) ===================== -->
-<section class="annex" aria-labelledby="logo-t">
-  <div>
-    <h2 id="logo-t">Logo</h2>
-    <p class="muted">El actual y dos propuestas. Cada una a 64, 32 y 16 px, sobre claro, sobre oscuro y en un solo color. Decide Miquel.</p>
-  </div>
-  <div class="logo-grid">
-    <article class="card logo-card">
-      <h3>Actual</h3>
-      <p class="small muted">Antifaz redondeado sobre cuadro índigo. Reconocible; a 16 px los ojos casi se pierden.</p>
-      <div class="logo-sizes">
-        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>64</figcaption></figure>
-        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>32</figcaption></figure>
-        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 72 72" aria-hidden="true"><use href="#logo-current"/></svg><figcaption>16</figcaption></figure>
-        <figure class="logo-mono"><svg width="32" height="16" viewBox="10 22 52 26" aria-hidden="true"><use href="#mask-shape" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
-      </div>
-    </article>
-    <article class="card logo-card">
-      <h3>Propuesta A · antifaz geométrico</h3>
-      <p class="small muted">El mismo gesto, más simétrico y con ojos más grandes: se lee mejor a 16 px. Continuidad con lo publicado.</p>
-      <div class="logo-sizes">
-        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>64</figcaption></figure>
-        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>32</figcaption></figure>
-        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b3fb8"/><use href="#mark-a" fill="#ffffff"/></svg><figcaption>16</figcaption></figure>
-        <figure class="logo-mono"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-a" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
-      </div>
-    </article>
-    <article class="card logo-card">
-      <h3>Propuesta B · ojos de tachado</h3>
-      <p class="small muted">Antifaz anguloso sin fondo; los ojos son dos barras de tachado, el signo de «dato oculto». Más propio, menos parecido a un antifaz de carnaval.</p>
-      <div class="logo-sizes">
-        <figure class="on-light"><svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#4b3fb8"/></svg><figcaption>64</figcaption></figure>
-        <figure class="on-light"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#4b3fb8"/></svg><figcaption>32</figcaption></figure>
-        <figure class="on-dark"><svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="#aaa2ff"/></svg><figcaption>16</figcaption></figure>
-        <figure class="logo-mono"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark-b" fill="currentColor"/></svg><figcaption>1 color</figcaption></figure>
-      </div>
-    </article>
-  </div>
-</section>
 
 <script>
-(function () {
+(function(){
   "use strict";
-  var root = document.documentElement;
-  var app = document.getElementById("app");
+  var root=document.documentElement, app=document.getElementById("app");
+  var reduceQ=matchMedia("(prefers-reduced-motion: reduce)");
+  function calm(){ return root.classList.contains("reduce-motion"); }
+  if(!reduceQ.matches){ root.classList.add("intro"); setTimeout(function(){ root.classList.remove("intro"); },1900); }
+  function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+  function icon(id){ var s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("class","ic"); s.setAttribute("aria-hidden","true");
+    var u=document.createElementNS("http://www.w3.org/2000/svg","use"); u.setAttribute("href","#"+id); s.appendChild(u); return s; }
 
-  /* ---- Theme: follows the system until the user picks one ---- */
-  var themeBtn = document.getElementById("theme-btn");
-  var darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  function effectiveTheme() {
-    return root.getAttribute("data-theme") || (darkQuery.matches ? "dark" : "light");
-  }
-  function paintThemeButton() {
-    var next = effectiveTheme() === "dark" ? "light" : "dark";
-    document.getElementById("theme-label").textContent = next === "dark" ? "Oscuro" : "Claro";
-    document.getElementById("theme-icon").setAttribute("href", next === "dark" ? "#i-moon" : "#i-sun");
-    themeBtn.setAttribute("aria-label", next === "dark" ? "Cambiar a tema oscuro" : "Cambiar a tema claro");
-  }
-  themeBtn.addEventListener("click", function () {
-    root.setAttribute("data-theme", effectiveTheme() === "dark" ? "light" : "dark");
-    paintThemeButton();
-  });
-  darkQuery.addEventListener("change", paintThemeButton);
-  paintThemeButton();
+  /* ---- Theme: follows the system until the viewer picks one ---- */
+  var darkQ=matchMedia("(prefers-color-scheme: dark)");
+  function eff(){ return root.getAttribute("data-theme") || (darkQ.matches?"dark":"light"); }
+  function paint(){ var next=eff()==="dark"?"light":"dark";
+    document.querySelectorAll(".theme-icon").forEach(function(u){ u.setAttribute("href", next==="dark"?"#i-moon":"#i-sun"); });
+    document.querySelectorAll(".theme-btn").forEach(function(b){ b.setAttribute("aria-label", next==="dark"?"Cambiar a tema oscuro":"Cambiar a tema claro"); }); }
+  document.querySelectorAll(".theme-btn").forEach(function(b){ b.addEventListener("click",function(){ root.setAttribute("data-theme", eff()==="dark"?"light":"dark"); paint(); }); });
+  darkQ.addEventListener("change",paint); paint();
 
-  /* ---- Tabs: roving tabindex, arrows, Home and End ---- */
-  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
-  function selectTab(tab, focus) {
-    tabs.forEach(function (t) {
-      var on = t === tab;
-      t.setAttribute("aria-selected", on ? "true" : "false");
-      t.tabIndex = on ? 0 : -1;
-      document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
-    });
-    if (focus) tab.focus();
-    if (tab.id === "tab-playground") playMask();
-  }
-  tabs.forEach(function (tab, i) {
-    tab.addEventListener("click", function () { selectTab(tab, false); });
-    tab.addEventListener("keydown", function (e) {
-      var to = null;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") to = tabs[(i + 1) % tabs.length];
-      else if (e.key === "ArrowUp" || e.key === "ArrowLeft") to = tabs[(i - 1 + tabs.length) % tabs.length];
-      else if (e.key === "Home") to = tabs[0];
-      else if (e.key === "End") to = tabs[tabs.length - 1];
-      if (to) { e.preventDefault(); selectTab(to, true); }
-    });
-  });
+  /* ---- Tabs: roving tabindex, arrows, Home/End, and 1–5 as shortcuts ---- */
+  var tabs=[].slice.call(document.querySelectorAll('.nav [role="tab"]'));
+  function enter(v){ v.classList.remove("enter"); void v.offsetWidth; [].forEach.call(v.children,function(c,i){ c.style.setProperty("--i",i); }); v.classList.add("enter"); }
+  function current(){ return document.getElementById(tabs.filter(function(t){ return t.getAttribute("aria-selected")==="true"; })[0].getAttribute("aria-controls")); }
+  function select(tab,focus){
+    tabs.forEach(function(t){ var on=t===tab; t.setAttribute("aria-selected",on?"true":"false"); t.tabIndex=on?0:-1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden=!on; });
+    var view=document.getElementById(tab.getAttribute("aria-controls"));
+    document.getElementById("crumb-name").textContent=tab.getAttribute("data-name");
+    if(!calm()) enter(view);
+    if(focus) tab.focus();
+    if(view.id==="panel-playground") setTimeout(playMask,250);
+    syncLive(); }
+  tabs.forEach(function(tab,i){
+    tab.addEventListener("click",function(){ select(tab,false); });
+    tab.addEventListener("keydown",function(e){ var to=null;
+      if(e.key==="ArrowDown"||e.key==="ArrowRight") to=tabs[(i+1)%tabs.length];
+      else if(e.key==="ArrowUp"||e.key==="ArrowLeft") to=tabs[(i-1+tabs.length)%tabs.length];
+      else if(e.key==="Home") to=tabs[0]; else if(e.key==="End") to=tabs[tabs.length-1];
+      if(to){ e.preventDefault(); select(to,true); } }); });
+  document.addEventListener("keydown",function(e){ if(e.target.matches("input,textarea,select,[contenteditable]")||e.metaKey||e.ctrlKey||e.altKey) return;
+    var n=parseInt(e.key,10); if(n>=1&&n<=5) select(tabs[n-1],true); });
+
+  /* ---- Playground: step switcher on phones ---- */
+  var psw=document.querySelector(".pswitch"), panes=document.querySelector(".panes");
+  function setPane(p){ psw.setAttribute("data-p",p); panes.setAttribute("data-p",p);
+    psw.querySelectorAll("button").forEach(function(x){ x.setAttribute("aria-pressed",x.getAttribute("data-p")===p?"true":"false"); }); }
+  psw.querySelectorAll("button").forEach(function(b){ b.addEventListener("click",function(){ setPane(b.getAttribute("data-p")); }); });
+
+  /* ---- En directo: counters and the feed (types and counts only, never a value) ---- */
+  var TYPES=[["ES_DNI","DNI"],["EMAIL","Email"],["PERSON","Nombre"],["IBAN","IBAN"],["PHONE","Teléfono"]];
+  var counts={};
+  var BASE=[
+    {t:"10:44",who:"equipo-soporte",app:"Claude Code",what:"1 email y 1 teléfono ocultados · Anthropic",k:"mask",n:2},
+    {t:"10:43",who:"rrhh-nominas",app:"Open WebUI",what:"PDF adjunto → bloqueado",k:"block"},
+    {t:"10:42",who:"equipo-soporte",app:"Claude Code",what:"2 DNI y 1 IBAN ocultados · Anthropic",k:"mask",n:3},
+    {t:"10:41",who:"script-facturas",app:"",what:"Categoría especial (salud) → IA local · Ollama",k:"local"},
+    {t:"10:40",who:"desarrollo",app:"Codex",what:"Sin datos personales · OpenAI",k:"none"},
+    {t:"10:38",who:"equipo-soporte",app:"Claude Code",what:"3 nombres ocultados · Anthropic",k:"mask",n:3}];
+  var TOP={
+    blocked:{t:"10:45",who:"rrhh-nominas",app:"script",what:"Categoría especial (salud) → bloqueado",k:"block"},
+    error:{t:"10:45",who:"equipo-soporte",app:"Claude Code",what:"Anthropic no responde · no se ha enviado nada",k:"error"},
+    broken:{t:"10:40",who:"Verificación automática",app:"",what:"Cadena de evidencias rota en el registro 18.193",k:"chain"}};
+  /* Synthetic arrivals while someone watches the view (prototype only). */
+  var POOL=[
+    {who:"equipo-soporte",app:"Claude Code",what:"1 DNI y 1 email ocultados · Anthropic",k:"mask",n:2,add:{ES_DNI:1,EMAIL:1}},
+    {who:"desarrollo",app:"Codex",what:"Sin datos personales · OpenAI",k:"none"},
+    {who:"equipo-soporte",app:"Claude Code",what:"2 nombres ocultados · Anthropic",k:"mask",n:2,add:{PERSON:2}},
+    {who:"rrhh-nominas",app:"Open WebUI",what:"1 IBAN y 1 teléfono ocultados · OpenAI",k:"mask",n:2,add:{IBAN:1,PHONE:1}}];
+  var BADGE={mask:["accent","i-eye-off","Ocultados "],block:["danger","i-block","Bloqueado"],local:["","i-local","IA local"],none:["","i-check","Sin datos"],error:["warn","i-alert","Error 504"],chain:["danger","i-chain","Alerta"]};
+  var feed=document.getElementById("feed");
+  function evItem(ev,isNew){
+    var li=el("li","ev"+(isNew?" is-new":""));
+    var tm=el("time",null,ev.t); tm.setAttribute("datetime","2026-10-06T"+ev.t); li.appendChild(tm);
+    var main=el("span","ev-main"), who=el("span","ev-who",ev.who);
+    if(ev.app){ who.appendChild(el("span",null," · "+ev.app)); }
+    main.appendChild(who); main.appendChild(el("span","ev-what",ev.what)); li.appendChild(main);
+    var b=BADGE[ev.k], badge=el("span","badge "+b[0]); badge.appendChild(icon(b[1])); badge.appendChild(document.createTextNode(b[2]+(ev.k==="mask"?ev.n:""))); li.appendChild(badge);
+    return li; }
+  function renderBars(){
+    var ul=document.getElementById("st-bars"), max=0, total=0; ul.textContent="";
+    TYPES.forEach(function(t){ max=Math.max(max,counts[t[0]]); total+=counts[t[0]]; });
+    TYPES.slice().sort(function(a,b){ return counts[b[0]]-counts[a[0]]; }).forEach(function(t){
+      var li=el("li"); li.appendChild(el("span",null,t[1]));
+      var tr=el("span","track"), f=el("span","fill"); f.style.width=(max?Math.round(counts[t[0]]/max*100):0)+"%"; tr.appendChild(f); li.appendChild(tr);
+      li.appendChild(el("span","n",String(counts[t[0]]))); ul.appendChild(li); });
+    document.getElementById("st-total").textContent=String(total); }
+  var clock=45, poolIx=0, timer=null;
+  function renderLive(s){
+    counts={ES_DNI:41,EMAIL:37,PERSON:22,IBAN:18,PHONE:10};
+    if(s==="empty") TYPES.forEach(function(t){ counts[t[0]]=0; });
+    renderBars(); clock=46; poolIx=0;
+    document.getElementById("st-blocks").textContent=s==="empty"?"0":s==="blocked"?"4":"3";
+    document.getElementById("st-blocks-sub").textContent=s==="empty"?"Ninguno hoy.":s==="blocked"?"2 adjuntos · 2 categoría especial":"2 adjuntos · 1 categoría especial";
+    document.getElementById("st-locals").textContent=s==="empty"?"0":"2";
+    feed.textContent="";
+    if(s==="empty") return;
+    if(TOP[s]) feed.appendChild(evItem(TOP[s],false));
+    BASE.forEach(function(ev){ feed.appendChild(evItem(ev,false)); }); }
+  function tick(){
+    var ev=POOL[poolIx++%POOL.length], e={t:"10:"+(clock++),who:ev.who,app:ev.app,what:ev.what,k:ev.k,n:ev.n};
+    if(clock>59) clock=46;
+    if(ev.add) Object.keys(ev.add).forEach(function(k){ counts[k]+=ev.add[k]; });
+    renderBars();
+    feed.insertBefore(evItem(e,!calm()),feed.firstChild);
+    while(feed.children.length>9) feed.removeChild(feed.lastChild); }
+  /* The stream only runs while the view is open and the page is visible (0 % CPU otherwise). */
+  function syncLive(){
+    var on=!document.getElementById("panel-live").hidden && !document.hidden && app.getAttribute("data-state")!=="empty";
+    if(on&&!timer) timer=setInterval(tick,6000);
+    if(!on&&timer){ clearInterval(timer); timer=null; } }
+  document.addEventListener("visibilitychange",syncLive);
+
+  /* ---- Políticas: rows, presets and the YAML preview ---- */
+  var ROWS=[["ES_DNI","DNI"],["ES_NIE","NIE"],["ES_CIF","CIF de empresa"],["ES_NSS","Seguridad Social"],["IBAN","IBAN"],["CREDIT_CARD","Tarjeta de pago"],["EMAIL","Email"],["PHONE","Teléfono"],["ADDRESS","Dirección postal"],["PERSON","Nombre de persona"]];
+  var ACTS=[["mask","Ocultar"],["allow","Permitir"],["block","Bloquear"],["route_local","IA local"]];
+  var PRESET={
+    "default":{rev:4,hash:"sha256:3f9c…e21a",keys:3,special:"route_local",e:{ES_CIF:"allow"}},
+    rrhh:{rev:2,hash:"sha256:81b0…7c4d",keys:2,special:"block",e:{ES_CIF:"allow",CREDIT_CARD:"block",ES_NSS:"route_local"}}};
+  var rowsBox=document.getElementById("pol-rows");
+  ROWS.forEach(function(r){
+    var row=el("div","prow"); row.setAttribute("data-type",r[0]);
+    var nm=el("span","nm"); nm.appendChild(el("b",null,r[1])); nm.appendChild(el("span",null,r[0]+(r[0]==="PERSON"?" · necesita el NER":""))); row.appendChild(nm);
+    var fs=el("fieldset","seg"); fs.style.setProperty("--n","4");
+    fs.appendChild(el("legend",null,r[1])); var th=el("span","thumb"); th.setAttribute("aria-hidden","true"); fs.appendChild(th);
+    ACTS.forEach(function(a){ var id="p-"+r[0]+"-"+a[0], inp=el("input"); inp.type="radio"; inp.name="pt-"+r[0]; inp.id=id; inp.value=a[0];
+      var lb=el("label",null,a[1]); lb.htmlFor=id; fs.appendChild(inp); fs.appendChild(lb); });
+    row.appendChild(fs); rowsBox.appendChild(row); });
+  var yamlOut=document.getElementById("yaml-out"), saveBtn=document.getElementById("pol-save"), dirty=document.getElementById("pol-dirty");
+  var saved=null, polName="default";
+  function readPolicy(){ var p={entities:{},special:document.querySelector('input[name="pol-special"]:checked').value};
+    ROWS.forEach(function(r){ p.entities[r[0]]=document.querySelector('input[name="pt-'+r[0]+'"]:checked').value; }); return p; }
+  function loadPreset(name){ var pr=PRESET[name]; polName=name;
+    ROWS.forEach(function(r){ document.getElementById("p-"+r[0]+"-"+(pr.e[r[0]]||"mask")).checked=true; });
+    document.getElementById(pr.special==="block"?"pol-special-block":"pol-special-local").checked=true;
+    document.getElementById("pol-meta").textContent="Revisión "+pr.rev+" · huella "+pr.hash+" · la usan "+pr.keys+" claves";
+    document.getElementById("yaml-name").textContent=name;
+    saveBtn.textContent="Guardar como revisión "+(pr.rev+1);
+    saved=readPolicy(); renderYaml(); }
+  function line(k,v,chg,indent){ var s=el("span","ln"+(chg?" chg":"")); s.appendChild(el("span","k",(indent||"")+k+":"));
+    if(v!=null) s.appendChild(el("span","v"," "+v));
+    s.appendChild(document.createTextNode("\n")); return s; }
+  function renderYaml(){
+    var p=readPolicy(), n=0; yamlOut.textContent="";
+    [["version","1"],["name",polName],["on_detector_error","block"],["unknown_text_fields","mask"],["attachments","block"]].forEach(function(kv){ yamlOut.appendChild(line(kv[0],kv[1])); });
+    yamlOut.appendChild(line("entities",null));
+    ROWS.forEach(function(r){ var c=p.entities[r[0]]!==saved.entities[r[0]]; if(c) n++;
+      yamlOut.appendChild(line(r[0],p.entities[r[0]],c,"  "));
+      rowsBox.querySelector('[data-type="'+r[0]+'"]').classList.toggle("changed",c); });
+    var cs=p.special!==saved.special; if(cs) n++;
+    yamlOut.appendChild(line("special_categories",p.special,cs));
+    yamlOut.appendChild(line("allowlist",'["Antifaz"]'));
+    yamlOut.appendChild(line("custom",null));
+    yamlOut.appendChild(line("  - name","CLIENT_CODE"));
+    yamlOut.appendChild(line("    regex",'"CLI-\\d{5}"'));
+    yamlOut.appendChild(line("    action","mask"));
+    saveBtn.disabled=n===0;
+    dirty.textContent=n===0?"Sin cambios":n===1?"1 cambio sin guardar":n+" cambios sin guardar"; }
+  document.getElementById("panel-policies").addEventListener("change",function(e){
+    if(e.target.name==="pol-pick") loadPreset(e.target.value);
+    else if(e.target.name&&(e.target.name.indexOf("pt-")===0||e.target.name==="pol-special")) renderYaml(); });
+  saveBtn.addEventListener("click",function(){ PRESET[polName].rev++; var keep=readPolicy(); loadPreset(polName);
+    ROWS.forEach(function(r){ document.getElementById("p-"+r[0]+"-"+keep.entities[r[0]]).checked=true; });
+    document.getElementById(keep.special==="block"?"pol-special-block":"pol-special-local").checked=true;
+    saved=readPolicy(); renderYaml(); dirty.textContent="Guardada (en el prototipo no se escribe nada)"; });
+
+  /* ---- Estado: checked on demand only ---- */
+  var chk=0;
+  document.getElementById("check-now").addEventListener("click",function(){
+    var out=document.getElementById("check-time"), b=this; b.disabled=true; out.textContent="Comprobando…";
+    setTimeout(function(){ chk++; out.textContent="Comprobado a las 10:"+(44+chk>59?59:44+chk); b.disabled=false; },calm()?0:700); });
 
   /* ---- Prototype states ---- */
-  var EXAMPLE = "Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora " +
-    "ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
-  var textByState = {
-    empty: "", data: EXAMPLE, error: EXAMPLE, broken: EXAMPLE,
-    blocked: EXAMPLE + " Está de baja médica desde el lunes."
-  };
-  var pgText = document.getElementById("pg-text");
-  var pgPolicy = document.getElementById("pg-policy");
-  function setState(state) {
-    app.setAttribute("data-state", state);
-    document.querySelectorAll("[data-only]").forEach(function (el) {
-      el.hidden = el.getAttribute("data-only").split(" ").indexOf(state) === -1;
-    });
-    pgText.value = textByState[state];
-    pgPolicy.value = state === "blocked" ? "rrhh" : "default";
-    playMask();
-  }
-  document.querySelectorAll('input[name="proto-state"]').forEach(function (r) {
-    r.addEventListener("change", function () { if (r.checked) setState(r.value); });
-  });
-  function useExample() {
-    document.querySelector('input[name="proto-state"][value="data"]').checked = true;
-    setState("data");
-  }
-  document.getElementById("pg-example").addEventListener("click", useExample);
-  document.querySelector('[data-action="example"]').addEventListener("click", useExample);
-  document.getElementById("pg-form").addEventListener("submit", function (e) {
-    e.preventDefault();
-    if (app.getAttribute("data-state") === "empty") useExample(); else playMask();
-  });
+  var EX="Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
+  var TXT={empty:"",data:EX,error:EX,broken:EX,blocked:EX+" Está de baja médica desde el lunes."};
+  var txt=document.getElementById("pg-text");
+  function setState(s){ app.setAttribute("data-state",s);
+    document.querySelectorAll("[data-only]").forEach(function(n){ n.hidden=n.getAttribute("data-only").split(" ").indexOf(s)===-1; });
+    txt.value=TXT[s]; document.getElementById(s==="blocked"?"pg-pol-rrhh":"pg-pol-default").checked=true;
+    setPane(s==="blocked"?"1":"2"); renderLive(s); syncLive(); playMask(); }
+  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value); }); });
+  function useExample(){ document.getElementById("st-data").checked=true; setState("data"); }
+  document.getElementById("pg-example").addEventListener("click",useExample);
+  document.querySelector('[data-action="example"]').addEventListener("click",useExample);
+  var form=document.getElementById("pg-form");
+  form.addEventListener("submit",function(e){ e.preventDefault(); if(app.getAttribute("data-state")==="empty") useExample(); else playMask(); });
+  txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
 
   /* ---- Simulated phone ---- */
-  document.getElementById("proto-mobile").addEventListener("change", function (e) {
-    document.getElementById("stage-wrap").classList.toggle("is-mobile", e.target.checked);
-  });
+  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked); setTimeout(playMask,600); });
 
   /* ---- Reduced motion: system setting, or the toggle to preview it ---- */
-  var motionBox = document.getElementById("proto-motion");
-  var reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-  function syncMotion() {
-    if (reduceQuery.matches) { motionBox.checked = true; motionBox.disabled = true; }
-    root.classList.toggle("reduce-motion", motionBox.checked);
-  }
-  motionBox.addEventListener("change", function () { syncMotion(); playMask(); });
-  reduceQuery.addEventListener("change", syncMotion);
-  syncMotion();
+  var mBox=document.getElementById("proto-motion");
+  function syncM(){ if(reduceQ.matches){ mBox.checked=true; mBox.disabled=true; } root.classList.toggle("reduce-motion",mBox.checked); }
+  mBox.addEventListener("change",function(){ syncM(); playMask(); }); reduceQ.addEventListener("change",syncM); syncM();
 
-  /* ---- Mask animation (F3): restart by toggling a class; the CSS does the rest ---- */
-  var stage = document.getElementById("mask-anim");
-  function playMask() {
-    var state = app.getAttribute("data-state");
-    if (root.classList.contains("reduce-motion")) return;
-    if (state !== "data" && state !== "broken") return;
-    if (document.getElementById("panel-playground").hidden) return;
-    stage.classList.remove("is-playing");
-    void stage.offsetWidth;
-    stage.classList.add("is-playing");
-  }
-  document.getElementById("anim-replay").addEventListener("click", playMask);
+  /* ---- Mask animation: each token reacts when the mask actually reaches it.
+     The sweep eases with cubic-bezier(.45,.05,.35,1); invert it to time each token. ---- */
+  function bez(x1,y1,x2,y2){ function c(a,b,t){ return 3*a*t*(1-t)*(1-t)+3*b*t*t*(1-t)+t*t*t; }
+    return function(p){ var lo=0,hi=1,t=.5; for(var k=0;k<30;k++){ t=(lo+hi)/2; if(c(y1,y2,t)<p) lo=t; else hi=t; } return c(x1,x2,t); }; }
+  var tAt=bez(.45,.05,.35,1), stage=document.getElementById("mask-anim"), pg=document.getElementById("panel-playground");
+  function stamp(wipe,sel,start,dur,lead){
+    var W=wipe.getBoundingClientRect(); if(!W.width) return;
+    wipe.querySelectorAll(sel).forEach(function(n){ var r=n.getBoundingClientRect(), p=Math.min(1,Math.max(0,(r.left+r.width*lead-W.left)/W.width));
+      n.style.setProperty("--d",(start+dur*tAt(p)).toFixed(3)+"s"); }); }
+  function playMask(){ var s=app.getAttribute("data-state");
+    if(calm()||(s!=="data"&&s!=="broken")||pg.hidden) return;
+    stage.classList.remove("play");
+    stage.querySelectorAll(".w1 .scan").forEach(function(m,i){ m.style.setProperty("--d",(.25+i*.2)+"s"); });
+    stamp(stage.querySelector(".w1"),".layer-after .marker",1.3,2.1,.15);
+    stamp(stage.querySelector(".w2"),".layer-after .restored",5.3,1.9,.1);
+    void stage.offsetWidth; stage.classList.add("play"); }
+  document.getElementById("anim-replay").addEventListener("click",playMask);
 
-  /* ---- Policy YAML preview, built from the radios ---- */
-  var yamlOut = document.getElementById("yaml-out");
-  var saveBtn = document.getElementById("pol-save");
-  var dirty = document.getElementById("pol-dirty");
-  var special = document.getElementById("pol-special");
-  var initial = null;
-  function buildYaml() {
-    var lines = ["version: 1", "name: default", "on_detector_error: block",
-      "unknown_text_fields: mask", "attachments: block", "entities:"];
-    document.querySelectorAll("#pol-rows .seg").forEach(function (seg) {
-      var checked = seg.querySelector("input:checked");
-      lines.push("  " + checked.name + ": " + checked.value);
-    });
-    lines.push("special_categories: " + special.value);
-    lines.push('allowlist: ["Antifaz"]');
-    lines.push("custom:", "  - name: CLIENT_CODE", '    regex: "CLI-\\\\d{5}"', "    action: mask");
-    return lines.join("\n");
-  }
-  function renderYaml() {
-    var text = buildYaml();
-    if (initial === null) initial = text;
-    yamlOut.textContent = text;
-    var changed = text !== initial;
-    saveBtn.disabled = !changed;
-    dirty.textContent = changed ? "Cambios sin guardar" : "Sin cambios";
-  }
-  document.getElementById("panel-policies").addEventListener("change", function (e) {
-    if (e.target.matches("#pol-rows input, #pol-special")) renderYaml();
-  });
-  renderYaml();
-
+  loadPreset("default");
   setState("data");
 })();
 </script>
