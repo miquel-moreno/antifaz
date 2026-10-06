@@ -15,9 +15,13 @@ RELEASE_TEXT = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-
 RELEASE: dict[Any, Any] = yaml.safe_load(RELEASE_TEXT)
 # PyYAML (YAML 1.1) reads the `on:` key as the boolean True.
 TRIGGER: dict[str, Any] = RELEASE.get("on", RELEASE.get(True))
-(JOB_NAME,) = RELEASE["jobs"]
-JOB: dict[str, Any] = RELEASE["jobs"][JOB_NAME]
+JOBS: dict[str, Any] = RELEASE["jobs"]
+JOB: dict[str, Any] = JOBS["publish-image"]
 STEPS: list[dict[str, Any]] = JOB["steps"]
+# Issue 42: a second, small job attaches the digest-pinned docker-compose.yml to the release.
+ASSET_JOB: dict[str, Any] = JOBS["release-asset"]
+ASSET_STEPS: list[dict[str, Any]] = ASSET_JOB["steps"]
+ALL_STEPS = STEPS + ASSET_STEPS
 
 # Only first-party GitHub and Docker actions may hold the permission to publish.
 ALLOWED_ACTIONS = {
@@ -31,7 +35,7 @@ ALLOWED_ACTIONS = {
 
 
 def _uses() -> list[str]:
-    return [str(s["uses"]) for s in STEPS if "uses" in s]
+    return [str(s["uses"]) for s in ALL_STEPS if "uses" in s]
 
 
 def _step(action: str) -> dict[str, Any]:
@@ -53,9 +57,69 @@ def test_no_permissions_by_default_and_the_minimum_in_the_job() -> None:
     }
 
 
-def test_one_job_in_the_protected_release_environment() -> None:
-    assert JOB_NAME == "publish-image"
+def test_two_jobs_both_in_the_protected_release_environment() -> None:
+    assert set(JOBS) == {"publish-image", "release-asset"}
     assert JOB["environment"] == "release"
+    assert ASSET_JOB["environment"] == "release"
+
+
+# --- release-asset (issue 42) -----------------------------------------------------------------
+
+
+def _asset_step(fragment: str) -> dict[str, Any]:
+    (step,) = [s for s in ASSET_STEPS if fragment in str(s.get("run", ""))]
+    return step
+
+
+def test_the_asset_job_runs_after_the_image_and_may_only_write_contents() -> None:
+    assert ASSET_JOB["needs"] == "publish-image"
+    assert ASSET_JOB["permissions"] == {"contents": "write"}
+    # The image job keeps contents: read; the write permission lives only in the small job.
+    assert JOB["permissions"]["contents"] == "read"
+
+
+def test_the_digest_goes_from_the_build_to_the_asset_job_through_an_output() -> None:
+    assert JOB["outputs"] == {"digest": "${{ steps.build.outputs.digest }}"}
+    write = _asset_step("scripts.release_compose")
+    assert write["env"]["DIGEST"] == "${{ needs.publish-image.outputs.digest }}"
+
+
+def test_the_asset_job_runs_no_action_but_checkout_and_keeps_no_token() -> None:
+    uses = [str(s["uses"]).split("@")[0] for s in ASSET_STEPS if "uses" in s]
+    assert uses == ["actions/checkout"]
+    (checkout,) = [s for s in ASSET_STEPS if "uses" in s]
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def test_no_expression_inside_the_asset_scripts() -> None:
+    # Template injection: the tag, the digest and the token reach the scripts through env.
+    for step in ASSET_STEPS:
+        if "run" in step:
+            assert "${{" not in step["run"], step["run"]
+
+
+def test_the_compose_file_is_pinned_by_the_script_without_the_token() -> None:
+    write = _asset_step("scripts.release_compose")
+    assert "python3 -m scripts.release_compose" in write["run"]
+    assert '--version "${GITHUB_REF_NAME#v}"' in write["run"]
+    assert '--digest "${DIGEST}"' in write["run"]
+    assert "GH_TOKEN" not in write.get("env", {})  # repository code never sees the token
+
+
+def test_the_asset_is_uploaded_with_gh_and_a_missing_release_becomes_a_draft() -> None:
+    upload = _asset_step("gh release upload")
+    assert upload["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert upload["env"]["GH_REPO"] == "${{ github.repository }}"
+    script = upload["run"]
+    assert "set -euo pipefail" in script
+    assert 'gh release view "${GITHUB_REF_NAME}"' in script
+    create = next(line for line in script.splitlines() if "gh release create" in line)
+    for flag in ("--draft", "--prerelease", "--verify-tag"):
+        assert flag in create, flag
+    assert 'gh release upload "${GITHUB_REF_NAME}" dist/docker-compose.yml --clobber' in script
+    # Never publishes a release, edits one or deletes anything.
+    for verb in ("gh release edit", "gh release delete", "--draft=false", "gh api"):
+        assert verb not in script, verb
 
 
 def test_releases_never_cancel_each_other() -> None:
