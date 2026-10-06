@@ -461,7 +461,9 @@ def test_a_failed_replace_leaves_the_old_file_and_names_the_backup(
     monkeypatch.setattr(init_module, "_replace", locked)
     assert run("--apply", "--yes") == 1
     assert settings_file.read_bytes() == raw
-    assert "a copy is in settings.json.bak-" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "a copy is in " in err
+    assert "settings.json.bak-" in err
     assert not [p for p in settings_file.parent.iterdir() if ".tmp-" in p.name]
 
 
@@ -516,7 +518,8 @@ def test_a_different_base_url_shows_old_and_new(
     write(settings_file, {"env": {"ANTHROPIC_BASE_URL": "https://gateway.example.com"}})
     assert run() == 0
     captured = capsys.readouterr()
-    assert '-    "ANTHROPIC_BASE_URL": "https://gateway.example.com"' in captured.out
+    assert '-    "ANTHROPIC_BASE_URL": "<previous value, sha256 ' in captured.out
+    assert "gateway.example.com" not in captured.out + captured.err
     assert '+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8000"' in captured.out
     assert "points somewhere else" in captured.err
 
@@ -529,7 +532,7 @@ def test_an_old_base_url_with_a_password_is_hidden_in_the_diff(
     assert run() == 0
     captured = capsys.readouterr()
     assert password not in captured.out + captured.err
-    assert '-    "ANTHROPIC_BASE_URL": "<hidden>"' in captured.out
+    assert '-    "ANTHROPIC_BASE_URL": "<previous value, sha256 ' in captured.out
 
 
 def test_managed_settings_are_mentioned(
@@ -630,7 +633,7 @@ def test_uninstall_dry_run_shows_the_removal_and_writes_nothing(
 ) -> None:
     raw = write(settings_file, {"env": {"ANTHROPIC_BASE_URL": URL}})
     assert run("--uninstall") == 0
-    assert '-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8000"' in capsys.readouterr().out
+    assert '-    "ANTHROPIC_BASE_URL": "<previous value, sha256 ' in capsys.readouterr().out
     assert settings_file.read_bytes() == raw
 
 
@@ -748,3 +751,247 @@ def test_apply_then_uninstall_round_trip(
     assert raw.startswith(BOM) == bom
     assert (b"\r\n" in raw) == crlf
     assert json.loads(raw[len(BOM) :] if bom else raw) == original
+
+
+# --- Review fixes ----------------------------------------------------------------------------
+
+
+def test_project_backups_go_outside_the_repository(
+    tmp_path: Path, sandbox: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 1: settings.local.json can hold tokens in permission rules; a copy next to it
+    would sit in the repository, not git-ignored."""
+    work = tmp_path / "work"
+    (work / ".git").mkdir()
+    local = work / ".claude" / "settings.local.json"
+    raw = write(local, {"permissions": {"allow": ["Bash(curl -H x)"]}})
+    assert run("--project", "--apply", "--yes") == 0
+    assert files_in(local.parent) == {"settings.local.json"}
+    backups = list((sandbox / ".claude" / "antifaz-backups").rglob("settings.local.json.bak-*"))
+    assert [b.read_bytes() for b in backups] == [raw]
+    out = capsys.readouterr().out
+    assert str(backups[0]) in out
+    assert "whole previous file" in out
+    assert "secrets" in out
+    assert "delete it when you no longer need it" in out
+
+
+def test_project_backups_are_never_written_inside_a_git_work_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo / "conf"))
+    local = tmp_path / "work" / ".claude" / "settings.local.json"
+    raw = write(local, {})
+    assert run("--project", "--apply", "--yes") == 2
+    assert local.read_bytes() == raw
+    assert not (repo / "conf").exists()
+
+
+@pytest.mark.parametrize("parts", [(".claude",), ("sub", ".Claude"), ("a", "b", "conf")])
+def test_any_user_target_inside_a_git_work_tree_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parts: tuple[str, ...]
+) -> None:
+    """Review 2: also another case, a subfolder, or any folder of a repository."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo.joinpath(*parts)))
+    assert run("--apply", "--yes") == 2
+    assert not repo.joinpath(*parts).exists()
+
+
+def test_a_git_file_marks_a_work_tree_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "worktree"
+    repo.mkdir()
+    (repo / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo / ".claude"))
+    assert run("--apply", "--yes") == 2
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows drops trailing dots")
+def test_a_trailing_dot_does_not_dodge_the_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo / ".claude") + ".")
+    assert run("--apply", "--yes") == 2
+
+
+def test_project_inside_a_repository_is_allowed(tmp_path: Path) -> None:
+    (tmp_path / "work" / ".git").mkdir()
+    assert run("--project", "--apply", "--yes") == 0
+
+
+SURROGATE_VALUE = b'{"a": "' + b"\\" + b'ud800"}'
+SURROGATE_KEY = b'{"' + b"\\" + b'udfff": 1}'
+DEEP = b'{"a": ' * 200 + b"1" + b"}" * 200
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [SURROGATE_VALUE, SURROGATE_KEY, DEEP],
+    ids=["lone-surrogate-value", "lone-surrogate-key", "deep"],
+)
+def test_odd_text_and_deep_nesting_fail_in_the_dry_run(
+    settings_file: Path, raw: bytes, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 3: refused with a fixed message while reading, not as a crash while writing."""
+    settings_file.parent.mkdir(parents=True)
+    settings_file.write_bytes(raw)
+    assert run() == 2
+    assert "fix it first" in capsys.readouterr().err
+    assert settings_file.read_bytes() == raw
+
+
+@pytest.mark.parametrize("number", [b"1e999", b"-1e999"])
+def test_numbers_that_overflow_fail_in_the_dry_run(settings_file: Path, number: bytes) -> None:
+    """Review 4: 1e999 parses as infinity, which cannot be written back as JSON."""
+    settings_file.parent.mkdir(parents=True)
+    settings_file.write_bytes(b'{"a": ' + number + b"}")
+    assert run() == 2
+
+
+def test_previous_owned_values_are_hidden_and_new_ones_shown(
+    settings_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 5: an old base URL or helper is never printed, harmless-looking or not."""
+    old = {"env": {"ANTHROPIC_BASE_URL": "https://old.example"}, "apiKeyHelper": "old"}
+    write(settings_file, old)
+    assert run("--key-helper", "new-helper") == 0
+    out = capsys.readouterr().out
+    assert "old.example" not in out
+    assert '"apiKeyHelper": "old"' not in out
+    assert '-  "apiKeyHelper": "<previous value, sha256 ' in out
+    assert '+  "apiKeyHelper": "new-helper"' in out
+    assert '+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8000"' in out
+
+
+def test_an_unchanged_owned_value_is_not_shown_as_a_change(
+    settings_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(settings_file, {"env": {"ANTHROPIC_BASE_URL": URL}})
+    assert run("--key-helper", "new-helper") == 0
+    out = capsys.readouterr().out
+    assert "ANTHROPIC_BASE_URL" in out
+    assert '+    "ANTHROPIC_BASE_URL"' not in out
+    assert '-    "ANTHROPIC_BASE_URL"' not in out
+
+
+@pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
+def test_a_project_file_that_outranks_the_user_file_gives_a_warning(
+    tmp_path: Path, name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 6: a project base URL wins over the user file, so Claude Code would skip Antifaz."""
+    other = canary()
+    project_file = tmp_path / "work" / ".claude" / name
+    write(project_file, {"env": {"ANTHROPIC_BASE_URL": f"https://{other}.example"}})
+    assert run() == 0
+    err = capsys.readouterr().err
+    assert name in err
+    assert "outranks" in err
+    assert other not in err
+
+
+def test_the_shared_file_does_not_outrank_settings_local(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shared = tmp_path / "work" / ".claude" / "settings.json"
+    write(shared, {"env": {"ANTHROPIC_BASE_URL": "https://x.example"}})
+    assert run("--project") == 0
+    assert "outranks" not in capsys.readouterr().err
+
+
+def test_a_linked_config_folder_is_explained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 7: ~/.claude as a symlink or junction (dotfiles): say where the file really is."""
+    real = tmp_path / "real-claude"
+    real.mkdir()
+    link = tmp_path / "linked-claude"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("this system cannot make symlinks")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(link))
+    assert run() == 0
+    err = capsys.readouterr().err
+    assert "link or junction" in err
+    assert str(real.resolve()) in err
+
+
+def test_a_hard_linked_settings_file_is_refused(
+    tmp_path: Path, settings_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    raw = write(settings_file, {})
+    other = tmp_path / "other-name.json"
+    try:
+        os.link(settings_file, other)
+    except OSError:
+        pytest.skip("this file system cannot make hard links")
+    assert run("--apply", "--yes") == 2
+    assert "hard link" in capsys.readouterr().err
+    assert settings_file.read_bytes() == raw
+    assert other.read_bytes() == raw
+
+
+@pytest.mark.parametrize(
+    ("url", "loopback"),
+    [
+        ("http://127.0.0.2:8000", True),
+        ("http://[::1]:8000", True),
+        ("http://localhost:8000", True),
+        ("http://LOCALHOST", True),
+        ("http://127.evil.example", False),
+        ("http://10.0.0.5", False),
+    ],
+)
+def test_loopback_is_decided_by_the_address(url: str, loopback: bool) -> None:
+    """Review 8: 127.evil.example is a name, not a loopback address."""
+    assert setup._is_loopback(url) is loopback
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://antifaz-gateway-production-eu-west-1-internal.example.com",
+        "https://a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7.gateways.example.com",
+        "https://gw.example.com/antifaz-gateway-for-the-claude-code-team",
+    ],
+)
+def test_long_host_names_and_readable_paths_are_accepted(settings_file: Path, url: str) -> None:
+    assert run("--url", url, "--apply", "--yes") == 0
+
+
+def test_a_random_token_in_the_url_path_is_refused(settings_file: Path) -> None:
+    url = f"https://gw.example.com/{secrets.token_urlsafe(30)}"
+    assert run("--url", url, "--apply", "--yes") == 2
+
+
+def test_a_long_readable_helper_is_accepted(settings_file: Path) -> None:
+    helper = "get-antifaz-key-from-the-company-secrets-vault-now"
+    assert run("--key-helper", helper, "--apply", "--yes") == 0
+
+
+def test_the_docstring_matches_what_uninstall_does() -> None:
+    """Review 9: --uninstall aborts with a message; it shows no diff then."""
+    assert setup.__doc__ is not None
+    assert "aborts and shows the diff" not in setup.__doc__
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are a Windows thing")
+def test_a_junction_config_folder_is_explained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review 7: on Windows, dotfiles tools link %USERPROFILE%/.claude with a junction."""
+    import _winapi  # type: ignore[import-not-found,unused-ignore]
+
+    real = tmp_path / "real-claude"
+    real.mkdir()
+    link = tmp_path / "junction-claude"
+    _winapi.CreateJunction(str(real), str(link))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(link))
+    assert run("--apply", "--yes") == 0
+    assert "link or junction" in capsys.readouterr().err
+    assert (real / "settings.json").is_file()

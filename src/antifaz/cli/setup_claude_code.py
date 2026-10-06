@@ -11,23 +11,28 @@ Bearer`), never in a settings file: this command never reads it and never writes
 
 Target: the user settings file (`$CLAUDE_CONFIG_DIR/settings.json`, otherwise
 `~/.claude/settings.json`; `%USERPROFILE%\\.claude` on Windows) or, with --project,
-`.claude/settings.local.json` in the current folder. The shared `.claude/settings.json` of a
-repository is refused: it is committed and shared.
+`.claude/settings.local.json` in the current folder. A user target inside a git work tree
+(a `.git` in the folder or any folder above it, after resolving links) is refused: that covers
+a repository's shared `.claude/settings.json`, which is committed and shared.
 
 Default is a dry run: it prints a diff and the SHA-256 of the file, and writes nothing. In the
-diff every value is hidden except the two this command owns (and the old base URL or helper
-only when it holds no user, password, query or anything key-like). With --apply, after typing
-`yes` (or --yes): the file is read again and must still have the same SHA-256 ("file changed,
-run again" otherwise), a dated backup is written (O_EXCL, 0600, never over another one), the
-new file goes to a 0600 temp file in the same folder, is parsed back, and replaces the old one
-with `os.replace` (retried on Windows). A UTF-8 BOM and CRLF line ends are kept; the JSON is
-written with 2-space indent. Anything unreadable (not UTF-8, invalid JSON, a key twice in an
-object, NaN, a top level or an `env` that is not an object, a link) aborts without touching
-anything.
+diff every value is hidden except the NEW values of the two entries this command owns; their
+previous values are shown only as a short SHA-256. With --apply, after typing `yes` (or
+--yes): the file is read again and must still have the same SHA-256 ("changed meanwhile; run
+again" otherwise), a dated backup of the whole previous file is written (O_EXCL, 0600, never
+over another one; next to the user file, or for --project under
+`$CLAUDE_CONFIG_DIR/antifaz-backups/<hash of the project folder>/`, never inside a git work
+tree), the new file goes to a 0600 temp file in the same folder, is parsed back, and replaces
+the old one with `os.replace` (retried on Windows). A UTF-8 BOM and CRLF line ends are kept;
+the JSON is written with 2-space indent. Anything unreadable (not UTF-8, invalid JSON, a key
+twice in an object, NaN or a number too large for a float, lone surrogates, nesting deeper
+than 64, a top level or an `env` that is not an object, a symlink or a hard link) aborts
+without touching anything.
 
 Ownership without comments or a sidecar file: --uninstall removes `env.ANTHROPIC_BASE_URL` only
 if it still equals --url, and `apiKeyHelper` only if --key-helper is given and still equal;
-otherwise it aborts and shows the diff. An `env` left empty is removed.
+otherwise it aborts with a message naming the entry and changes nothing. An `env` left empty
+is removed.
 
 Exit codes: 0 done (or nothing to do, or a dry run); 2 usage or refused (nothing written);
 1 the file changed meanwhile or could not be written (the old file is untouched).
@@ -40,11 +45,14 @@ import contextlib
 import copy
 import difflib
 import hashlib
+import ipaddress
 import json
+import math
 import os
 import re
 import secrets
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,12 +68,19 @@ HELPER = "apiKeyHelper"
 CREDENTIAL_VARIABLES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 MAX_SETTINGS_BYTES = 1024 * 1024
 MAX_HELPER = 1024
+MAX_DEPTH = 64
 HIDDEN = "<hidden>"
+BACKUPS = "antifaz-backups"
 _UTF8_BOM = b"\xef\xbb\xbf"
-# Something a key helper command should never hold: a long hex or base64-like run, or a
-# provider-style key. A real helper is a path or a short command line.
-_KEY_LIKE = re.compile(r"[0-9a-fA-F]{32,}|[A-Za-z0-9_\-]{40,}|\bsk-[A-Za-z0-9_\-]{12,}")
+# What a key looks like (a helper command or a URL path should never hold one): a long hex run,
+# a provider-style key, or a long token with mixed case or digits and high entropy. Readable
+# names ("get-antifaz-key-from-the-vault") and host names are not keys.
+_HEX_RUN = re.compile(r"[0-9a-fA-F]{32,}")
+_PROVIDER_KEY = re.compile(r"\bsk-[A-Za-z0-9_\-]{12,}")
+_TOKEN = re.compile(r"[A-Za-z0-9_\-+=]{24,}")
+_MIN_ENTROPY = 4.0  # bits per character; random base64 is close to 6, English words below 4.2
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_MISSING = object()
 # Environment variables whose values a helper must not contain (compared, never printed).
 _SECRET_VARIABLES = ("ANTIFAZ_API_KEY", *CREDENTIAL_VARIABLES)
 # Where Claude Code reads managed settings (https://code.claude.com/docs/en/managed-settings).
@@ -151,14 +166,35 @@ def checked_url(value: str) -> str:
         raise SetupError(
             "--url expects http(s)://host[:port] without a user, password, query or fragment"
         )
-    if _KEY_LIKE.search(url) or any(secret in url for secret in _secret_values()):
+    # Host labels may be long or hex-like (load balancers); only the path is checked for keys.
+    if looks_like_key(urlsplit(url).path) or any(secret in url for secret in _secret_values()):
         raise SetupError("--url seems to contain a key; the settings file must never hold one")
     return url
 
 
+def _entropy(text: str) -> float:
+    counts = Counter(text)
+    return -sum(n / len(text) * math.log2(n / len(text)) for n in counts.values())
+
+
+def looks_like_key(text: str) -> bool:
+    if _HEX_RUN.search(text) or _PROVIDER_KEY.search(text):
+        return True
+    for token in _TOKEN.findall(text):
+        mixed = any(c.isdigit() for c in token) or (token.lower() != token != token.upper())
+        if mixed and _entropy(token) >= _MIN_ENTROPY:
+            return True
+    return False
+
+
 def _is_loopback(url: str) -> bool:
     host = (urlsplit(url).hostname or "").lower()
-    return host in ("localhost", "::1") or host.startswith("127.")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:  # a name, not an address: 127.evil.example is not loopback
+        return False
 
 
 def _secret_values() -> list[str]:
@@ -171,7 +207,7 @@ def checked_helper(value: str) -> str:
     """The helper command as given, or SetupError if it is empty, odd or seems to hold a key."""
     if not value.strip() or len(value) > MAX_HELPER or _CONTROL.search(value):
         raise SetupError(f"--key-helper expects one command line (at most {MAX_HELPER} characters)")
-    if _KEY_LIKE.search(value) or any(secret in value for secret in _secret_values()):
+    if looks_like_key(value) or any(secret in value for secret in _secret_values()):
         raise SetupError(
             "--key-helper seems to contain a key; give a command that reads the key from a "
             "file or a vault instead (the settings file must never hold a key)"
@@ -179,25 +215,10 @@ def checked_helper(value: str) -> str:
     return value
 
 
-def _shown_url(value: object) -> str:
-    """A base URL found in the file, or HIDDEN if it could hold a secret."""
-    if not isinstance(value, str) or _CONTROL.search(value) or _KEY_LIKE.search(value):
-        return HIDDEN
-    try:
-        parts = urlsplit(value)
-    except ValueError:
-        return HIDDEN
-    if "@" in parts.netloc or "?" in value or "#" in value:
-        return HIDDEN
-    return value
-
-
-def _shown_helper(value: object) -> str:
-    if not isinstance(value, str) or _CONTROL.search(value) or _KEY_LIKE.search(value):
-        return HIDDEN
-    if any(secret in value for secret in _secret_values()):
-        return HIDDEN
-    return value
+def _fingerprint(value: object) -> str:
+    """How a previous value of ours is shown: never the value, only a short SHA-256."""
+    digest = hashlib.sha256(json.dumps(value, ensure_ascii=True).encode()).hexdigest()
+    return f"<previous value, sha256 {digest[:8]}>"
 
 
 # --- Reading ----------------------------------------------------------------------------------
@@ -231,6 +252,39 @@ def _no_constant(_: str) -> Any:
     raise SetupError("the settings file is not valid JSON (NaN or Infinity); fix it first")
 
 
+def _finite(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):  # 1e999 parses as infinity, which JSON cannot hold
+        raise SetupError("the settings file has a number too large to keep; fix it first")
+    return number
+
+
+def _check_shape(data: Any) -> None:
+    """Nesting at most MAX_DEPTH, and every key and string writable as UTF-8 (no lone
+    surrogates such as an escaped \\ud800). Iterative: no recursion on hostile input."""
+    stack: list[tuple[Any, int]] = [(data, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise SetupError(f"the settings file is nested deeper than {MAX_DEPTH}; fix it first")
+        items: list[Any] = []
+        if isinstance(node, dict):
+            items = list(node.values())
+            texts = list(node.keys())
+        elif isinstance(node, list):
+            items, texts = node, []
+        else:
+            texts = [node] if isinstance(node, str) else []
+        for text in texts:
+            try:
+                text.encode("utf-8")
+            except UnicodeEncodeError:
+                raise SetupError(
+                    "the settings file has text that is not valid Unicode; fix it first"
+                ) from None
+        stack.extend((item, depth + 1) for item in items)
+
+
 def parse(raw: bytes) -> tuple[dict[str, Any], bool]:
     """The top-level object and whether there was a UTF-8 BOM. Refuses anything odd."""
     bom = raw.startswith(_UTF8_BOM)
@@ -241,11 +295,17 @@ def parse(raw: bytes) -> tuple[dict[str, Any], bool]:
     if not text.strip():
         return {}, bom  # an empty file is an empty object
     try:
-        data = json.loads(text, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+        data = json.loads(
+            text,
+            object_pairs_hook=_no_duplicates,
+            parse_constant=_no_constant,
+            parse_float=_finite,
+        )
     except (ValueError, RecursionError):  # JSONDecodeError is a ValueError
         raise SetupError("the settings file is not valid JSON; fix it first") from None
     if not isinstance(data, dict):
         raise SetupError("the settings file is not a JSON object; fix it first")
+    _check_shape(data)
     if "env" in data and not isinstance(data["env"], dict):
         raise SetupError('"env" in the settings file is not an object; fix it first')
     return data, bom
@@ -258,6 +318,11 @@ def read_current(path: Path) -> Current:
         return Current(path, False, b"", {}, False, "\n", True)
     if not path.is_file():
         raise SetupError("the settings path exists and is not a file; not touching it")
+    if path.stat().st_nlink > 1:
+        raise SetupError(
+            "the settings file has other hard links; replacing it would split them, so edit it "
+            "by hand"
+        )
     try:
         with path.open("rb") as handle:
             raw = handle.read(MAX_SETTINGS_BYTES + 1)
@@ -304,40 +369,57 @@ def uninstall_change(data: dict[str, Any], url: str, helper: str | None) -> dict
 
 
 def render(data: dict[str, Any], current: Current) -> bytes:
-    text = json.dumps(data, indent=2, ensure_ascii=False)
-    if current.final_newline:
-        text += "\n"
-    if current.newline != "\n":
-        text = text.replace("\n", current.newline)
-    return (_UTF8_BOM if current.bom else b"") + text.encode("utf-8")
+    try:
+        text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False)
+        if current.final_newline:
+            text += "\n"
+        if current.newline != "\n":
+            text = text.replace("\n", current.newline)
+        return (_UTF8_BOM if current.bom else b"") + text.encode("utf-8")
+    except (ValueError, RecursionError):  # UnicodeEncodeError is a ValueError; parse() checks
+        raise SetupError("the settings file cannot be written back as JSON; fix it first") from None
 
 
-def _redact(value: Any, path: tuple[str, ...]) -> Any:
-    """Every value hidden except the two this command owns (and those only if harmless)."""
-    if path == ("env", BASE_URL):
-        return _shown_url(value)
-    if path == (HELPER,):
-        return _shown_helper(value)
+OWNED = (("env", BASE_URL), (HELPER,))
+
+
+def _owned_value(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    node: Any = data
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return _MISSING
+        node = node[key]
+    return node
+
+
+def _redact(value: Any, path: tuple[str, ...], old: dict[str, Any] | None) -> Any:
+    """Every value hidden. Ours: the previous value (old is None) only as a fingerprint; the
+    new one (old given) in clear, unless it is the same as before."""
+    if path in OWNED:
+        if old is None or _owned_value(old, path) == value:
+            return _fingerprint(value)
+        return value
     if isinstance(value, dict):
-        return {key: _redact(item, (*path, key)) for key, item in value.items()}
+        return {key: _redact(item, (*path, key), old) for key, item in value.items()}
     if isinstance(value, list):
-        return [_redact(item, (*path, "[]")) for item in value]
+        return [_redact(item, (*path, "[]"), old) for item in value]
     if value is None or isinstance(value, bool):
         return value
     return HIDDEN
 
 
 def safe_diff(old: dict[str, Any], new: dict[str, Any], name: str) -> str:
-    """A unified diff of the two documents with every value we do not own hidden."""
+    """A unified diff of the two documents in which only our new values can be read."""
 
-    def lines(data: dict[str, Any]) -> list[str]:
+    def lines(data: dict[str, Any], previous: dict[str, Any] | None) -> list[str]:
         if not data:
             return []
-        return (json.dumps(_redact(data, ()), indent=2, ensure_ascii=False) + "\n").splitlines(
-            keepends=True
-        )
+        shown = _redact(data, (), previous)
+        return (json.dumps(shown, indent=2, ensure_ascii=False) + "\n").splitlines(keepends=True)
 
-    return "".join(difflib.unified_diff(lines(old), lines(new), f"{name} (now)", f"{name} (after)"))
+    return "".join(
+        difflib.unified_diff(lines(old, None), lines(new, old), f"{name} (now)", f"{name} (after)")
+    )
 
 
 # --- Target -----------------------------------------------------------------------------------
@@ -351,40 +433,73 @@ def user_settings_path() -> Path:
     return base / SETTINGS
 
 
-def _is_shared_project_file(path: Path) -> bool:
-    """A `.claude/settings.json` at the root of a repository (committed and shared)."""
-    folder = path.parent
-    return (
-        path.name == SETTINGS
-        and folder.name == ".claude"
-        and os.path.lexists(folder.parent / ".git")
-    )
+def _real(path: Path) -> str:
+    """The path with links and junctions resolved, as the OS compares it (case on Windows;
+    abspath also drops Windows' trailing dots and spaces)."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
+def git_work_tree(path: Path) -> Path | None:
+    """The folder with a `.git` (folder or file) at or above `path`, links resolved."""
+    real = Path(os.path.realpath(os.path.abspath(path)))
+    for folder in (real, *real.parents):
+        if os.path.lexists(folder / ".git"):
+            return folder
+    return None
 
 
 def target_path(project: bool) -> Path:
     if project:
+        # settings.local.json is the per-person file; Claude Code git-ignores it when it saves
+        # there. It may live in a repository (it is the point of --project).
         return Path.cwd() / ".claude" / LOCAL_SETTINGS
     path = user_settings_path()
-    cwd = Path.cwd().resolve()
-    same_as_project = path.parent.resolve() == cwd / ".claude" and cwd != Path.home().resolve()
-    if same_as_project or _is_shared_project_file(path):
+    cwd = Path.cwd()
+    project_folder = _real(cwd / ".claude")
+    same_as_project = _real(path.parent) == project_folder and _real(cwd) != _real(Path.home())
+    if same_as_project or git_work_tree(path.parent) is not None:
         raise SetupError(
-            "that settings file is a repository's shared .claude/settings.json (committed and "
-            "shared); use --project for .claude/settings.local.json"
+            "that settings file is inside a git work tree, where it could be committed and "
+            "shared (like a repository's shared .claude/settings.json); point CLAUDE_CONFIG_DIR "
+            "elsewhere, or use --project for .claude/settings.local.json"
         )
     return path
+
+
+def backup_folder(target: Path, project: bool) -> Path:
+    """Where the copy of the previous file goes. Never inside a git work tree: the copy holds
+    the whole file, secrets of other tools included."""
+    if project:
+        digest = hashlib.sha256(_real(target.parent.parent).encode("utf-8")).hexdigest()[:16]
+        folder = user_settings_path().parent / BACKUPS / digest
+    else:
+        folder = target.parent
+    if git_work_tree(folder) is not None:
+        raise SetupError(
+            "the backup would go inside a git work tree; point CLAUDE_CONFIG_DIR at a folder "
+            "outside any repository"
+        )
+    return folder
+
+
+def _linked(path: Path) -> bool:
+    """Whether the folder of `path` or any folder above it is a symlink or a junction."""
+    folder = Path(os.path.abspath(path.parent))
+    return any(os.path.islink(p) or os.path.isjunction(p) for p in (folder, *folder.parents))
 
 
 # --- Writing ----------------------------------------------------------------------------------
 
 
-def write_settings(current: Current, content: bytes) -> Path | None:
+def write_settings(current: Current, content: bytes, backups: Path) -> Path | None:
     """Replace the settings file atomically if it has not changed since it was read. Returns
-    the backup, if there was a file to back up."""
+    the backup (in `backups`), if there was a file to back up."""
     path = current.path
     folder = path.parent
     try:
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if current.exists:
+            backups.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError:
         raise SetupError("cannot create the settings folder; nothing was changed", 1) from None
     temp = folder / f"{path.name}.tmp-{secrets.token_hex(8)}"
@@ -398,7 +513,7 @@ def write_settings(current: Current, content: bytes) -> Path | None:
             now = path.read_bytes()
             if hashlib.sha256(now).hexdigest() != current.digest:
                 raise SetupError("the settings file changed meanwhile; run again", 1)
-            backup = init.write_backup(path, now, f"{path.name}.bak-")
+            backup = init.write_backup(backups / path.name, now, f"{path.name}.bak-")
         elif os.path.lexists(path):
             raise SetupError("the settings file appeared meanwhile; run again", 1)
         init._replace(temp, path)
@@ -407,8 +522,7 @@ def write_settings(current: Current, content: bytes) -> Path | None:
             message = "could not write the settings file; nothing was changed"
         else:
             message = (
-                f"could not write the settings file; it was not replaced and a copy is in "
-                f"{backup.name}"
+                f"could not write the settings file; it was not replaced and a copy is in {backup}"
             )
         raise SetupError(message, 1) from None
     finally:
@@ -458,6 +572,31 @@ def _warnings(current: Current, new: dict[str, Any], uninstall: bool) -> list[st
             f"a managed settings file exists in {managed}: your organization's values win over "
             "this file"
         )
+    return notes
+
+
+def _outranking_notes(target: Path, project: bool, url: str) -> list[str]:
+    """Project files in the current folder that set ANTHROPIC_BASE_URL above the target (names
+    only): there, Claude Code would not use Antifaz. settings.local.json is the top project
+    file, so nothing outranks it but managed settings and --settings."""
+    if project:
+        return []
+    notes = []
+    for name in (LOCAL_SETTINGS, SETTINGS):
+        other = Path.cwd() / ".claude" / name
+        if not other.is_file() or _real(other) == _real(target):
+            continue
+        try:
+            data = read_current(other).data
+        except (SetupError, OSError):
+            notes.append(f"could not read {other} to check whether it overrides this setting")
+            continue
+        value = _owned_value(data, ("env", BASE_URL))
+        if value is not _MISSING and value != url:
+            notes.append(
+                f"{other} sets env.{BASE_URL} (value not shown) and outranks {target.name}: "
+                "in this folder Claude Code would not use Antifaz"
+            )
     return notes
 
 
@@ -514,6 +653,15 @@ def run(args: argparse.Namespace) -> int:
         if args.yes and not args.apply:
             raise SetupError("--yes only goes with --apply")
         path = target_path(args.project)
+        if _linked(path):
+            # Work on the real folder: the temp file and os.replace then stay in one folder
+            # (O_EXCL through a Windows junction fails) and the link itself is left alone.
+            path = Path(os.path.realpath(path))
+            _warn(
+                "warning: the settings folder (or a folder above it) is a link or junction: the "
+                f"file really is {path}, and that is the file changed"
+            )
+        backups = backup_folder(path, args.project)
         current = read_current(path)
         if args.uninstall:
             new = uninstall_change(current.data, url, helper)
@@ -524,7 +672,10 @@ def run(args: argparse.Namespace) -> int:
                 "warning: --url is plain http to another machine: the Antifaz key would travel "
                 "unencrypted; use https"
             )
-        for note in _warnings(current, new, args.uninstall):
+        notes = _warnings(current, new, args.uninstall)
+        if not args.uninstall:
+            notes += _outranking_notes(path, args.project, url)
+        for note in notes:
             _warn(f"warning: {note}")
         if helper is not None and not args.uninstall:
             _warn(
@@ -538,14 +689,14 @@ def run(args: argparse.Namespace) -> int:
         state = f"SHA-256 {current.digest}" if current.exists else "does not exist yet"
         _say(f"antifaz setup claude-code: {path} ({state})")
         _say(diff.rstrip("\n"))
-        _say("(values this command does not own are shown as <hidden>)")
+        _say("(other values are shown as <hidden>; previous values of ours only as a SHA-256)")
         if current.exists and render(current.data, current) != current.raw:
             _say("note: the whole file is rewritten with 2-space indentation")
         if not args.apply:
             _say("Dry run: nothing was written. Add --apply to write it.")
             return 0
         _confirm(args)
-        backup = write_settings(current, render(new, current))
+        backup = write_settings(current, render(new, current), backups)
     except SetupError as error:
         _warn(str(error))
         return error.code
@@ -554,6 +705,16 @@ def run(args: argparse.Namespace) -> int:
         return 2
     _say(f"antifaz setup claude-code: wrote {path}")
     if backup is not None:
-        _say(f"  the previous file is kept as {backup.name}")
+        _say(f"  backup of the previous file: {backup}")
+        _say(
+            "  it is a copy of the whole previous file, including any secrets in it (tokens in "
+            "permission rules, env values); delete it when you no longer need it (one copy is "
+            "kept per change: they add up)"
+        )
+        if sys.platform == "win32":
+            _say(
+                "  on Windows 0600 does not apply: the copy has the permissions of its folder "
+                "(in your profile, only you)"
+            )
     _say(_next_steps(url, args, helper))
     return 0
