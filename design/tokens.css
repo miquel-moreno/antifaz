@@ -2,29 +2,43 @@
  * Antifaz design tokens: the single source for colours, type, spacing, radii,
  * shadows and motion. The panel (v0.2) and the prototype read only these.
  *
- * Direction (chosen by Miquel, issue #30): a macOS-style floating window on a soft
- * ambient indigo glow. Near-monochrome; indigo only marks actions, focus, the
- * [[MARKERS]] and the mask itself. Inter (optical sizing) + Geist Mono.
+ * Direction (Miquel's brief for the panel redesign, issue #30): an Apple-like, near-monochrome
+ * frosted-glass window floating over a very soft ambient light. Indigo only marks three things:
+ * the main action, the [[MARKERS]] and the mask itself. Inter (optical sizing) + Geist Mono,
+ * both bundled in design/fonts/ (OFL-1.1): nothing is requested from outside.
+ *
+ * Values come from the :root of the reference (antifaz-panel-referencia.html). The few that
+ * were changed to reach WCAG AA are marked "AA" below; the table with every pair, before and
+ * after, is in design/README.md.
  *
  * Theme rules:
  * - Every token is defined first on :root (light).
  * - Dark comes from prefers-color-scheme, unless the page forces light;
  *   [data-theme="dark"] forces dark. Both dark blocks hold the same values.
- * - Components never use a literal colour: only these tokens. Exceptions: the
- *   logo gradient (below, same in both themes) and the fixed light/dark stages of
- *   the Logo section, which exist to test the logo on both.
- * Contrast ratios of the text and control pairs are in design/README.md (WCAG AA).
- * Rule: --color-text-faint is never used on --color-surface-3.
+ * - Components never use a literal colour: only these tokens. The only exceptions are the fixed
+ *   light/dark stages of the Logo section of the prototype, which exist to test the logo on both.
+ * - --color-text-faint is never used on --color-surface-3 (it does not reach 4.5:1 there).
+ *
+ * Brief name -> token: bg -> --color-bg, window -> --color-window, sidebar -> --color-sidebar,
+ * surface/-2/-3 -> --color-surface/-2/-3, line(-strong) -> --color-line(-strong),
+ * text/muted/faint -> --color-text/-text-muted/-text-faint, accent(-ink/-soft) ->
+ * --color-accent(-ink/-soft), on-accent -> --color-on-accent, ok/warn/danger(-soft) ->
+ * --color-ok/... , pii(-bg/-glow) -> --color-pii(-bg/-glow), stage -> --color-stage,
+ * glow -> --color-glow, edge -> --color-edge, amb-1/amb-2 -> --color-ambient-1/-2,
+ * f-sans/f-mono -> --font-sans/--font-mono, ease/spring -> --ease-out/--ease-spring.
  */
 
 :root {
   color-scheme: light;
 
-  /* Page and window. The ambient colours are decoration only (a soft glow). */
+  /* Page and ambient light. The ambient blobs are decoration only (they move with transform). */
   --color-bg: #eeeef3;
   --color-ambient-1: rgb(120 104 255 / 0.16);
   --color-ambient-2: rgb(80 160 255 / 0.1);
+
+  /* The window: frosted glass. Its colour is mixed at --window-alpha with what is behind it. */
   --color-window: #ffffff;
+  --color-window-highlight: rgb(255 255 255 / 0.07); /* the 1px light on its top edge */
   --color-sidebar: #f7f7f9;
 
   /* Surfaces, from the card up to the tracks of segmented controls. */
@@ -33,77 +47,122 @@
   --color-surface-3: #ebebf0;
   --color-stage: #fbfbfd; /* the stage of the mask animation */
 
-  /* Lines. Hairlines are decoration; --color-control is the 3:1 edge of a control. */
+  /* Lines. Hairlines are decoration (only where they separate); --color-control is the 3:1
+     edge of a control that needs one (switch off, segmented thumb, text box). */
   --color-line: rgb(29 29 31 / 0.08);
   --color-line-strong: rgb(29 29 31 / 0.15);
   --color-control: #7b7b83;
 
-  /* Text: primary, secondary and tertiary (all >= 4.5:1 where they are used). */
+  /* Text: primary, secondary and tertiary. */
   --color-text: #1d1d1f;
-  --color-text-muted: #5f5f66;
-  --color-text-faint: #6c6c73;
+  --color-text-muted: #6a6a71; /* AA: brief #6b6b72 (4.45:1 on surface-3) */
+  --color-text-faint: #707077; /* AA: brief #8b8b92 (3.1-3.4:1 everywhere) */
 
-  /* Accent: indigo. Actions, focus, markers and the mask. */
+  /* Accent: indigo. The main action, focus, the markers and the mask. */
   --color-accent: #5847e0;
-  --color-accent-ink: #4434c4; /* accent as text (links, markers) */
+  --color-accent-ink: #4434c4; /* the accent as text (markers, ghost buttons) */
   --color-accent-soft: rgb(88 71 224 / 0.1);
   --color-on-accent: #ffffff;
   --color-focus: #5847e0;
   --color-glow: rgb(88 71 224 / 0.38);
-  --color-edge: rgb(88 71 224 / 0.28);
+  --color-edge: rgb(88 71 224 / 0.28); /* the gradient border of the animation card */
 
-  /* Semantic colours. Always paired with an icon or a word, never alone. */
-  --color-ok: #1a7f35;
+  /* Semantic colours. Always with a word (and a dot or icon), never alone. */
+  --color-ok: #197e34; /* AA: brief #1b8738 (4.07:1 on ok-soft, 4.32:1 on the glass window) */
   --color-ok-soft: rgb(52 199 89 / 0.14);
-  --color-warn: #8f4700;
+  --color-warn: #9a4d00;
   --color-warn-soft: rgb(255 159 10 / 0.15);
-  --color-danger: #c3160e;
+  --color-danger: #c8170f;
   --color-danger-soft: rgb(255 59 48 / 0.1);
 
   /* Switch: the "on" track and the knob (>= 3:1 between them). */
-  --color-switch-on: #1a7f35;
+  --color-switch-on: #197e34;
   --color-knob: #ffffff;
 
   /* A personal value found in the Playground (only there, synthetic data). */
-  --color-pii: #8f4700; /* the type label next to the value */
+  --color-pii: #9a4d00; /* the type label next to the value */
   --color-pii-bg: rgb(255 184 64 / 0.26);
   --color-pii-glow: rgb(255 170 40 / 0.45);
+
+  /* Glows of the mask animation (same in both themes): the amber flash of a found value and
+     the green glow of a value put back. The "-0" stops are the same colour, transparent. */
+  --color-scan-glow: rgb(255 170 40 / 0.45);
+  --color-scan-glow-0: rgb(255 170 40 / 0);
+  --color-restore-glow: rgb(50 215 75 / 0.6);
+  --color-restore-glow-0: rgb(50 215 75 / 0);
+
+  /* Light effects on top of coloured fills (same in both themes). */
+  --color-highlight: rgb(255 255 255 / 0.22); /* inner top light of the primary button */
+  --color-sheen: rgb(255 255 255 / 0.35); /* the shine that crosses "Probar" on hover */
+  --color-mask-drop: rgb(0 0 0 / 0.25); /* the drop shadow of the moving mask */
 
   /* Logo tile (same in both themes; it is the brand, not the theme). */
   --logo-from: #7363f7;
   --logo-to: #3b2db0;
   --logo-mask: #ffffff;
+  --logo-ring: rgb(255 255 255 / 0.2);
+  --logo-highlight: rgb(255 255 255 / 0.25);
+  --logo-shadow: rgb(63 49 184 / 0.7);
 
-  /* Shadows: the window floats; cards are a hairline ring plus a soft drop. */
+  /* Glass: how much of each layer covers what is behind it, and the blur. */
+  --window-alpha: 80%;
+  --window-blur: 40px;
+  --window-saturate: 1.6;
+  --chrome-alpha: 76%; /* the sticky header */
+  --chrome-blur: 20px;
+  --chrome-saturate: 1.8;
+  --sidebar-alpha: 60%;
+  --sidebar-alpha-phone: 82%;
+  --surface-alpha: 88%; /* composer and the three panes */
+  --stage-alpha: 90%;
+  --grain-opacity: 0.04; /* the fine noise over the page */
+
+  /* Shadows: the window floats; cards are a hairline ring plus a soft drop; "pop" lifts the
+     selected pill. */
   --shadow-window: 0 0 0 1px rgb(0 0 0 / 0.05), 0 2px 4px rgb(0 0 0 / 0.03),
     0 24px 48px -16px rgb(30 24 80 / 0.18), 0 60px 120px -40px rgb(30 24 80 / 0.22);
-  --shadow-card: 0 0 0 1px var(--color-line), 0 1px 2px rgb(0 0 0 / 0.03),
-    0 8px 22px -10px rgb(20 20 40 / 0.1);
+  --shadow-drop: 0 1px 2px rgb(0 0 0 / 0.03), 0 8px 22px -10px rgb(20 20 40 / 0.1);
+  --shadow-card: 0 0 0 1px var(--color-line), var(--shadow-drop);
   --shadow-pop: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.08),
     0 4px 10px -2px rgb(0 0 0 / 0.08);
+  --shadow-knob: 0 1px 2px rgb(0 0 0 / 0.25);
 
-  /* Type. Inter (optical sizing) and Geist Mono, both SIL OFL 1.1. The real panel
-     self-hosts the woff2 files; the fallbacks keep it usable without them. */
+  /* Type. Inter (variable, optical sizing: titles get its Display cut with
+     font-optical-sizing: auto) and Geist Mono for markers, codes and the policy YAML.
+     Both SIL OFL 1.1, served from design/fonts/fonts.css; the fallbacks keep the panel usable
+     if the files do not load. */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     system-ui, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", "Cascadia Mono", Menlo,
     Consolas, "Liberation Mono", monospace;
+  --font-features: "cv05", "cv08"; /* Inter: lowercase l with a tail, upper-case I with serifs */
+  --font-numeric: tabular-nums; /* counters, times, ids: digits of equal width */
+
+  --text-title: clamp(30px, 4.4cqi, 50px); /* view title (cqi: the window is the container) */
+  --text-title-phone: 26px;
+  --weight-title: 650;
+  --tracking-title: -0.034em;
+  --leading-title: 1.08;
+  --text-body: 15px;
+  --text-body-lg: 16px; /* the composer text */
+  --tracking-body: -0.011em;
+  --leading-body: 1.5;
+
   --text-2xs: 0.6875rem; /* 11px: kbd hints, tiny labels */
   --text-xs: 0.75rem; /* 12px: captions, eyebrows */
   --text-sm: 0.8125rem; /* 13px: secondary text */
-  --text-md: 0.9375rem; /* 15px: body */
+  --text-md: 0.9375rem; /* 15px: body (= --text-body) */
   --text-lg: 1.0625rem; /* 17px: card titles */
-  --text-xl: 1.5rem; /* 24px: view titles on phones */
-  --text-2xl: 2.125rem; /* 34px: view titles */
+  --text-xl: 1.5rem; /* 24px: section titles */
+  --text-2xl: 2.125rem; /* 34px: titles without a container */
   --text-3xl: 2.75rem; /* 44px: big counters */
   --leading-tight: 1.1;
-  --leading-body: 1.5;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-bold: 650;
-  --tracking-tight: -0.011em;
-  --tracking-display: -0.034em;
+  --tracking-tight: -0.011em; /* = --tracking-body */
+  --tracking-display: -0.034em; /* = --tracking-title */
 
   /* Spacing: 4px grid. */
   --space-1: 0.25rem;
@@ -114,20 +173,32 @@
   --space-6: 2rem;
   --space-7: 3rem;
 
-  /* Radii. */
-  --radius-sm: 7px; /* markers, code */
-  --radius-md: 10px; /* segmented tracks, icon buttons */
-  --radius-lg: 18px; /* cards */
-  --radius-xl: 24px; /* the window */
+  /* Radii: window 24, cards 18-20, controls 9-11, buttons in a pill. */
+  --radius-xs: 6px; /* inline code */
+  --radius-sm: 7px; /* markers */
+  --radius-control-sm: 9px; /* tabs, icon buttons, the logo tile */
+  --radius-control: 10px; /* segmented tracks */
+  --radius-control-lg: 11px; /* the phone column switcher */
+  --radius-callout: 16px; /* warnings; cards on phones */
+  --radius-card: 18px;
+  --radius-card-lg: 20px; /* the animation card */
+  --radius-window: 24px;
+  --radius-phone: 40px; /* the simulated phone of the prototype */
   --radius-pill: 999px;
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-window);
 
-  /* Motion. All of it is switched off with prefers-reduced-motion. */
+  /* Motion. All of it is switched off with prefers-reduced-motion (final state shown). */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.32, 0.5, 1);
   --duration-fast: 200ms;
   --duration-base: 350ms;
-  --duration-slow: 550ms;
-  --duration-mask: 7.2s; /* the full Playground animation (F3) */
+  --duration-spring: 450ms; /* segmented thumbs sliding */
+  --duration-slow: 550ms; /* views entering */
+  --duration-stagger: 45ms; /* delay between the pieces of a view entering */
+  --duration-intro: 2s; /* the entry (doors), only the first time */
+  --duration-mask: 7.5s; /* the full mask animation of the Playground */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -146,8 +217,8 @@
     --color-line-strong: rgb(255 255 255 / 0.15);
     --color-control: #7c7c86;
     --color-text: #f5f5f7;
-    --color-text-muted: #a1a1aa;
-    --color-text-faint: #8e8e97;
+    --color-text-muted: #9d9da6;
+    --color-text-faint: #85858c; /* AA: brief #77777f (3.7-4.3:1) */
     --color-accent: #9d93ff;
     --color-accent-ink: #c7c1ff;
     --color-accent-soft: rgb(157 147 255 / 0.15);
@@ -161,13 +232,14 @@
     --color-warn-soft: rgb(255 179 64 / 0.14);
     --color-danger: #ff6b63;
     --color-danger-soft: rgb(255 107 99 / 0.14);
-    --color-switch-on: #248a3d;
+    --color-switch-on: #21ab36; /* AA: brief ok #32d74b (1.92:1 against the white knob) */
     --color-knob: #ffffff;
     --color-pii: #ffcc70;
     --color-pii-bg: rgb(255 184 64 / 0.18);
     --color-pii-glow: rgb(255 190 80 / 0.4);
     --shadow-window: 0 0 0 1px rgb(255 255 255 / 0.07), 0 40px 100px -30px rgb(0 0 0 / 0.95);
-    --shadow-card: 0 0 0 1px var(--color-line), 0 10px 28px -14px rgb(0 0 0 / 0.8);
+    --shadow-drop: 0 10px 28px -14px rgb(0 0 0 / 0.8);
+    --shadow-card: 0 0 0 1px var(--color-line), var(--shadow-drop);
     --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 4px 12px -2px rgb(0 0 0 / 0.6);
   }
 }
@@ -187,8 +259,8 @@
   --color-line-strong: rgb(255 255 255 / 0.15);
   --color-control: #7c7c86;
   --color-text: #f5f5f7;
-  --color-text-muted: #a1a1aa;
-  --color-text-faint: #8e8e97;
+  --color-text-muted: #9d9da6;
+  --color-text-faint: #85858c; /* AA: brief #77777f (3.7-4.3:1) */
   --color-accent: #9d93ff;
   --color-accent-ink: #c7c1ff;
   --color-accent-soft: rgb(157 147 255 / 0.15);
@@ -202,13 +274,14 @@
   --color-warn-soft: rgb(255 179 64 / 0.14);
   --color-danger: #ff6b63;
   --color-danger-soft: rgb(255 107 99 / 0.14);
-  --color-switch-on: #248a3d;
+  --color-switch-on: #21ab36; /* AA: brief ok #32d74b (1.92:1 against the white knob) */
   --color-knob: #ffffff;
   --color-pii: #ffcc70;
   --color-pii-bg: rgb(255 184 64 / 0.18);
   --color-pii-glow: rgb(255 190 80 / 0.4);
   --shadow-window: 0 0 0 1px rgb(255 255 255 / 0.07), 0 40px 100px -30px rgb(0 0 0 / 0.95);
-  --shadow-card: 0 0 0 1px var(--color-line), 0 10px 28px -14px rgb(0 0 0 / 0.8);
+  --shadow-drop: 0 10px 28px -14px rgb(0 0 0 / 0.8);
+  --shadow-card: 0 0 0 1px var(--color-line), var(--shadow-drop);
   --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 4px 12px -2px rgb(0 0 0 / 0.6);
 }
 
@@ -216,6 +289,14 @@
   :root {
     --duration-fast: 0ms;
     --duration-base: 0ms;
+    --duration-spring: 0ms;
     --duration-slow: 0ms;
+    --duration-stagger: 0ms;
+    --duration-intro: 0ms;
   }
+}
+
+/* Helper: digits of equal width (counters, times, ids). */
+.tabular-nums {
+  font-variant-numeric: var(--font-numeric);
 }

@@ -4,6 +4,17 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 
 **Estado: pendiente de aprobación.** Aprobado por Miquel el: \_\_\_ / \_\_\_ / 2026. Hasta que esta línea tenga fecha, no se construye nada del panel.
 
+**Rediseño en curso** (encargo de Miquel, octubre de 2026): un estilo más cercano a Apple, casi monocromo, con la ventana de vidrio esmerillado sobre una luz ambiental muy suave. Se hace en seis pasos, cada uno con el visto bueno de Miquel:
+
+1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (esta versión).
+2. Ventana, barra lateral, cabecera y móvil.
+3. Vista «Prueba un texto» con sus cinco estados.
+4. Animación del antifaz y entrada.
+5. Las otras cuatro vistas con el mismo lenguaje.
+6. Comprobación final.
+
+Hasta el paso 5, el prototipo ya usa los tokens y las fuentes nuevas, pero la ventana, las vistas y la animación son todavía las anteriores: es normal que se vea a medias.
+
 ## La dirección visual
 
 Miquel eligió la muestra de estilo de «Prueba un texto» y el resto del panel se ha pasado a ese lenguaje:
@@ -22,14 +33,16 @@ Desde la raíz del repo:
 python -m http.server 8765 --bind 127.0.0.1
 ```
 
-y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html>. Hace falta el servidor porque la página carga `design/tokens.css` y el icono por ruta relativa.
+y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o <http://127.0.0.1:8765/design/prototype/tokens-preview.html> (los tokens). Hace falta el servidor porque las páginas cargan `design/tokens.css`, las fuentes de `design/fonts/` y el icono por ruta relativa. No se pide nada fuera de tu equipo.
 
 ## Archivos
 
 | Archivo | Qué es |
 |---|---|
 | `prototype/antifaz-panel.html` | La página: las cinco secciones del panel, los estados y el apartado del logo |
-| `tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras y movimiento, en claro y oscuro. Es la única fuente de colores |
+| `prototype/tokens-preview.html` | Página de revisión de los tokens: colores de los dos temas lado a lado, tipografía, radios, sombras, estados y la tabla de contraste calculada en vivo. No es parte del panel |
+| `tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras, vidrio y movimiento, en claro y oscuro. Es la única fuente de colores |
+| `fonts/` | Inter y Geist Mono (woff2 oficiales, sin modificar), sus licencias OFL y `fonts.css` con los `@font-face` |
 | `logo.svg` | Logo principal propuesto: el antifaz blanco en el cuadro con degradado índigo |
 | `logo-mark.svg` | Solo el antifaz, en un color (`currentColor`: toma el color del texto donde se use) |
 | `logo-option-a.svg`, `logo-option-b.svg` | Las dos propuestas anteriores. Se guardan como referencia; el apartado Logo ya no las enseña |
@@ -75,7 +88,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 ## Reglas
 
 - **Nunca se muestra un dato personal ni un marcador ligado a un valor fuera del Playground** (invariante 15). En el Playground solo hay datos inventados. En directo, Claves, Políticas y Estado solo hay tipos, cantidades, nombres de clave e ids.
-- Colores solo desde `tokens.css`. Las excepciones son el propio logo (su degradado es la marca y no cambia con el tema) y los fondos fijos claro y oscuro del apartado Logo, que existen para probarlo.
+- Colores solo desde `tokens.css`, también el degradado del logo (`--logo-from`, `--logo-to`) y los brillos de la animación (`--color-scan-glow`, `--color-restore-glow`). Las únicas excepciones son los archivos SVG del logo (y sus copias en el apartado Logo) y los fondos fijos claro y oscuro de ese apartado, que existen para probarlo.
 - `--color-text-faint` (texto terciario) nunca va sobre `--color-surface-3`: ahí no llega a 4,5:1.
 - Contraste WCAG AA en los dos temas (tabla abajo).
 - Nada se comunica solo con color: cada estado lleva icono o punto **y** palabra; los datos resaltados llevan su tipo escrito; el punto de aviso en la pestaña Estado lleva texto para lectores de pantalla.
@@ -87,47 +100,86 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 
 ## Tipos de letra
 
-- **Inter** (con tamaño óptico) y **Geist Mono**. Las dos tienen licencia **SIL Open Font License 1.1**, que permite incluirlas en el proyecto.
-- En el **prototipo** se cargan de Google Fonts, con una lista completa de fuentes del sistema por si no cargan (`--font-sans` y `--font-mono` en `tokens.css`).
-- En el **panel real** no: Antifaz no envía nada a ningún sitio, así que los archivos `woff2` irán dentro del proyecto y se servirán desde la propia pasarela, sin peticiones externas. `docs/licencias.md` las listará (OFL-1.1).
-- **Pendiente del OK de Miquel** para añadir los archivos de fuentes (unos 0,5 MB). No se han descargado todavía.
+- **Inter** para la interfaz y los títulos (variable, con eje de tamaño óptico: con `font-optical-sizing: auto` los títulos grandes usan su corte Display) y **Geist Mono** para marcadores, códigos y el YAML. Las dos tienen licencia **SIL Open Font License 1.1**.
+- **Van dentro del proyecto**, en `design/fonts/`, y se cargan con `design/fonts/fonts.css` (`font-display: swap`). Nada de Google Fonts: Antifaz no hace peticiones a terceros. Si no cargan, se usa la lista de fuentes del sistema de `--font-sans` y `--font-mono` (`tokens.css`).
+- Ajustes de Inter en los tokens: `--font-features` (`"cv05", "cv08"`), `--tracking-body` (−0,011em), `--font-numeric` (`tabular-nums`, también la clase `.tabular-nums`) y la escala de títulos `--text-title` (`clamp(30px, 4.4cqi, 50px)`, peso 650, −0,034em).
+- **Por qué los archivos oficiales enteros y no los recortes por alfabeto.** Los recortes de Google Fonts / Fontsource (latín y latín extendido por separado, 238 KB) **quitan las variantes `cv05` y `cv08`** de Inter, que pide el diseño. Los archivos oficiales las tienen todas, también `tnum` y el eje `opsz`, y caben de sobra en el límite (414 KB los dos). Cubren latín, latín extendido y más, así que no hace falta `unicode-range`.
+
+| Archivo | Fuente | Versión | Tamaño | SHA-256 |
+|---|---|---|---|---|
+| `InterVariable.woff2` | [rsms/inter, release v4.1](https://github.com/rsms/inter/releases/tag/v4.1) (`Inter-4.1.zip` → `web/InterVariable.woff2`) | 4.1 (la fuente dice «Version 4.001») | 352 240 B | `693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3` |
+| `Inter-OFL.txt` | el mismo zip (`LICENSE.txt`) | 4.1 | 4 380 B | `262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a` |
+| `GeistMono-Variable.woff2` | [vercel/geist-font, release v1.7.2](https://github.com/vercel/geist-font/releases/tag/v1.7.2) (`geist-font-v1.7.2.zip` → `geist-font/GeistMono/webfonts/GeistMono[wght].woff2`, renombrado) | 1.7.2 (la fuente dice «Version 1.700») | 71 368 B | `fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab` |
+| `GeistMono-OFL.txt` | el mismo zip (`geist-font/OFL.txt`) | 1.7.2 | 4 383 B | `c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90` |
+
+SHA-256 de los zips descargados: `Inter-4.1.zip` `9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`; `geist-font-v1.7.2.zip` `7fc800d2ac6b92844895196e5041aca55d814c15db70c44f79b3b83ab82b04e2` (coincide con el que publica GitHub en la release). Las dos licencias no declaran ningún «Reserved Font Name».
 
 ## Contraste (WCAG 2.x)
 
-AA pide 4,5:1 para texto normal y 3:1 para bordes de controles e indicadores. Calculado con la fórmula de luminancia relativa de WCAG; los colores con transparencia se han mezclado antes con el fondo sobre el que van.
+AA pide 4,5:1 para texto normal y 3:1 para bordes de controles, iconos e indicadores. Calculado con la fórmula de luminancia relativa de WCAG. Los fondos con transparencia se mezclan como en la referencia y en el peor caso: la luz ambiental (`--color-ambient-1`) entera sobre el fondo, la ventana al 80 % encima, la barra lateral al 60 % sobre la ventana, las tarjetas al 88 % y el escenario de la animación al 90 %. La página `prototype/tokens-preview.html` calcula esta misma tabla en vivo con los tokens.
 
 | Par | Claro | Oscuro |
 |---|---|---|
-| Texto / ventana | 16,83 | 17,70 |
-| Texto / tarjeta | 16,83 | 16,26 |
-| Texto / fondo de pistas (controles de píldora) | 14,16 | 13,10 |
-| Texto secundario / ventana | 6,33 | 7,52 |
-| Texto secundario / fondo 2 | 5,82 | 6,48 |
-| Texto secundario / fondo de pistas | 5,33 | 5,57 |
-| Texto secundario / barra lateral | 5,92 | 7,24 |
-| Texto terciario / barra lateral | 4,87 | 5,71 |
-| Texto terciario / tarjeta | 5,21 | 5,45 |
-| Texto terciario / fondo 2 | 4,79 | 5,11 |
-| Acento como texto (enlaces, marcadores) / tarjeta | 8,29 | 10,54 |
-| Acento (iconos activos) / tarjeta | 6,19 | 6,79 |
+| Texto / ventana | 15,82 | 17,39 |
+| Texto / barra lateral | 15,77 | 17,18 |
+| Texto / tarjeta | 16,71 | 16,41 |
+| Texto / fondo 2 | 15,47 | 15,24 |
+| Texto / fondo de pistas | 14,16 | 13,10 |
+| Texto / escenario de la animación | 16,24 | 17,32 |
+| Texto secundario / ventana | 5,05 | 7,04 |
+| Texto secundario / barra lateral | 5,03 | 6,95 |
+| Texto secundario / tarjeta | 5,33 | 6,64 |
+| Texto secundario / fondo 2 | 4,93 | 6,17 |
+| Texto secundario / fondo de pistas | 4,52 | 5,30 |
+| Texto secundario / escenario de la animación | 5,18 | 7,01 |
+| Texto terciario / ventana | 4,62 | 5,17 |
+| Texto terciario / barra lateral | 4,60 | 5,11 |
+| Texto terciario / tarjeta | 4,88 | 4,87 |
+| Texto terciario / fondo 2 | 4,52 | 4,53 |
+| Texto terciario / escenario de la animación | 4,74 | 5,15 |
+| Acento como texto / tarjeta | 8,23 | 10,63 |
+| Marcador (acento como texto / fondo suave, tarjeta) | 7,10 | 8,34 |
+| Marcador en la animación (fondo suave / escenario) | 6,91 | 8,96 |
+| Acento (icono de la pestaña activa) / tarjeta (3:1) | 6,14 | 6,85 |
 | Texto del botón principal / acento | 6,19 | 7,38 |
-| Marcador y aviso índigo (texto / fondo suave) | 7,16 | 8,29 |
-| Correcto / tarjeta | 5,08 | 9,24 |
-| Correcto / fondo suave | 4,54 | 7,08 |
-| Aviso / fondo suave | 6,14 | 8,39 |
-| Peligro / tarjeta | 6,10 | 6,35 |
-| Peligro / fondo suave | 5,32 | 5,80 |
-| Texto / aviso ámbar | 15,10 | 13,74 |
-| Texto / aviso rojo | 14,68 | 14,84 |
-| Texto / resaltado de dato | 14,62 | 10,93 |
-| Tipo del dato / resaltado de dato | 5,95 | 8,01 |
-| Borde de controles / tarjeta (3:1) | 4,20 | 4,29 |
+| Foco (acento) / ventana (3:1) | 5,82 | 7,26 |
+| Correcto / ventana (estado de la cabecera) | 4,85 | 9,88 |
+| Correcto / barra lateral | 4,83 | 9,76 |
+| Correcto / fondo suave | 4,57 | 7,19 |
+| Aviso / ventana (estado de la cabecera) | 5,75 | 10,62 |
+| Aviso / fondo suave (aviso arriba) | 5,18 | 8,19 |
+| Aviso / fondo suave sobre tarjeta (nota) | 5,44 | 7,55 |
+| Peligro / ventana (estado de la cabecera) | 5,51 | 6,79 |
+| Peligro / fondo suave (aviso arriba) | 4,83 | 5,67 |
+| Peligro / fondo suave sobre tarjeta (nota) | 5,09 | 5,27 |
+| Texto / aviso ámbar | 14,26 | 13,41 |
+| Texto / aviso rojo | 13,89 | 14,50 |
+| Texto secundario / nota ámbar | 4,77 | 5,00 |
+| Texto secundario / nota roja | 4,66 | 5,46 |
+| Texto / resaltado de dato | 14,50 | 11,10 |
+| Tipo del dato / resaltado de dato | 5,27 | 8,13 |
+| Subrayado verde (dato devuelto) / tarjeta (3:1) | 5,12 | 9,32 |
+| Interruptor encendido / su mando (3:1) | 5,15 | 3,02 |
+| Interruptor encendido / ventana (3:1) | 4,85 | 6,26 |
+| Borde de controles / tarjeta (3:1) | 4,17 | 4,32 |
 | Borde de controles / fondo de pistas (3:1) | 3,53 | 3,45 |
-| Foco / ventana (3:1) | 6,19 | 7,39 |
-| Interruptor encendido / su mando (3:1) | 5,08 | 4,40 |
-| Interruptor encendido / ventana (3:1) | 5,08 | 4,38 |
 
-Para cumplir AA se han tocado cuatro colores de la muestra: el texto secundario y el terciario (un poco más oscuros en claro y más claros en oscuro), el verde, el ámbar y el rojo del tema claro (un poco más oscuros) y el interruptor encendido del tema oscuro (un verde más oscuro, para que el mando blanco se distinga).
+### Cambios respecto a la referencia
+
+Con los valores exactos de la referencia, estos pares no llegaban a AA. Se ha cambiado lo mínimo (solo la luminosidad, mismo tono) para pasar:
+
+| Token | Tema | Referencia | Ahora | Peor par antes → ahora |
+|---|---|---|---|---|
+| `--color-text-muted` | claro | `#6b6b72` | `#6a6a71` | sobre fondo de pistas: 4,45 → 4,52 |
+| `--color-text-faint` | claro | `#8b8b92` | `#707077` | sobre fondo 2: 3,11 → 4,52 (sobre ventana: 3,18 → 4,62) |
+| `--color-text-faint` | oscuro | `#77777f` | `#85858c` | sobre fondo 2: 3,74 → 4,53 (sobre tarjeta: 4,02 → 4,87) |
+| `--color-ok` | claro | `#1b8738` | `#197e34` | sobre fondo suave: 4,07 → 4,57 (sobre ventana: 4,32 → 4,85) |
+| `--color-switch-on` | claro | `#1b8738` (el verde) | `#197e34` | sigue al verde: 4,60 → 5,15 contra el mando |
+| `--color-switch-on` | oscuro | `#32d74b` (el verde) | `#21ab36` | contra el mando blanco: 1,92 → 3,02 |
+
+El resto de colores de la referencia pasan tal cual: acento, marcadores, ámbar, rojo, resaltado de dato y todos los de texto principal. `--color-control` (borde de 3:1 de los controles) no está en la referencia y se mantiene del prototipo anterior.
+
+**Ojo con el texto terciario en claro**: para llegar a 4,5:1 se queda casi igual que el secundario (`#707077` frente a `#6a6a71`), así que en claro se pierde la diferencia entre los dos grises. Está en las preguntas para Miquel, abajo.
 
 ## Logo
 
@@ -141,7 +193,9 @@ El apartado Logo del prototipo enseña la propuesta a 64, 32 y 16 px sobre claro
 
 - Aprobar el prototipo (la línea de arriba).
 - Logo: aprobar la propuesta principal para sustituir `docs/images/logo.svg`.
-- OK para añadir los archivos de Inter y Geist Mono (~0,5 MB, OFL-1.1) al proyecto.
+- Texto terciario en claro: con AA queda casi igual que el secundario. ¿Se acepta así, o se oscurece un poco más el secundario (por ejemplo `#5f5f66`, el del prototipo anterior, 6,0:1) para que se note el escalón?
+- Fuentes: se han usado los archivos oficiales enteros (414 KB) en vez de los recortes por alfabeto (238 KB), porque los recortes no traen `cv05`/`cv08`. ¿Vale, o se prefieren los recortes sin esas variantes?
+- Rediseño, pasos 2 a 6: GSAP o Web Animations API, y si la entrada con puertas sale solo la primera vez por sesión (recomendado).
 - Si «Prueba un texto» llama a la IA de verdad (gasta) o usa una respuesta de prueba local. El prototipo enseña una respuesta de ejemplo y el destino real.
 - Qué nombre de cliente se enseña en directo (`Claude Code`, `Codex`…): el prototipo pone el nombre de la clave y, si se sabe, el del programa.
 - Qué hace la pasarela cuando la cadena de evidencias se rompe (seguir sirviendo o parar). El prototipo solo avisa.

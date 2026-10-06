@@ -123,6 +123,17 @@ Antifaz no importa ninguno de esos dos módulos: comprobado el 2026-10-01 import
 
 **Pendiente de decidir por Miquel**: si esta excepción de la regla (que habla de "la librería y la imagen") basta así anotada, o si se prefiere una base sin paquetes GPL (por ejemplo una distroless, sin readline ni gdbm), con más trabajo de mantenimiento.
 
+## Tipos de letra del panel
+
+El panel (v0.2) lleva sus dos tipos de letra dentro, en `design/fonts/`, para no pedir nada a terceros (nada de Google Fonts). Son los archivos `woff2` variables oficiales, **sin modificar**, con su licencia al lado. La SIL Open Font License 1.1 permite incluirlos y redistribuirlos con software, también comercial, siempre que vayan con su licencia y no se vendan solos. No son paquetes de Python, así que `scripts/check_licenses.py` no los ve: se anotan aquí a mano. Descargados y comprobados el 2026-10-06:
+
+| Tipo de letra | Versión | Licencia | Archivo | Fuente | SHA-256 del woff2 |
+|---|---|---|---|---|---|
+| Inter | 4.1 | OFL-1.1 (`design/fonts/Inter-OFL.txt`) | `design/fonts/InterVariable.woff2` (352 240 B) | [rsms/inter, release v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | `693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3` |
+| Geist Mono | 1.7.2 | OFL-1.1 (`design/fonts/GeistMono-OFL.txt`) | `design/fonts/GeistMono-Variable.woff2` (71 368 B; en el zip, `GeistMono[wght].woff2`) | [vercel/geist-font, release v1.7.2](https://github.com/vercel/geist-font/releases/tag/v1.7.2) | `fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab` |
+
+Ninguna de las dos licencias declara un «Reserved Font Name». El resto de detalles (zips de origen y sus SHA-256) están en `design/README.md`.
+
 ## Modelos y datos
 
 ### Datos del benchmark (no se distribuyen)
