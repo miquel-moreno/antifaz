@@ -65,7 +65,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv sync --frozen
       - name: CLI tests
-        run: uv run pytest tests/unit/test_cli.py tests/unit/test_cli_init.py --no-cov
+        run: uv run pytest tests/unit/test_cli.py tests/unit/test_cli_init.py tests/unit/test_cli_doctor.py --no-cov
 
   supply-chain:
     name: Vulnerabilities and licenses

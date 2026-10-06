@@ -1,5 +1,5 @@
 """Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`,
-`antifaz init`, `antifaz serve`.
+`antifaz init`, `antifaz serve`, `antifaz doctor`.
 
 Uses the library functions directly. `scan` prints `TYPE start end` per detection and
 `mask` prints the masked text. Neither prints values nor the placeholder table, and errors
@@ -7,6 +7,8 @@ are generic messages that never echo the input. `verify` (cli/verify.py) plants 
 data with the current configuration and checks that none reaches a fake provider. `init`
 (cli/init.py) writes a .env with a new key; provider keys never come from argv. `serve`
 (cli/serve.py) runs the gateway with fixed uvicorn settings: it is the image's default command.
+`doctor` (cli/doctor.py) checks the configuration, the running gateway and, only with
+--providers, the provider keys (a free model list).
 
 Forbidden: No dependency on the database for scan.
 """
@@ -17,7 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
-from antifaz.cli import init, serve
+from antifaz.cli import doctor, init, serve
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
@@ -47,6 +49,7 @@ def _parser() -> argparse.ArgumentParser:
         "provider (never calls a real one)",
     )
     init.add_parser(commands)
+    doctor.add_parser(commands)
     commands.add_parser(
         "serve",
         help="run the gateway on 0.0.0.0:8000 (the image's default command; no options)",
@@ -67,6 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "init":
         return init.run(args)
+    if args.command == "doctor":
+        return doctor.run(args)
     if args.command == "serve":
         return serve.run()
     if args.command == "verify":

@@ -53,10 +53,12 @@ curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docke
 docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
   ghcr.io/miquel-moreno/antifaz:0.2.0 init
 docker compose up -d
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.2.0"}
+docker compose exec antifaz antifaz doctor   # checks .env and the gateway
 ```
 
 `init` asks for your provider keys without showing them, writes `.env` and makes a new random `ANTIFAZ_API_KEY`, which it shows once: your clients use it. No key goes on the command line. `--rm` deletes the container and its log (which holds that key); `--user` makes `.env` yours. The downloaded `docker-compose.yml` pins the image by digest. Running `init` in the container needs v0.2.0 or later: the 0.1.0 image can only serve.
+
+`doctor` says what is wrong, if anything: the setting to fix (never its value), whether the gateway answers, and the next steps. Add `--providers` to also test your provider keys: it only lists their models, which is free.
 
 On Windows (PowerShell), `curl.exe` instead of `curl`, without `--user`, and `${PWD}`, in one line (or split it with a backtick `` ` `` at the end of each line, not `\`):
 
@@ -64,6 +66,7 @@ On Windows (PowerShell), `curl.exe` instead of `curl`, without `--user`, and `${
 curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
 docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
 docker compose up -d
+docker compose exec antifaz antifaz doctor
 ```
 
 **With v0.1.0 (today), by hand:**
