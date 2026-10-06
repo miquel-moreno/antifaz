@@ -51,6 +51,8 @@ import math
 import os
 import re
 import secrets
+import shutil
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -312,13 +314,22 @@ def parse(raw: bytes) -> tuple[dict[str, Any], bool]:
 
 
 def read_current(path: Path) -> Current:
-    if os.path.islink(path):
+    try:
+        is_link = os.path.islink(path)
+        exists = os.path.lexists(path)
+        is_file = exists and not is_link and path.is_file()
+        links = path.stat().st_nlink if is_file else 1
+    except OSError:  # PermissionError on the file or a folder above it
+        raise SetupError(
+            "cannot check the settings file (permission?); nothing was changed"
+        ) from None
+    if is_link:
         raise SetupError("the settings file is a link; edit the file it points to by hand")
-    if not os.path.lexists(path):
+    if not exists:
         return Current(path, False, b"", {}, False, "\n", True)
-    if not path.is_file():
+    if not is_file:
         raise SetupError("the settings path exists and is not a file; not touching it")
-    if path.stat().st_nlink > 1:
+    if links > 1:
         raise SetupError(
             "the settings file has other hard links; replacing it would split them, so edit it "
             "by hand"
@@ -400,7 +411,13 @@ def _redact(value: Any, path: tuple[str, ...], old: dict[str, Any] | None) -> An
             return _fingerprint(value)
         return value
     if isinstance(value, dict):
-        return {key: _redact(item, (*path, key), old) for key, item in value.items()}
+        # Key names are shown only at the top level and inside env (variable names): below
+        # that, a name (an MCP server, a hook matcher) can say too much.
+        shown_keys = path in ((), ("env",))
+        return {
+            (key if shown_keys else f"<hidden key {number}>"): _redact(item, (*path, key), old)
+            for number, (key, item) in enumerate(value.items(), start=1)
+        }
     if isinstance(value, list):
         return [_redact(item, (*path, "[]"), old) for item in value]
     if value is None or isinstance(value, bool):
@@ -584,7 +601,7 @@ def _outranking_notes(target: Path, project: bool, url: str) -> list[str]:
     notes = []
     for name in (LOCAL_SETTINGS, SETTINGS):
         other = Path.cwd() / ".claude" / name
-        if not other.is_file() or _real(other) == _real(target):
+        if not os.path.isfile(other) or _real(other) == _real(target):
             continue
         try:
             data = read_current(other).data
@@ -598,6 +615,40 @@ def _outranking_notes(target: Path, project: bool, url: str) -> list[str]:
                 "in this folder Claude Code would not use Antifaz"
             )
     return notes
+
+
+def _ignore_note(target: Path) -> str | None:
+    """With --project: a warning if settings.local.json is in a git work tree and not
+    git-ignored (`git check-ignore -q`), or if that could not be checked."""
+    if git_work_tree(target.parent) is None:
+        return None
+    relative = f"{target.parent.name}/{target.name}"
+    could_not = (
+        f"could not check whether {relative} is git-ignored (is git installed?); make sure it "
+        "is, so it never ends up in a commit"
+    )
+    git = shutil.which("git")
+    if git is None:
+        return could_not
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed arguments, no shell
+            [git, "check-ignore", "-q", "--", relative],
+            cwd=target.parent.parent,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return could_not
+    if result.returncode == 0:
+        return None
+    if result.returncode == 1:
+        return (
+            f"{relative} is not git-ignored in this repository: add it to .gitignore so it "
+            "never ends up in a commit (Claude Code adds it to your global gitignore only when "
+            "it saves a setting there itself)"
+        )
+    return could_not
 
 
 def _confirm(args: argparse.Namespace) -> None:
@@ -675,6 +726,8 @@ def run(args: argparse.Namespace) -> int:
         notes = _warnings(current, new, args.uninstall)
         if not args.uninstall:
             notes += _outranking_notes(path, args.project, url)
+            if args.project and (ignore_note := _ignore_note(path)) is not None:
+                notes.append(ignore_note)
         for note in notes:
             _warn(f"warning: {note}")
         if helper is not None and not args.uninstall:

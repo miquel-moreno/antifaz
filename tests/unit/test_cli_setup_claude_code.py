@@ -9,7 +9,9 @@ import io
 import json
 import os
 import secrets
+import shutil
 import stat
+import subprocess
 import sys
 from collections.abc import Iterator
 from datetime import datetime
@@ -995,3 +997,103 @@ def test_a_junction_config_folder_is_explained(
     assert run("--apply", "--yes") == 0
     assert "link or junction" in capsys.readouterr().err
     assert (real / "settings.json").is_file()
+
+
+# --- Second review ---------------------------------------------------------------------------
+
+
+def test_nested_key_names_are_hidden_in_the_diff(
+    settings_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Follow-up 1: a key name below the top level (an MCP server name, a hook matcher) can
+    say too much; only top-level keys and env variable names are shown."""
+    server = canary("server-")
+    data = {"env": {"MY_VAR": "1"}, "mcpServers": {server: {}, "second": {"command": "x"}}}
+    write(settings_file, data)
+    assert run() == 0
+    out = capsys.readouterr().out
+    assert server not in out
+    assert '"<hidden key 1>"' in out  # within the diff's context lines
+    assert '"mcpServers"' in out
+    assert '"MY_VAR"' in out
+    assert setup._redact(data, (), None) == {
+        "env": {"MY_VAR": "<hidden>"},
+        "mcpServers": {"<hidden key 1>": {}, "<hidden key 2>": {"<hidden key 1>": "<hidden>"}},
+    }
+
+
+def test_an_unreadable_settings_path_gives_a_fixed_message(
+    settings_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Follow-up 2: a PermissionError while checking the file is a refusal, not a traceback."""
+    write(settings_file, {})
+
+    def denied(self: Path, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError(13, "denied", str(self))
+
+    monkeypatch.setattr(Path, "is_file", denied)
+    assert run() == 2
+    assert "cannot check the settings file" in capsys.readouterr().err
+
+
+def test_an_unreadable_stat_gives_a_fixed_message(
+    settings_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(settings_file, {})
+    real_stat = Path.stat
+
+    def denied(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name == "settings.json":
+            raise PermissionError(13, "denied", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    assert run() == 2
+    assert "cannot check the settings file" in capsys.readouterr().err
+
+
+@pytest.fixture
+def real_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """git with no global or system configuration (the user's global gitignore must not count)."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    empty = tmp_path / "empty.gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    subprocess.run([git, "init", "-q", str(tmp_path / "work")], check=True)  # noqa: S603
+    return git
+
+
+def test_project_warns_when_settings_local_is_not_git_ignored(
+    real_git: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Follow-up 3: the file Claude Code reads per person must not end up in a commit."""
+    assert run("--project") == 0
+    assert "is not git-ignored" in capsys.readouterr().err
+
+
+def test_project_says_nothing_when_settings_local_is_git_ignored(
+    real_git: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "work" / ".gitignore").write_text(".claude/settings.local.json\n", encoding="utf-8")
+    assert run("--project") == 0
+    assert "git-ignored" not in capsys.readouterr().err
+
+
+def test_project_without_git_says_it_could_not_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "work" / ".git").mkdir()
+    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
+    assert run("--project") == 0
+    assert "could not check whether" in capsys.readouterr().err
+
+
+def test_project_outside_a_repository_needs_no_ignore_check(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
+    assert run("--project") == 0
+    assert "git-ignored" not in capsys.readouterr().err
