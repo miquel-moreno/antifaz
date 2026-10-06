@@ -61,7 +61,7 @@ def test_the_image_runs_antifaz_and_serves_by_default(stack: Stack) -> None:
 def test_help_works_in_the_image(stack: Stack) -> None:
     result = docker("run", "--rm", "--network", "none", IMAGE, "--help")
     assert result.returncode == 0, result.stderr
-    for command in ("serve", "init", "verify", "scan", "mask"):
+    for command in ("serve", "init", "verify", "doctor", "scan", "mask"):
         assert command in result.stdout, command
 
 
