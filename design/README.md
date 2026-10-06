@@ -103,7 +103,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 - **Inter** para la interfaz y los títulos (variable, con eje de tamaño óptico: con `font-optical-sizing: auto` los títulos grandes usan su corte Display) y **Geist Mono** para marcadores, códigos y el YAML. Las dos tienen licencia **SIL Open Font License 1.1**.
 - **Van dentro del proyecto**, en `design/fonts/`, y se cargan con `design/fonts/fonts.css` (`font-display: swap`). Nada de Google Fonts: Antifaz no hace peticiones a terceros. Si no cargan, se usa la lista de fuentes del sistema de `--font-sans` y `--font-mono` (`tokens.css`).
 - Ajustes de Inter en los tokens: `--font-features` (`"cv05", "cv08"`), `--tracking-body` (−0,011em), `--font-numeric` (`tabular-nums`, también la clase `.tabular-nums`) y la escala de títulos `--text-title` (`clamp(30px, 4.4cqi, 50px)`, peso 650, −0,034em).
-- **Por qué los archivos oficiales enteros y no los recortes por alfabeto.** Los recortes de Google Fonts / Fontsource (latín y latín extendido por separado, 238 KB) **quitan las variantes `cv05` y `cv08`** de Inter, que pide el diseño. Los archivos oficiales las tienen todas, también `tnum` y el eje `opsz`, y caben de sobra en el límite (414 KB los dos). Cubren latín, latín extendido y más, así que no hace falta `unicode-range`.
+- **Por qué los archivos oficiales enteros y no los recortes por alfabeto** (aprobado por Miquel al revisar el paso 1). Los recortes de Google Fonts / Fontsource (latín y latín extendido por separado, 238 KB) **quitan las variantes `cv05` y `cv08`** de Inter, que pide el diseño. Los archivos oficiales las tienen todas, también `tnum` y el eje `opsz`, y caben de sobra en el límite (414 KB los dos). Cubren latín, latín extendido y más, así que no hace falta `unicode-range`.
 
 | Archivo | Fuente | Versión | Tamaño | SHA-256 |
 |---|---|---|---|---|
@@ -126,12 +126,12 @@ AA pide 4,5:1 para texto normal y 3:1 para bordes de controles, iconos e indicad
 | Texto / fondo 2 | 15,47 | 15,24 |
 | Texto / fondo de pistas | 14,16 | 13,10 |
 | Texto / escenario de la animación | 16,24 | 17,32 |
-| Texto secundario / ventana | 5,05 | 7,04 |
-| Texto secundario / barra lateral | 5,03 | 6,95 |
-| Texto secundario / tarjeta | 5,33 | 6,64 |
-| Texto secundario / fondo 2 | 4,93 | 6,17 |
-| Texto secundario / fondo de pistas | 4,52 | 5,30 |
-| Texto secundario / escenario de la animación | 5,18 | 7,01 |
+| Texto secundario / ventana | 5,96 | 7,04 |
+| Texto secundario / barra lateral | 5,93 | 6,95 |
+| Texto secundario / tarjeta | 6,29 | 6,64 |
+| Texto secundario / fondo 2 | 5,82 | 6,17 |
+| Texto secundario / fondo de pistas | 5,33 | 5,30 |
+| Texto secundario / escenario de la animación | 6,11 | 7,01 |
 | Texto terciario / ventana | 4,62 | 5,17 |
 | Texto terciario / barra lateral | 4,60 | 5,11 |
 | Texto terciario / tarjeta | 4,88 | 4,87 |
@@ -154,8 +154,8 @@ AA pide 4,5:1 para texto normal y 3:1 para bordes de controles, iconos e indicad
 | Peligro / fondo suave sobre tarjeta (nota) | 5,09 | 5,27 |
 | Texto / aviso ámbar | 14,26 | 13,41 |
 | Texto / aviso rojo | 13,89 | 14,50 |
-| Texto secundario / nota ámbar | 4,77 | 5,00 |
-| Texto secundario / nota roja | 4,66 | 5,46 |
+| Texto secundario / nota ámbar | 5,63 | 5,00 |
+| Texto secundario / nota roja | 5,50 | 5,46 |
 | Texto / resaltado de dato | 14,50 | 11,10 |
 | Tipo del dato / resaltado de dato | 5,27 | 8,13 |
 | Subrayado verde (dato devuelto) / tarjeta (3:1) | 5,12 | 9,32 |
@@ -170,7 +170,7 @@ Con los valores exactos de la referencia, estos pares no llegaban a AA. Se ha ca
 
 | Token | Tema | Referencia | Ahora | Peor par antes → ahora |
 |---|---|---|---|---|
-| `--color-text-muted` | claro | `#6b6b72` | `#6a6a71` | sobre fondo de pistas: 4,45 → 4,52 |
+| `--color-text-muted` | claro | `#6b6b72` | `#5f5f66` | sobre fondo de pistas: 4,45 → 5,33 (más oscuro de lo justo, para que se note el escalón con el terciario) |
 | `--color-text-faint` | claro | `#8b8b92` | `#707077` | sobre fondo 2: 3,11 → 4,52 (sobre ventana: 3,18 → 4,62) |
 | `--color-text-faint` | oscuro | `#77777f` | `#85858c` | sobre fondo 2: 3,74 → 4,53 (sobre tarjeta: 4,02 → 4,87) |
 | `--color-ok` | claro | `#1b8738` | `#197e34` | sobre fondo suave: 4,07 → 4,57 (sobre ventana: 4,32 → 4,85) |
@@ -179,7 +179,7 @@ Con los valores exactos de la referencia, estos pares no llegaban a AA. Se ha ca
 
 El resto de colores de la referencia pasan tal cual: acento, marcadores, ámbar, rojo, resaltado de dato y todos los de texto principal. `--color-control` (borde de 3:1 de los controles) no está en la referencia y se mantiene del prototipo anterior.
 
-**Ojo con el texto terciario en claro**: para llegar a 4,5:1 se queda casi igual que el secundario (`#707077` frente a `#6a6a71`), así que en claro se pierde la diferencia entre los dos grises. Está en las preguntas para Miquel, abajo.
+**Escalón entre los grises en claro**: para llegar a 4,5:1 el terciario tuvo que oscurecerse hasta `#707077`, casi igual que el secundario. Por eso el secundario se ha oscurecido a `#5f5f66` (decisión de Miquel al revisar el paso 1): entre los dos hay ahora un contraste de 1,29:1 (antes 1,09:1), así que se distinguen a simple vista. En oscuro ya había escalón (`#9d9da6` frente a `#85858c`).
 
 ## Logo
 
@@ -193,8 +193,6 @@ El apartado Logo del prototipo enseña la propuesta a 64, 32 y 16 px sobre claro
 
 - Aprobar el prototipo (la línea de arriba).
 - Logo: aprobar la propuesta principal para sustituir `docs/images/logo.svg`.
-- Texto terciario en claro: con AA queda casi igual que el secundario. ¿Se acepta así, o se oscurece un poco más el secundario (por ejemplo `#5f5f66`, el del prototipo anterior, 6,0:1) para que se note el escalón?
-- Fuentes: se han usado los archivos oficiales enteros (414 KB) en vez de los recortes por alfabeto (238 KB), porque los recortes no traen `cv05`/`cv08`. ¿Vale, o se prefieren los recortes sin esas variantes?
 - Rediseño, pasos 2 a 6: GSAP o Web Animations API, y si la entrada con puertas sale solo la primera vez por sesión (recomendado).
 - Si «Prueba un texto» llama a la IA de verdad (gasta) o usa una respuesta de prueba local. El prototipo enseña una respuesta de ejemplo y el destino real.
 - Qué nombre de cliente se enseña en directo (`Claude Code`, `Codex`…): el prototipo pone el nombre de la clave y, si se sabe, el del programa.

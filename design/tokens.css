@@ -55,7 +55,8 @@
 
   /* Text: primary, secondary and tertiary. */
   --color-text: #1d1d1f;
-  --color-text-muted: #6a6a71; /* AA: brief #6b6b72 (4.45:1 on surface-3) */
+  --color-text-muted: #5f5f66; /* AA + step: brief #6b6b72 (4.45:1 on surface-3); darker so it
+     stays visibly apart from --color-text-faint (Miquel, step 1 review) */
   --color-text-faint: #707077; /* AA: brief #8b8b92 (3.1-3.4:1 everywhere) */
 
   /* Accent: indigo. The main action, focus, the markers and the mask. */
