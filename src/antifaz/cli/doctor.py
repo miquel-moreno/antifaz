@@ -7,13 +7,19 @@ Three checks, in order (issue 43, ADR-0017):
    `check_safe_to_start`. It names variables, never values, and says which providers have a
    key (names only) and whether the NER is on.
 2. Gateway: `GET {url}/healthz` (public: no key is sent) with a Host the gateway accepts and
-   never through a proxy (HTTP(S)_PROXY is ignored: the gateway is local), no redirects.
+   never through a proxy (HTTP(S)_PROXY is ignored: the gateway is local), no redirects, no
+   compression (so the 64 KiB cap on the answer is real).
 3. Only with --providers: `GET` the model list of each provider that has a key, straight to
    the provider (OpenAI `{base}/models` with Bearer; Anthropic `{base}/v1/models` with
    x-api-key and anthropic-version). Listing models is free. No redirects (a key must never
    follow one), a timeout, and the answer body is never read: only its status code. These
    requests DO honour HTTP(S)_PROXY, as the gateway's own client does, so a corporate proxy
    is checked on the same path the gateway uses.
+
+--timeout is a total deadline for each request (connect, headers and body together), not
+per read: a server that answers one byte at a time cannot hold doctor longer. A base URL
+with a user or password in it is named and its provider is not called. The httpx and httpcore
+loggers are kept at WARNING while doctor runs, so they never log a request line.
 
 Every message is fixed text: never a key, a body, an exception or a base URL (it could hold
 a user:password). Exit codes: 0 every check passed, 1 something failed, 2 usage.
@@ -23,10 +29,14 @@ redirects. Calling a provider without --providers.
 """
 
 import argparse
+import contextlib
 import json
+import logging
 import re
 import sys
-from collections.abc import Sequence
+import threading
+import time
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, TextIO
@@ -37,6 +47,7 @@ from pydantic import ValidationError
 
 from antifaz.config import Settings, UnsafeConfigError, _format_problem, check_safe_to_start
 from antifaz.healthcheck import host_header
+from antifaz.logging import QUIET_LOGGERS
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 5.0
@@ -46,6 +57,11 @@ DOCS_URL = "https://github.com/miquel-moreno/antifaz#quick-start"
 MAX_HEALTH_BYTES = 64 * 1024
 NER_STATES = frozenset({"ok", "starting", "circuit_open", "closed"})
 _VERSION = re.compile(r"[0-9A-Za-z.+-]{1,40}")
+# (provider, base URL variable, settings field)
+BASE_URLS = (
+    ("OpenAI", "ANTIFAZ_OPENAI_BASE_URL", "openai_base_url"),
+    ("Anthropic", "ANTIFAZ_ANTHROPIC_BASE_URL", "anthropic_base_url"),
+)
 
 Status = Literal["ok", "fail", "note"]
 MARKS: dict[Status, str] = {"ok": "✓", "fail": "✗", "note": "-"}
@@ -62,6 +78,48 @@ class Report:
     @property
     def failed(self) -> bool:
         return any(status == "fail" for status, _ in self.lines)
+
+
+class DeadlineExceeded(httpx.TimeoutException):
+    """The total time for one request ran out."""
+
+
+def within[T](seconds: float, work: Callable[[float], T]) -> T:
+    """`work(deadline)` in a daemon thread, given `seconds` in total (httpx's own timeouts are
+    per read). Raises DeadlineExceeded when time runs out; `work` should also check the
+    deadline while it reads, so the thread stops soon after."""
+    deadline = time.monotonic() + seconds
+    outcome: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            outcome["value"] = work(deadline)
+        except BaseException as error:  # handed to the caller, never printed
+            outcome["error"] = error
+
+    thread = threading.Thread(target=target, name="antifaz-doctor", daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise DeadlineExceeded("deadline")
+    if "error" in outcome:
+        raise outcome["error"]
+    value: T = outcome["value"]
+    return value
+
+
+@contextlib.contextmanager
+def quiet_http_logs() -> Iterator[None]:
+    """httpx logs every request line at INFO (a base URL could hold a user:password)."""
+    loggers = [logging.getLogger(name) for name in QUIET_LOGGERS]
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.setLevel(level)
 
 
 # --- Arguments --------------------------------------------------------------------------------
@@ -129,14 +187,24 @@ def _variable(field_name: str) -> str:
     return name if name.startswith("ANTIFAZ_") else f"ANTIFAZ_{name}"
 
 
-def load_settings(folder: Path) -> tuple[Settings | None, list[str]]:
-    """The settings from folder/.env and the environment, or the variables that are wrong."""
+def load_settings(folder: Path) -> tuple[Settings | None, str]:
+    """The settings from folder/.env and the environment, or why they cannot be read."""
     try:
-        return Settings(_env_file=folder / ".env"), []
+        return Settings(_env_file=folder / ".env"), ""
     except ValidationError as error:
         # Only the field names: the error itself repeats the values it got.
         fields = sorted({str(detail["loc"][0]) for detail in error.errors() if detail["loc"]})
-        return None, [_variable(name) for name in fields]
+        return None, "cannot read; check " + ", ".join(_variable(name) for name in fields)
+    except (UnicodeDecodeError, OSError):  # never shown: the error holds bytes of the file
+        return None, "cannot read .env as UTF-8 text"
+
+
+def has_userinfo(url: str) -> bool:
+    """True if `url` has a user or password before its host (https://user:pass@host)."""
+    try:
+        return "@" in urlsplit(url).netloc
+    except ValueError:
+        return False
 
 
 def configured_providers(settings: Settings) -> list[tuple[str, str]]:
@@ -151,9 +219,9 @@ def configured_providers(settings: Settings) -> list[tuple[str, str]]:
 
 def check_config(folder: Path, report: Report) -> Settings | None:
     found = (folder / ".env").is_file()
-    settings, wrong = load_settings(folder)
+    settings, problem = load_settings(folder)
     if settings is None:
-        report.add("fail", "configuration: cannot read; check " + ", ".join(wrong))
+        report.add("fail", f"configuration: {problem}")
         return None
     try:
         check_safe_to_start(settings)
@@ -170,6 +238,13 @@ def check_config(folder: Path, report: Report) -> Settings | None:
         + (", ".join(names) if names else "none (every proxy route answers 503)"),
     )
     report.add("note", f"NER (names and addresses): {'on' if settings.ner_enabled else 'off'}")
+    for _, variable, attribute in BASE_URLS:
+        if has_userinfo(getattr(settings, attribute)):
+            report.add(
+                "note",
+                f"warning: {variable} holds a user or password; it travels with every request "
+                "and doctor does not call that provider",
+            )
     return settings
 
 
@@ -205,9 +280,12 @@ def choose_host(url: str, allowed_hosts: Sequence[str] | None) -> str:
     return exact[0] if exact else host_header(allowed_hosts)
 
 
-def _health_body(response: httpx.Response) -> dict[str, Any] | None:
+def _health_body(response: httpx.Response, deadline: float) -> dict[str, Any] | None:
+    """The JSON object of an uncompressed answer of at most 64 KiB, read before `deadline`."""
     data = b""
-    for chunk in response.iter_bytes():
+    for chunk in response.iter_bytes():  # no decoding: other encodings are refused before
+        if time.monotonic() > deadline:
+            raise DeadlineExceeded("deadline")
         data += chunk
         if len(data) > MAX_HEALTH_BYTES:
             return None
@@ -222,13 +300,21 @@ def check_gateway(
     url: str, host: str, timeout: float, settings: Settings | None, report: Report
 ) -> bool:
     """Report the gateway's state. True if it answered at all."""
-    try:
+    headers = {"Host": host, "Accept-Encoding": "identity"}
+
+    def ask(deadline: float) -> tuple[int, bool, dict[str, Any] | None]:
         with (
             gateway_client(timeout) as client,
-            client.stream("GET", f"{url}/healthz", headers={"Host": host}) as response,
+            client.stream("GET", f"{url}/healthz", headers=headers) as response,
         ):
-            status = response.status_code
-            body = _health_body(response) if status == 200 else None
+            encoding = response.headers.get("content-encoding", "").strip().lower()
+            if encoding not in ("", "identity"):
+                return response.status_code, True, None
+            body = _health_body(response, deadline) if response.status_code == 200 else None
+            return response.status_code, False, body
+
+    try:
+        status, compressed, body = within(timeout, ask)
     except httpx.TimeoutException:
         report.add("fail", f"gateway: no answer within {timeout:g} s")
         return False
@@ -241,6 +327,9 @@ def check_gateway(
             "gateway: refused the Host header (HTTP 400): its ANTIFAZ_ALLOWED_HOSTS does not "
             "match this configuration (restart it after changing .env)",
         )
+        return True
+    if compressed:
+        report.add("fail", "gateway: /healthz answer is compressed (Content-Encoding); not read")
         return True
     if status != 200 or body is None or body.get("status") != "ok":
         report.add("fail", f"gateway: /healthz did not answer ok (HTTP {status})")
@@ -298,12 +387,18 @@ def _provider_status(
     if secret is None or _format_problem(secret.get_secret_value()) is not None:
         return "fail", f"{name}: not checked: fix {key_variable} first"
     url, headers, base_variable = _provider_request(name, secret.get_secret_value(), settings)
-    try:
+    if has_userinfo(url):
+        return "fail", f"{name}: not checked: {base_variable} holds a user or password"
+
+    def ask(_deadline: float) -> int:
         with (
             provider_client(timeout) as client,
             client.stream("GET", url, headers=headers) as response,
         ):
-            status = response.status_code  # the body is never read: it could echo the key
+            return response.status_code  # the body is never read: it could echo the key
+
+    try:
+        status = within(timeout, ask)
     except httpx.TimeoutException:
         return "fail", f"{name}: no answer within {timeout:g} s (check {base_variable})"
     except (httpx.InvalidURL, httpx.UnsupportedProtocol):
@@ -380,9 +475,10 @@ def run(args: argparse.Namespace) -> int:
     report = Report()
     settings = check_config(folder, report)
     host = choose_host(url, settings.allowed_hosts if settings is not None else None)
-    gateway_up = check_gateway(url, host, args.timeout, settings, report)
-    if args.providers:
-        check_providers(settings, args.timeout, report)
+    with quiet_http_logs():
+        gateway_up = check_gateway(url, host, args.timeout, settings, report)
+        if args.providers:
+            check_providers(settings, args.timeout, report)
     _print(report, gateway_up, sys.stdout)
     return 1 if report.failed else 0
 

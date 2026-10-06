@@ -5,12 +5,14 @@ the repository is never read. Keys are canaries made at runtime. The gateway and
 are httpx.MockTransport fakes, or tiny servers on 127.0.0.1; any other connection fails.
 """
 
+import gzip
 import io
 import json
 import logging
 import os
 import secrets
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -334,7 +336,7 @@ def test_an_unexpected_status_is_reported_with_its_code_only(
     assert not result.holds_any(canaries.all())
 
 
-def test_base_urls_are_never_printed(
+def test_a_base_url_with_a_password_is_named_and_not_called(
     tmp_path: Path, canaries: Keys, gateway: Any, providers: Any, run: Any
 ) -> None:
     password = canary("pw")
@@ -342,14 +344,46 @@ def test_base_urls_are_never_printed(
         tmp_path, canaries, ANTIFAZ_OPENAI_BASE_URL=f"https://user:{password}@fake.invalid/v1"
     )
     gateway(healthy())
-
-    def fail(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError(f"cannot connect to {request.url}")
-
-    providers(fail)
+    provider = providers(models_ok)
     result = run("--providers")
     assert result.code == 1
+    assert "ANTIFAZ_OPENAI_BASE_URL holds a user or password" in result.out
+    assert "OpenAI: not checked: ANTIFAZ_OPENAI_BASE_URL holds a user or password" in result.out
+    assert [str(r.url) for r in provider.requests] == ["https://api.anthropic.com/v1/models"]
     assert not result.holds_any([password, *canaries.all()])
+
+
+def test_a_base_url_with_a_password_is_only_a_warning_without_providers(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    password = canary("pw")
+    write_env(tmp_path, canaries, ANTIFAZ_ANTHROPIC_BASE_URL=f"https://{password}@fake.invalid")
+    gateway(healthy())
+    result = run()
+    assert result.code == 0
+    assert "ANTIFAZ_ANTHROPIC_BASE_URL holds a user or password" in result.out
+    assert not result.holds_any([password, *canaries.all()])
+
+
+def test_httpx_logs_nothing_about_provider_requests(
+    tmp_path: Path, canaries: Keys, gateway: Any, providers: Any, run: Any
+) -> None:
+    marker = canary("host")
+    write_env(tmp_path, canaries, ANTIFAZ_OPENAI_BASE_URL=f"https://{marker}.fake.invalid/v1")
+    gateway(healthy())
+    providers(models_ok)
+    httpx_logger = logging.getLogger("httpx")
+    before = httpx_logger.level
+    httpx_logger.setLevel(logging.NOTSET)  # as a library user would leave it: INFO gets through
+    try:
+        result = run("--providers")
+        after = httpx_logger.level
+    finally:
+        httpx_logger.setLevel(before)
+    assert result.code == 0
+    assert marker not in result.logs
+    assert "HTTP Request" not in result.logs
+    assert after == logging.NOTSET  # doctor puts the library loggers back as they were
 
 
 # --- Gateway ------------------------------------------------------------------------------------
@@ -741,3 +775,153 @@ def test_provider_checks_honour_the_proxy_like_the_gateway(
     assert proxy.requests and upstream.requests == []  # through the proxy, as the gateway goes
     assert proxy.requests[0][0] == f"{upstream.url}/v1/models"
     assert health.requests  # and the gateway check went direct
+
+
+# --- Total deadlines, encodings and unreadable files -------------------------------------------
+
+
+def test_a_healthz_compressed_answer_is_refused(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    write_env(tmp_path, canaries)
+    body = gzip.compress(b'{"status": "ok", "version": "0.2.0"}')
+    health = gateway(
+        lambda request: httpx.Response(200, content=body, headers={"content-encoding": "gzip"})
+    )
+    result = run()
+    assert result.code == 1
+    assert "gateway: /healthz answer is compressed" in result.out
+    assert health.requests[0].headers["accept-encoding"] == "identity"
+
+
+def test_a_healthz_identity_encoding_is_accepted(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    write_env(tmp_path, canaries)
+    gateway(
+        lambda request: httpx.Response(
+            200, json={"status": "ok", "version": "0.2.0"}, headers={"content-encoding": "identity"}
+        )
+    )
+    assert run().code == 0
+
+
+def test_an_env_file_that_is_not_utf8_is_named_not_shown(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    text = f"ANTIFAZ_API_KEY={canaries.gateway}\nANTIFAZ_APP_NAME=compañía\n"
+    (tmp_path / ".env").write_bytes(text.encode("cp1252"))
+    gateway(healthy())
+    result = run("--providers")
+    assert result.code == 1
+    assert "configuration: cannot read .env as UTF-8 text" in result.out
+    assert "providers: not checked" in result.out
+    assert not result.holds_any(canaries.all())
+    assert "Traceback" not in result.err
+
+
+def test_an_env_file_that_cannot_be_opened_is_reported(
+    tmp_path: Path, canaries: Keys, gateway: Any, monkeypatch: pytest.MonkeyPatch, run: Any
+) -> None:
+    write_env(tmp_path, canaries)
+    gateway(healthy())
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(doctor, "Settings", broken)
+    result = run()
+    assert result.code == 1
+    assert "configuration: cannot read .env as UTF-8 text" in result.out
+
+
+@pytest.fixture
+def drip_server() -> Iterator[Callable[[bool], str]]:
+    """A server on 127.0.0.1 that sends one byte every 0.1 s for up to 10 s, in the headers
+    (`in_headers`) or in the body. Each byte arrives well within httpx's read timeout."""
+    servers: list[ThreadingHTTPServer] = []
+
+    def start(in_headers: bool) -> str:
+        class Drip(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: Any) -> None:
+                """Silent."""
+
+            def do_GET(self) -> None:
+                head = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                try:
+                    if in_headers:
+                        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+                        for _ in range(100):
+                            self.wfile.write(b"X-Slow: a\r\n")
+                            self.wfile.flush()
+                            time.sleep(0.1)
+                        return
+                    self.wfile.write(head + b"Content-Length: 1000\r\n\r\n")
+                    for _ in range(100):
+                        self.wfile.write(b" ")
+                        self.wfile.flush()
+                        time.sleep(0.1)
+                except OSError:
+                    return  # the client gave up, as it should
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Drip)
+        server.daemon_threads = True
+        servers.append(server)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    yield start
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("in_headers", [False, True])
+def test_the_timeout_is_a_total_deadline_for_healthz(
+    tmp_path: Path, canaries: Keys, drip_server: Callable[[bool], str], run: Any, in_headers: bool
+) -> None:
+    write_env(tmp_path, canaries)
+    url = drip_server(in_headers)
+    started = time.monotonic()
+    result = run("--url", url, "--timeout", "1")
+    elapsed = time.monotonic() - started
+    assert result.code == 1
+    assert "gateway: no answer within 1 s" in result.out
+    assert elapsed < 4
+
+
+@pytest.mark.parametrize("in_headers", [False, True])
+def test_the_timeout_is_a_total_deadline_for_providers(
+    tmp_path: Path,
+    canaries: Keys,
+    gateway: Any,
+    drip_server: Callable[[bool], str],
+    run: Any,
+    in_headers: bool,
+) -> None:
+    url = drip_server(in_headers)
+    write_env(tmp_path, canaries, ANTIFAZ_ANTHROPIC_API_KEY="", ANTIFAZ_OPENAI_BASE_URL=url)
+    gateway(healthy())
+    started = time.monotonic()
+    result = run("--providers", "--timeout", "1")
+    elapsed = time.monotonic() - started
+    assert result.code == (1 if in_headers else 0)
+    if in_headers:
+        assert "OpenAI: no answer within 1 s" in result.out
+    else:  # the status line came in time; the body is never read
+        assert "OpenAI: the key works" in result.out
+    assert elapsed < 4
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://api.openai.com/v1", False),
+        ("https://user:pw@api.example.com/v1", True),
+        ("https://token@api.example.com", True),
+        ("https://api.example.com/v1?a=b@c", False),
+        ("http://[::1", False),  # not a URL at all: the request itself will fail, generically
+    ],
+)
+def test_userinfo_detection(url: str, expected: bool) -> None:
+    assert doctor.has_userinfo(url) is expected
