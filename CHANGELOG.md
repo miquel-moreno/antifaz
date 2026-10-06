@@ -5,10 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
-<!-- 0.1.0 carries the planned release day. Miquel creates the v0.1.0 tag (which starts the
-release workflow); if that happens on another day, fix the date on main before tagging. -->
-
-## [0.1.0] - 2026-10-02
+## [0.1.0] - 2026-10-06
 
 ### Security
 - Final red team round before v0.1.0 (`tests/redteam/test_final_v01*.py`): a provider key split across two streamed deltas could reach the client (invariant 13) when the second delta's index was written as `0.0`, `"0"` or left out, or when an event with more than 4096 fields made the key watch forget the first piece. Now a choice or content block whose `index` is not a plain non-negative integer (or an OpenAI choice without one, or a tool call with a bad one) ends the stream with the fixed malformed-stream error event; the key watch ends the stream (`stream_limit_exceeded`) instead of forgetting a tail; and it also keeps one tail per field name across paths, so an odd path or interleaving cannot hide a split key. The README now says that text in unknown fields is masked (ADR-0006), not blocked; 960 red-team tests pass and 13 more are documented known gaps.
