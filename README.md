@@ -4,6 +4,18 @@
 
 <p align="center"><b>Use any LLM with your customers' data, without sending it.</b><br><a href="README.es.md">Leer en español</a></p>
 
+<p align="center">
+  <a href="https://github.com/miquel-moreno/antifaz/releases"><img src="https://img.shields.io/github/v/release/miquel-moreno/antifaz?include_prereleases&amp;label=version" alt="Version"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/miquel-moreno/antifaz/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/miquel-moreno/antifaz" alt="License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&amp;logoColor=white" alt="Python 3.12"></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/pkgs/container/antifaz"><img src="https://img.shields.io/badge/ghcr.io-antifaz-2496ED?logo=docker&amp;logoColor=white" alt="Docker image on ghcr.io"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/OpenAI%20%7C%20Anthropic-compatible-412991" alt="OpenAI and Anthropic compatible"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0"><img src="https://img.shields.io/badge/status-beta-orange" alt="Status: beta"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/stargazers"><img src="https://img.shields.io/github/stars/miquel-moreno/antifaz?style=flat&amp;logo=github" alt="GitHub stars"></a>
+</p>
+
 Companies want to use ChatGPT or Claude with customer emails and documents, but sending personal data to them is a privacy risk. Antifaz sits in between and swaps that data for placeholders before the text leaves.
 
 ![Terminal demo with synthetic data: Antifaz finds a DNI, an email and an IBAN, the provider only receives placeholders, and the answer comes back with the original values.](docs/images/demo.gif)
@@ -15,7 +27,7 @@ Companies want to use ChatGPT or Claude with customer emails and documents, but 
 
 ## Result
 - On a public Spanish benchmark, names left exposed drop from 100 to 2.5 out of 100 with the optional name detector (it also hides some text that is not personal: details below).
-- Checks a document in about 3 milliseconds without the name detector, and 829 attack tests pass.
+- Checks a document in about 3 milliseconds without the name detector, and 960 attack tests pass.
 
 ## Technologies
 Python · FastAPI · LLM APIs (OpenAI, Anthropic) · NLP (GLiNER) · Privacy (GDPR) · Docker · GitHub Actions · pytest
@@ -28,11 +40,11 @@ Designed and built end to end. AI-assisted development under my specification an
 ---
 
 > [!WARNING]
-> **Beta (v0.1, in preparation).** Antifaz **does not guarantee finding all personal data**: it only protects what it detects, and the [benchmark](docs/benchmark.md) shows how much slips through. Test it with your own kind of texts before using it with real data.
+> **Beta: [v0.1.0 is released](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0).** Antifaz **does not guarantee finding all personal data**: it only protects what it detects, and the [benchmark](docs/benchmark.md) shows how much slips through. Test it with your own kind of texts before using it with real data.
 
 ## Quick start
 
-You need Docker with Compose.
+You need Docker with Compose. The published image is `ghcr.io/miquel-moreno/antifaz:0.1.0` (`docker pull ghcr.io/miquel-moreno/antifaz:0.1.0`).
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
