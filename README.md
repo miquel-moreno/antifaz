@@ -44,7 +44,7 @@ Designed and built end to end. AI-assisted development under my specification an
 
 ## Quick start
 
-You need Docker with Compose.
+You need Docker with Compose. **Install guide** for companies, step by step (Windows too, Claude Code, upgrades, troubleshooting): [docs/install.md](docs/install.md) · [en español](docs/instalacion.md).
 
 **From v0.2.0 (not released yet): one minute, no clone.** In an empty folder:
 

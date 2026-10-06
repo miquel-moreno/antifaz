@@ -18,6 +18,8 @@ make up        # construye la imagen desde el clon y la arranca con Compose (nec
 
 ## Docker (issue 7, parte 7a)
 
+La guía para instalarlo en una empresa, paso a paso (bash y PowerShell, clientes, Claude Code, apagarlo, tráfico que no pasa por la pasarela, actualizar, rotar claves y problemas frecuentes), está en [instalacion.md](instalacion.md) ([in English](install.md)). Esta sección explica cómo está hecho.
+
 ### Ponerlo en marcha desde cero
 
 Desde la v0.2.0, sin clonar (issue 42, ver «Una sola orden en la imagen»):
