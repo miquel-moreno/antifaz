@@ -5,6 +5,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+### Changed
+- README (English and Spanish): a row of badges under the tagline (version, CI, license, Python, FastAPI, ghcr.io image, OpenAI | Anthropic compatible, beta status, stars), and post-release text fixes: the beta notice links the v0.1.0 release and the quick start names the `ghcr.io/miquel-moreno/antifaz:0.1.0` image; the recruiter section now says 960 red-team tests pass, as the security section already did.
+
 ## [0.1.0] - 2026-10-06
 
 ### Security
