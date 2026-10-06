@@ -52,6 +52,7 @@ jobs:
   cli-windows:
     name: CLI tests on Windows
     runs-on: windows-latest
+    timeout-minutes: 15
     permissions:
       contents: read # check out the code
     steps:
