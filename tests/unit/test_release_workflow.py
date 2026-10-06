@@ -57,10 +57,13 @@ def test_no_permissions_by_default_and_the_minimum_in_the_job() -> None:
     }
 
 
-def test_two_jobs_both_in_the_protected_release_environment() -> None:
+def test_only_the_image_job_waits_in_the_protected_release_environment() -> None:
+    # One approval per release: publish-image is gated; release-asset needs it, so it only
+    # runs after that approval and a successful publish.
     assert set(JOBS) == {"publish-image", "release-asset"}
     assert JOB["environment"] == "release"
-    assert ASSET_JOB["environment"] == "release"
+    assert "environment" not in ASSET_JOB
+    assert ASSET_JOB["needs"] == "publish-image"
 
 
 # --- release-asset (issue 42) -----------------------------------------------------------------

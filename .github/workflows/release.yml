@@ -137,7 +137,8 @@ jobs:
     needs: publish-image
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: release
+    # No environment of its own: it needs publish-image, which already waited for the approval
+    # in `release`, so a release is approved once. It holds no secret, only contents: write.
     permissions:
       contents: write # create the draft release if there is none and upload the asset
     steps:
