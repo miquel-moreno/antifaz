@@ -3,12 +3,14 @@
 # dependencies = [
 #     "playwright==1.63.0",
 #     "axe-playwright-python==0.1.8",
+#     "pillow==12.3.0",
 # ]
 # ///
 """Final check of the panel prototype (design/prototype) in a real browser.
 
     make design-check          # uv run scripts/check_design.py
     uv run scripts/check_design.py --quick   # one width per group, for a fast loop
+    make design-captures       # uv run scripts/check_design.py --captures (design/captures/)
 
 Dev tool only: it is not part of `make check` and its dependencies (Playwright and
 axe-playwright-python, which bundles axe-core) live in the inline metadata above, never in
@@ -29,18 +31,31 @@ views in the five states:
   hidden/clip) and inside the viewport; text that only fits by scrolling a scroll container is
   listed apart, with the containers that are meant to scroll (the phone tab row, the YAML);
 - no text cut with an ellipsis (text-overflow: ellipsis with the text longer than its box);
+- identifiers never break inside: every .ident (key, team, model and policy names, ids, versions,
+  markers, codes) renders on one line box, unless it is at least as wide as its container (then
+  the break is the last resort and is listed apart, as info);
 - motion: no animation repeats forever, the status ring (only in the header and the phone bar)
   pulses three times, and with reduced motion nothing animates at all;
 - accessibility: axe-core on the five views and five states, light and dark, at 1280 and 390 px
   (and on tokens-preview.html), reported by rule and impact.
 
 Exit code 1 if anything fails. --json PATH also writes every finding as JSON.
+
+--captures writes the reference captures to design/captures/ instead of checking: the five views
+in «Con datos», light and dark, at 1280x800 and 390x844, plus the other four states of «Prueba un
+texto» (light, 1280 px); desktop as JPEG 85, mobile at 2x as WebP 90 (Pillow, from Playwright's
+lossless PNG: under 150 KB each, where the PNG was 300-730 KB). Every capture is written without
+metadata (JPEG: only the JFIF header; WebP: only the image chunks). Reduced motion is on (static
+final frames) and every timer is cleared before capturing (no live-feed rows are added), so two
+runs give the same pictures. Only the panel window is captured, not the prototype controls above.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import struct
 import sys
 import threading
 import time
@@ -52,6 +67,7 @@ from typing import Any
 
 from axe_playwright_python.base import AXE_FILE_PATH
 from axe_playwright_python.sync_playwright import Axe
+from PIL import Image
 from playwright.sync_api import Browser, ConsoleMessage, Page, Request, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +116,8 @@ INSPECT_JS = """
   const de = document.documentElement, vw = de.clientWidth;
   const out = {hscroll: de.scrollWidth > vw + 0 || document.body.scrollWidth > vw,
                scrollWidth: de.scrollWidth, clientWidth: vw,
-               clipped: [], scrolled: [], ellipsis: [], infinite: [], anims: 0};
+               clipped: [], scrolled: [], ellipsis: [], infinite: [], anims: 0,
+               idents: [], identsForced: [], identsChecked: 0};
   const name = (el) => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
     (typeof el.className === 'string' && el.className.trim() ?
      '.' + el.className.trim().split(/\\s+/).join('.') : '');
@@ -158,6 +175,47 @@ INSPECT_JS = """
     if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth && !invisible(el))
       out.ellipsis.push({el: name(el), text: el.textContent.trim().slice(0, 60)});
   }
+  // Identifiers (.ident) never break inside: each must sit on one line box, unless it is at least
+  // as wide as its container (then breaking is the last resort, reported apart as info).
+  const lines = (el) => {
+    const bands = [];
+    const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let t; (t = tw.nextNode());) {
+      if (!t.nodeValue.trim() || invisible(t.parentElement)) continue;
+      const rg = document.createRange(); rg.selectNodeContents(t);
+      for (const r of rg.getClientRects()) {
+        if (r.width < 0.5 || r.height < 0.5) continue;
+        const mid = (r.top + r.bottom) / 2;
+        const band = bands.find((b) => mid >= b[0] && mid <= b[1]);
+        if (!band) bands.push([r.top, r.bottom]);
+      }
+    }
+    return bands.length;
+  };
+  const blockOf = (el) => {
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      const d = getComputedStyle(a).display;
+      if (d !== 'inline' && d !== 'contents') return a;
+    }
+    return de;
+  };
+  for (const el of document.querySelectorAll('.ident')) {
+    if (!el.getClientRects().length || invisible(el)) continue;
+    out.identsChecked++;
+    const cs = getComputedStyle(el);
+    const lh = cs.lineHeight === 'normal' ? parseFloat(cs.fontSize) * 1.2
+                                          : parseFloat(cs.lineHeight);
+    const box = el.getBoundingClientRect();
+    const inner = box.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) -
+                  parseFloat(cs.borderTopWidth) - parseFloat(cs.borderBottomWidth);
+    const n = Math.max(lines(el), el.getClientRects().length);
+    if (n <= 1 && inner <= 1.5 * lh) continue;
+    const c = blockOf(el), ccs = getComputedStyle(c);
+    const cw = c.clientWidth - parseFloat(ccs.paddingLeft) - parseFloat(ccs.paddingRight);
+    const item = {el: name(el), text: el.textContent.trim().slice(0, 60), lines: n,
+                  width: Math.round(box.width), container: Math.round(cw), in: name(c)};
+    (box.width >= cw - 1 ? out.identsForced : out.idents).push(item);
+  }
   for (const a of document.getAnimations()) {
     const t = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : {};
     const target = a.effect && a.effect.target;
@@ -195,6 +253,7 @@ class Run:
         self.findings: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.checked = 0
         self.rings = 0
+        self.idents = 0
         self.axe: list[dict[str, Any]] = []
 
     def watch(self, page: Page, where: str) -> None:
@@ -260,6 +319,11 @@ def inspect(page: Page, run: Run, where: str, motion: str) -> None:
         run.add("ellipsis", where, e)
     for i in res["infinite"]:
         run.add("infinite", where, i)
+    run.idents += res["identsChecked"]
+    for i in res["idents"]:
+        run.add("ident-broken", where, i)
+    for i in res["identsForced"]:
+        run.add("ident-forced", where, i)
     if motion != "normal" and res["anims"]:
         run.add("motion-in-reduce", where, res["anims"])
 
@@ -379,6 +443,106 @@ def check_tokens(browser: Browser, run: Run) -> None:
                 page.context.close()
 
 
+CAPTURES = ROOT / "design" / "captures"
+# Desktop as JPEG (quality 85, Chromium's encoder) and mobile at 2x as WebP (quality 90, Pillow):
+# both look the same as the lossless PNG at 100 % and keep every mobile capture under 150 KB.
+# Both encoders are deterministic: the same page gives the same bytes on every run.
+CAPTURE_SIZES = {"desktop": (1280, 800, 1, "jpg"), "mobile": (390, 844, 2, "webp")}
+WEBP_QUALITY = 90
+# Chunks and segments that carry pixels or decoding data; anything else is metadata and is dropped.
+WEBP_IMAGE_CHUNKS = {b"VP8 ", b"VP8L", b"VP8X", b"ALPH", b"ANIM", b"ANMF"}
+
+
+def strip_jpeg(data: bytes) -> bytes:
+    """The JPEG without APP1-APP15 (EXIF, XMP, ICC, IPTC...) and comments; APP0 (JFIF) stays."""
+    out, pos = bytearray(data[:2]), 2
+    while pos + 4 <= len(data) and data[pos] == 0xFF:
+        marker = data[pos + 1]
+        if marker == 0xDA:  # start of scan: the rest is the image
+            break
+        (length,) = struct.unpack(">H", data[pos + 2 : pos + 4])
+        if not (0xE1 <= marker <= 0xEF or marker == 0xFE):
+            out += data[pos : pos + 2 + length]
+        pos += 2 + length
+    return bytes(out + data[pos:])
+
+
+def webp_from_png(png: bytes) -> bytes:
+    """Lossy WebP of a PNG screenshot, with no EXIF, XMP or ICC chunk."""
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    image.info = {}
+    buf = io.BytesIO()
+    image.save(buf, "WEBP", quality=WEBP_QUALITY, method=6, exif=b"", icc_profile=None)
+    data = buf.getvalue()
+    pos = 12
+    while pos + 8 <= len(data):
+        kind, length = struct.unpack("<4sI", data[pos : pos + 8])
+        assert kind in WEBP_IMAGE_CHUNKS, f"unexpected WebP chunk {kind!r}"
+        pos += 8 + length + (length & 1)
+    return data
+
+
+# Stops every pending timeout and interval (the live feed adds a row every 6 s, «Comprobar
+# ahora» answers after a delay) so nothing changes between settling and the screenshot.
+STOP_TIMERS_JS = """
+() => { const top = setTimeout(() => {}, 0);
+        for (let i = 0; i <= top; i++) { clearTimeout(i); clearInterval(i); } }
+"""
+
+
+def capture_one(
+    browser: Browser, run: Run, theme: str, size: str, shots: list[tuple[str, str, str]]
+) -> list[Path]:
+    width, height, scale, _ = CAPTURE_SIZES[size]
+    context = browser.new_context(
+        viewport={"width": width, "height": height},
+        device_scale_factor=scale,
+        color_scheme=theme,  # type: ignore[arg-type]
+        reduced_motion="reduce",
+    )
+    page = context.new_page()
+    run.watch(page, f"captures {size} {theme}")
+    page.goto(f"{run.origin}/{PANEL}", wait_until="load")
+    page.evaluate("() => document.fonts.ready.then(() => true)")
+    written = []
+    for state, view, name in shots:
+        page.evaluate(SET_STATE_JS, state)
+        page.evaluate(f"() => document.getElementById('tab-{view}').click()")
+        settle(page, 150)
+        page.evaluate(STOP_TIMERS_JS)
+        page.evaluate("() => { window.scrollTo(0, 0); document.activeElement.blur(); }")
+        settle(page, 50)
+        out = CAPTURES / name
+        if out.suffix == ".jpg":
+            shot = page.locator("#app").screenshot(
+                type="jpeg", quality=85, animations="disabled", caret="hide"
+            )
+            out.write_bytes(strip_jpeg(shot))
+        else:
+            shot = page.locator("#app").screenshot(animations="disabled", caret="hide")
+            out.write_bytes(webp_from_png(shot))
+        written.append(out)
+    context.close()
+    return written
+
+
+def make_captures(browser: Browser, run: Run) -> list[Path]:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for theme in THEMES:
+        for size in CAPTURE_SIZES:
+            ext = CAPTURE_SIZES[size][3]
+            shots = [("data", v, f"{v}-{theme}-{size}.{ext}") for v in VIEWS]
+            if theme == "light" and size == "desktop":
+                shots += [
+                    (s, "playground", f"playground-{s}-light-desktop.{ext}")
+                    for s in STATES
+                    if s != "data"
+                ]
+            written += capture_one(browser, run, theme, size, shots)
+    return written
+
+
 SEVERE = ("critical", "serious")
 
 
@@ -399,7 +563,9 @@ def report(run: Run, seconds: float) -> int:
         "infinite": "Animations that repeat forever",
         "ring": f"Status ring not restarted, 3 pulses, header only ({run.rings} state changes)",
         "motion-in-reduce": "Motion with reduced motion",
+        "ident-broken": f"Identifiers broken inside ({run.idents} identifier boxes checked)",
         "scrolled-intended": "Text in containers meant to scroll (info)",
+        "ident-forced": "Identifiers wider than their container, broken as a last resort (info)",
     }
     for kind, label in labels.items():
         items = run.findings.get(kind, [])
@@ -412,7 +578,7 @@ def report(run: Run, seconds: float) -> int:
             first.setdefault(text, i["where"])
         for text, n in distinct.most_common(8):
             print(f"   {n:>4} x {text}  (e.g. {first[text]})")
-        if kind != "scrolled-intended":
+        if kind not in ("scrolled-intended", "ident-forced"):
             failing += len(items)
     failing += len(run.third_party) + len(run.console)
 
@@ -455,6 +621,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--quick", action="store_true", help="390 and 1280 px only")
     parser.add_argument("--json", type=Path, help="also write every finding to this file")
+    parser.add_argument(
+        "--captures", action="store_true", help="write the reference captures to design/captures/"
+    )
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -465,13 +634,27 @@ def main() -> int:
         with sync_playwright() as p:
             browser = p.chromium.launch()
             try:
-                check_panel(browser, run, args.quick)
-                check_tokens(browser, run)
+                if args.captures:
+                    written = make_captures(browser, run)
+                else:
+                    check_panel(browser, run, args.quick)
+                    check_tokens(browser, run)
             finally:
                 browser.close()
     finally:
         server.shutdown()
         server.server_close()
+    if args.captures:
+        total = 0
+        for path in written:
+            size = path.stat().st_size
+            total += size
+            print(f"{path.relative_to(ROOT).as_posix()}  {size / 1024:.0f} KB")
+        problems = run.console + run.third_party
+        for line in problems:
+            print("  ", line)
+        print(f"{len(written)} captures, {total / 1024 / 1024:.2f} MB in total")
+        return 1 if problems else 0
     code = report(run, time.monotonic() - start)
     if args.json:
         args.json.write_text(

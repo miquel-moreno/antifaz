@@ -41,7 +41,7 @@ h1,h2,h3{text-wrap:balance}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .ic{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .mono{font-family:var(--font-mono);letter-spacing:0}
-.code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);color:var(--color-text);padding:1px 6px;border-radius:var(--radius-xs);letter-spacing:0;white-space:nowrap}
+.code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);color:var(--color-text);padding:1px 6px;border-radius:var(--radius-xs);letter-spacing:0}
 
 .skip{position:absolute;left:16px;top:12px;transform:translateY(-72px);z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:transform var(--duration-fast) var(--ease-out)}
 .skip:focus{transform:none}
@@ -312,7 +312,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 /* Tokens in text */
 mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;border-radius:6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .ptype{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:var(--weight-semibold);letter-spacing:.04em;color:var(--color-pii);margin-left:5px;vertical-align:1px}
-.marker{display:inline-block;font-family:var(--font-mono);font-size:.78em;font-weight:var(--weight-medium);letter-spacing:0;line-height:1.45;white-space:nowrap;background:var(--color-accent-soft);color:var(--color-accent-ink);border-radius:var(--radius-sm);padding:0 6px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent);vertical-align:1px}
+.marker{display:inline-block;font-family:var(--font-mono);font-size:.78em;font-weight:var(--weight-medium);letter-spacing:0;line-height:1.45;background:var(--color-accent-soft);color:var(--color-accent-ink);border-radius:var(--radius-sm);padding:0 6px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent);vertical-align:1px}
 .restored{background:linear-gradient(var(--color-ok),var(--color-ok)) 0 100%/100% 1.5px no-repeat;padding-bottom:1px}
 
 .rm-note{display:none;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted)}
@@ -341,6 +341,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .found dd{margin:0;display:inline-flex;align-items:center;gap:7px;padding:4px 5px 4px 11px;border-radius:var(--radius-pill);background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line);font-size:var(--text-sm);white-space:nowrap}
 .found dd b{min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);display:grid;place-items:center;background:var(--color-surface);font-size:11.5px;font-weight:var(--weight-bold);font-variant-numeric:tabular-nums;box-shadow:var(--shadow-pop)}
 .meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+/* Tabular digits suit counts and times, not names: in a model name they space out «-4-5» */
+.meta .ident{font-variant-numeric:normal}
 
 /* ---------- Shared by the four views (step 5): surfaces, tags, foot notes ----------
    Same language as «Prueba un texto»: white surfaces with the soft card shadow, 18 px corners,
@@ -397,7 +399,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .chain-links{display:flex;align-items:center;gap:3px}
 .chain-links i{width:18px;height:9px;border-radius:var(--radius-pill);box-shadow:inset 0 0 0 1.5px var(--color-control)}
 .chain-links i.cut{box-shadow:inset 0 0 0 1.5px var(--color-danger);background:var(--color-danger-soft);transform:rotate(-14deg) translateY(1px)}
-.chain-links i.cut~i{opacity:.4}
+.chain-links i.cut:not([hidden])~i{opacity:.4}
 /* Latest requests */
 .feed{display:flex;flex-direction:column}
 .ev{position:relative;display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:4px 14px;padding:12px 20px;border-top:1px solid var(--color-line)}
@@ -406,8 +408,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .ev-flash{position:absolute;inset:0;background:var(--color-accent-soft);opacity:0;pointer-events:none}
 .ev time{font-family:var(--font-mono);font-size:12.5px;color:var(--color-text-faint);letter-spacing:0;font-variant-numeric:tabular-nums}
 .ev-main{display:flex;flex-direction:column;min-width:0}
-.ev-who{font-size:14px;font-weight:var(--weight-semibold);overflow-wrap:anywhere}
-.ev-who span{font-weight:var(--weight-regular);color:var(--color-text-muted);white-space:nowrap}
+.ev-who{font-size:14px;font-weight:var(--weight-semibold)}
+.ev-who .ev-app{font-weight:var(--weight-regular);color:var(--color-text-muted)}
+.ev-app>span{white-space:nowrap}
 .ev-what{font-size:var(--text-sm);color:var(--color-text-muted)}
 .feed-empty{display:grid;justify-items:center;gap:10px;padding:28px 20px 32px;border-top:1px solid var(--color-line);text-align:center;color:var(--color-text-muted);font-size:14px}
 .feed-empty .orb{width:44px;height:44px;border-radius:14px}
@@ -431,7 +434,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .k-muted{color:var(--color-text-muted)}
 .keys tr.revoked td:not(:last-child){color:var(--color-text-muted)}
 .keys tr.revoked .k-name{text-decoration:line-through;text-decoration-thickness:1px}
-.k-name,.k-id,.keys td.k-muted{white-space:nowrap}
+.k-id,.keys td.k-muted{white-space:nowrap}
 /* The table needs about 780 px. Narrower (tablet with the sidebar, phone), each row becomes a
    compact card: name, state and «Revocar» on top, the four facts below with their labels.
    The surface is its own container, so this follows the space the table really has. */
@@ -485,6 +488,15 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .prow .nm .chg-note{font-family:var(--font-sans);color:var(--color-accent-ink);font-weight:var(--weight-semibold)}
 .prow .seg{flex:none}
 .prow .seg label{padding:4px 10px}
+/* A narrow column (two columns at about 1024 px) leaves no room for the name beside the four
+   options: then the name and its code go on top and the options below, as on the phone */
+.pol-types{container:poltypes/inline-size}
+@container poltypes (max-width: 420px){
+  .prow{flex-direction:column;align-items:stretch;gap:6px;padding:10px 12px 12px 16px}
+  .prow .nm{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .prow .seg{width:100%}
+  .prow .seg label{padding:5px 2px;font-size:12px}
+}
 .rules{display:flex;flex-direction:column}
 .rules li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px 12px;padding:11px 20px;border-top:1px solid var(--color-line);font-size:14px}
 .rules li:has(.seg){grid-template-columns:minmax(0,1fr) auto}
@@ -519,12 +531,14 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .ner .mono{font-size:11.5px;color:var(--color-text-faint)}
 .ner p{grid-column:2/4;color:var(--color-text-muted);font-size:12.5px}
 .ner .dot.ok{color:var(--color-ok)} .ner .dot.warn{color:var(--color-warn)} .ner .dot.danger{color:var(--color-danger)}
-.prov{display:flex;flex-direction:column;padding:0 20px 8px}
-.prov li{display:grid;grid-template-columns:minmax(0,1fr) 96px minmax(0,auto);align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--color-line);font-size:14px}
+/* One grid for the three rows (each row is a subgrid): the name column is as wide as the longest
+   host, so a host never breaks and the bars line up */
+.prov{display:grid;grid-template-columns:max-content minmax(48px,1fr) minmax(0,max-content);column-gap:12px;padding:0 20px 8px}
+.prov li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;row-gap:12px;padding:11px 0;border-top:1px solid var(--color-line);font-size:14px}
 .prov .nm{display:flex;flex-direction:column;min-width:0}
 .prov .nm span{font-size:var(--text-xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0}
 .prov .status{justify-self:end;font-size:var(--text-sm);white-space:normal;text-align:right}
-.prov .status b{font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold);color:var(--color-text)}
+.prov .status b{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold);color:var(--color-text)}
 .prov .meter.is-down>i{transform:scaleX(0)}
 
 /* ---------- Logo (prototype annex, outside the panel) ---------- */
@@ -543,6 +557,17 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .lset figcaption{font-size:var(--text-2xs);font-family:var(--font-mono);opacity:.75}
 .lset svg{display:block}
 
+/* Identifiers (key, team, model and policy names, ids, versions, markers, codes, commands) never
+   break inside: each one is an atomic inline box, so it moves whole to the next line and the text
+   between identifiers is what wraps. Only an identifier wider than its whole container may break,
+   as a last resort: max-width:100% caps the box at the container and overflow-wrap:anywhere then
+   breaks it. width:max-content keeps the box as wide as its text otherwise, and it is also what
+   tables, flex and grid items see when they size themselves (a percentage max-width does not
+   count there), so a column never shrinks an identifier to break it.
+   Last in the sheet so it wins over the white-space of .code, .k-id and friends.
+   scripts/check_design.py fails if an .ident renders on more than one line without needing to. */
+.ident{display:inline-block;width:max-content;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
 /* Small text (11-13 px): no negative tracking (--tracking-small = 0). The body's -0.011em suits
    15 px and up; below that it closes the letters. Uppercase mono badges keep their own spacing. */
 .proto-strip,.chips label,.app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
@@ -552,10 +577,14 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .pswitch button{letter-spacing:var(--tracking-small)}
 
 /* ---------- Medium: panes and grids stack ---------- */
-@container app (max-width: 980px){
-  .app-content{padding:30px 30px 44px}
+/* The three panes need about 230 px each so an IBAN fits whole on one line: they stack a bit
+   earlier than the rest */
+@container app (max-width: 1040px){
   .panes{grid-template-columns:minmax(0,1fr)}
   .pane+.pane{border-left:0;border-top:1px solid var(--color-line)}
+}
+@container app (max-width: 980px){
+  .app-content{padding:30px 30px 44px}
   .pol-grid{grid-template-columns:minmax(0,1fr)}
   .flight .lbl2{display:none}
   .help{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -664,7 +693,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .ner{padding:0 6px 10px}
   .ner li{padding:6px 10px}
   .prov{padding:0 16px 6px}
-  .prov li{grid-template-columns:minmax(0,1fr) minmax(0,auto);gap:6px 10px;padding:10px 0}
+  .prov{grid-template-columns:max-content minmax(0,1fr);column-gap:10px}
+  .prov li{row-gap:6px;padding:10px 0}
   .prov .status{max-width:190px}
   .prov .meter{grid-column:1/-1;grid-row:2}
 }
@@ -760,7 +790,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   <div class="app-window" id="app" data-state="data"><div class="app-shell">
     <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
       <div class="app-brand rv" style="--i:1">
-        <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version">v0.2.0</span>
+        <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version ident">v0.2.0</span>
         <span class="app-bar-tools">
           <span class="app-status is-ok" data-only="empty data blocked"><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Todo en orden</span>
           <span class="app-status is-warn" data-only="error" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Sin respuesta</span>
@@ -807,7 +837,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             <p>Ese registro no encaja con el anterior: alguien ha cambiado o borrado registros. Lo detectó la verificación de las 10:40. Desde ese punto, el registro ya no sirve como prueba.</p>
             <ol>
               <li>No borres ni arregles nada a mano.</li>
-              <li>Ejecuta <span class="code">antifaz audit verify</span> para ver el detalle.</li>
+              <li>Ejecuta <span class="code ident">antifaz audit verify</span> para ver el detalle.</li>
               <li>Compara con el último punto de control firmado (hoy, 00:00) y avisa a tu responsable de seguridad.</li>
             </ol>
           </div>
@@ -881,27 +911,27 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <div class="panes rv" style="--i:7" id="pg-panes" data-p="2" data-only="data blocked error broken">
             <article class="pane p1" aria-labelledby="pane1-t">
               <div class="ph"><span class="num" aria-hidden="true">1</span><h2 id="pane1-t">Lo que escribes</h2></div>
-              <p class="ptext">Hola, soy <mark class="pii">Carmen Prueba López<span class="ptype">NOMBRE</span></mark>, con DNI <mark class="pii">12345678Z<span class="ptype">DNI</span></mark>. Escribid a mi gestora <mark class="pii">ana.prueba@example.com<span class="ptype">EMAIL</span></mark> y haced el pago en <mark class="pii">ES9121000418450200051332<span class="ptype">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="ptype">SALUD</span></mark> desde el lunes.</span></p>
+              <p class="ptext">Hola, soy <mark class="pii">Carmen Prueba López<span class="ptype">NOMBRE</span></mark>, con DNI <mark class="pii"><span class="ident">12345678Z</span><span class="ptype">DNI</span></mark>. Escribid a mi gestora <mark class="pii"><span class="ident">ana.prueba@example.com</span><span class="ptype">EMAIL</span></mark> y haced el pago en <mark class="pii"><span class="ident">ES9121000418450200051332</span><span class="ptype">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="ptype">SALUD</span></mark> desde el lunes.</span></p>
               <p class="pfoot">Resaltado: dato encontrado, con su tipo al lado.</p>
             </article>
             <article class="pane p2" aria-labelledby="pane2-t">
               <div class="ph"><span class="num" aria-hidden="true">2</span><h2 id="pane2-t">Lo que recibe la IA</h2></div>
-              <p class="ptext" data-only="data error broken">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker">[[EMAIL_1]]</span> y haced el pago en <span class="marker">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
+              <p class="ptext" data-only="data error broken">Hola, soy <span class="marker ident">[[PERSON_1]]</span>, con DNI <span class="marker ident">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker ident">[[EMAIL_1]]</span> y haced el pago en <span class="marker ident">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
               <div class="note danger" data-only="blocked" hidden>
                 <strong><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado: no se ha enviado nada</strong>
-                <p>El texto habla de salud (categoría especial del RGPD) y la política <b>rrhh</b> bloquea esos textos.</p>
-                <p class="sub">Motivo <span class="code">special_category</span> · código <span class="code">antifaz_blocked</span></p>
+                <p>El texto habla de salud (categoría especial del RGPD) y la política <b class="ident">rrhh</b> bloquea esos textos.</p>
+                <p class="sub">Motivo <span class="code ident">special_category</span> · código <span class="code ident">antifaz_blocked</span></p>
               </div>
               <p class="pfoot" data-only="data error broken">Marcador: la IA solo ve esto.</p>
             </article>
             <article class="pane p3" aria-labelledby="pane3-t">
               <div class="ph"><span class="num" aria-hidden="true">3</span><h2 id="pane3-t">Lo que te vuelve</h2></div>
-              <p class="ptext" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
+              <p class="ptext" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored ident">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored ident">ES9121000418450200051332</span>.</p>
               <p class="pfoot" data-only="data broken">Subrayado verde: dato devuelto a su sitio. Respuesta de ejemplo.</p>
               <div class="note warn" data-only="error" hidden>
                 <strong><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>Sin respuesta</strong>
                 <p>Anthropic no ha respondido a tiempo. Tu texto ya iba sin datos personales y no hay nada que restaurar.</p>
-                <p class="sub">Error <span class="code">504</span> · prueba más tarde o elige otra ruta.</p>
+                <p class="sub">Error <span class="code ident">504</span> · prueba más tarde o elige otra ruta.</p>
               </div>
               <p class="pfoot" data-only="blocked" hidden>No hay respuesta: la petición se paró antes de salir.</p>
             </article>
@@ -913,9 +943,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
               <dd>Nombre <b>1</b></dd><dd>DNI <b>1</b></dd><dd>Email <b>1</b></dd><dd>IBAN <b>1</b></dd>
               <dd data-only="blocked" hidden>Salud <b>1</b></dd>
             </dl>
-            <p class="meta" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política default</span><span>Anthropic · claude-sonnet-4-5</span></p>
-            <p class="meta" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política rrhh</span><span>Nada ha salido de tu red</span></p>
-            <p class="meta" data-only="error" hidden><span>4 datos ocultados</span><span>Política default</span><span>Anthropic no responde</span></p>
+            <p class="meta" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política <span class="ident">default</span></span><span>Anthropic · <span class="ident">claude-sonnet-4-5</span></span></p>
+            <p class="meta" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política <span class="ident">rrhh</span></span><span>Nada ha salido de tu red</span></p>
+            <p class="meta" data-only="error" hidden><span>4 datos ocultados</span><span>Política <span class="ident">default</span></span><span>Anthropic no responde</span></p>
           </div>
           <!-- Says what came out each time the result changes (screen readers) -->
           <p class="sr-only" id="pg-live" role="status" aria-live="polite"></p>
@@ -994,11 +1024,11 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             <table class="keys" aria-labelledby="keys-t">
               <thead><tr><th scope="col">Nombre</th><th scope="col">Puede usar</th><th scope="col">Política</th><th scope="col">Límites</th><th scope="col">Último uso</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
               <tbody>
-                <tr><td><span class="k-name">equipo-soporte</span><span class="k-id">id kid_3f9a</span></td><td class="k-use" data-label="Puede usar">Anthropic · claude-sonnet-4-5</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">60/min · 5.000/día</td><td data-label="Último uso" class="k-muted">hace 1 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
-                <tr><td><span class="k-name">rrhh-nominas</span><span class="k-id">id kid_81c2</span></td><td class="k-use" data-label="Puede usar">OpenAI · gpt-4.1-mini</td><td data-label="Política"><span class="k-pol">rrhh</span></td><td data-label="Límites" class="k-num">20/min · 1.000/día</td><td data-label="Último uso" class="k-muted">hace 2 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
-                <tr><td><span class="k-name">desarrollo</span><span class="k-id">id kid_c47e</span></td><td class="k-use" data-label="Puede usar">Anthropic y OpenAI · todos</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">120/min</td><td data-label="Último uso" class="k-muted">hace 5 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
-                <tr><td><span class="k-name">script-facturas</span><span class="k-id">id kid_09bd</span></td><td class="k-use" data-label="Puede usar">Ollama (local)</td><td data-label="Política"><span class="k-pol">rrhh</span></td><td data-label="Límites" class="k-num">30/min</td><td data-label="Último uso" class="k-muted">hace 4 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
-                <tr class="revoked"><td><span class="k-name">becarios-2025</span><span class="k-id">id kid_5d10</span></td><td class="k-use" data-label="Puede usar">OpenAI · gpt-4.1-nano</td><td data-label="Política"><span class="k-pol">default</span></td><td data-label="Límites" class="k-num">10/min</td><td data-label="Último uso" class="k-muted">hace 40 días</td><td class="k-state" data-label="Estado"><span class="status neutral"><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Revocada</span></td><td class="k-act"></td></tr>
+                <tr><td><span class="k-name ident">equipo-soporte</span><span class="k-id">id <span class="ident">kid_3f9a</span></span></td><td class="k-use" data-label="Puede usar">Anthropic · <span class="ident">claude-sonnet-4-5</span></td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">60/min</span> · <span class="ident">5.000/día</span></td><td data-label="Último uso" class="k-muted">hace 1 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
+                <tr><td><span class="k-name ident">rrhh-nominas</span><span class="k-id">id <span class="ident">kid_81c2</span></span></td><td class="k-use" data-label="Puede usar">OpenAI · <span class="ident">gpt-4.1-mini</span></td><td data-label="Política"><span class="k-pol ident">rrhh</span></td><td data-label="Límites" class="k-num"><span class="ident">20/min</span> · <span class="ident">1.000/día</span></td><td data-label="Último uso" class="k-muted">hace 2 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
+                <tr><td><span class="k-name ident">desarrollo</span><span class="k-id">id <span class="ident">kid_c47e</span></span></td><td class="k-use" data-label="Puede usar">Anthropic y OpenAI · todos</td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">120/min</span></td><td data-label="Último uso" class="k-muted">hace 5 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
+                <tr><td><span class="k-name ident">script-facturas</span><span class="k-id">id <span class="ident">kid_09bd</span></span></td><td class="k-use" data-label="Puede usar">Ollama (local)</td><td data-label="Política"><span class="k-pol ident">rrhh</span></td><td data-label="Límites" class="k-num"><span class="ident">30/min</span></td><td data-label="Último uso" class="k-muted">hace 4 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
+                <tr class="revoked"><td><span class="k-name ident">becarios-2025</span><span class="k-id">id <span class="ident">kid_5d10</span></span></td><td class="k-use" data-label="Puede usar">OpenAI · <span class="ident">gpt-4.1-nano</span></td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">10/min</span></td><td data-label="Último uso" class="k-muted">hace 40 días</td><td class="k-state" data-label="Estado"><span class="status neutral"><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Revocada</span></td><td class="k-act"></td></tr>
               </tbody>
             </table>
           </article>
@@ -1067,11 +1097,11 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                       <input type="radio" name="pol-special" id="pol-special-block" value="block"><label for="pol-special-block">Bloquear</label>
                     </fieldset></li>
                 </ul>
-                <p class="rules-foot">Nunca ocultar: <span class="code">Antifaz</span> · Propios: <span class="code">CLIENT_CODE</span> (código de cliente) → ocultar</p>
+                <p class="rules-foot">Nunca ocultar: <span class="code ident">Antifaz</span> · Propios: <span class="code ident">CLIENT_CODE</span> (código de cliente) → ocultar</p>
               </article>
 
               <article class="surface pol-yaml" aria-labelledby="yaml-t">
-                <div class="sh"><h2 id="yaml-t">Así queda el archivo</h2><span class="aside">policies/<span id="yaml-name">default</span>.yaml</span></div>
+                <div class="sh"><h2 id="yaml-t">Así queda el archivo</h2><span class="aside"><span class="ident">policies/<span id="yaml-name">default</span>.yaml</span></span></div>
                 <pre class="yaml" id="yaml-out" tabindex="0" role="region" aria-label="Vista previa de la política en YAML"></pre>
               </article>
             </div>
@@ -1092,9 +1122,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             <article class="surface scard" aria-labelledby="s-gw">
               <div class="sh"><h2 id="s-gw">Pasarela</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funciona</span></div>
               <dl class="kv">
-                <dt>Versión</dt><dd class="mono">0.2.0</dd>
-                <dt>/healthz</dt><dd class="mono">"status": "ok"</dd>
-                <dt>Escucha en</dt><dd class="mono">127.0.0.1:8000</dd>
+                <dt>Versión</dt><dd class="mono"><span class="ident">0.2.0</span></dd>
+                <dt><span class="ident">/healthz</span></dt><dd class="mono"><span class="ident">"status": "ok"</span></dd>
+                <dt>Escucha en</dt><dd class="mono"><span class="ident">127.0.0.1:8000</span></dd>
                 <dt>Base de datos</dt><dd>PostgreSQL · conectada</dd>
                 <dt>En marcha desde</dt><dd>hace 3 días</dd>
               </dl>
@@ -1104,10 +1134,10 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
               <div class="sh"><h2 id="s-ner">Detector de nombres (NER)</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funcionando</span></div>
               <p class="desc">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido. Sus cuatro estados:</p>
               <ul class="ner" aria-label="Estados posibles del detector">
-                <li class="now" aria-current="true"><span class="dot ok" aria-hidden="true"></span><b>Funcionando</b><span class="tag">Ahora</span><p><span class="mono">ok</span> · busca nombres.</p></li>
-                <li><span class="dot warn" aria-hidden="true"></span><b>Arrancando</b><span></span><p><span class="mono">starting</span> · carga el modelo; mientras, se bloquea.</p></li>
-                <li><span class="dot warn" aria-hidden="true"></span><b>En pausa tras fallos</b><span></span><p><span class="mono">circuit_open</span> · bloquea unos segundos y lo vuelve a intentar.</p></li>
-                <li><span class="dot danger" aria-hidden="true"></span><b>Parado</b><span></span><p><span class="mono">closed</span> · bloquea todo lo que necesite el NER.</p></li>
+                <li class="now" aria-current="true"><span class="dot ok" aria-hidden="true"></span><b>Funcionando</b><span class="tag">Ahora</span><p><span class="mono ident">ok</span> · busca nombres.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>Arrancando</b><span></span><p><span class="mono ident">starting</span> · carga el modelo; mientras, se bloquea.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>En pausa tras fallos</b><span></span><p><span class="mono ident">circuit_open</span> · bloquea unos segundos y lo vuelve a intentar.</p></li>
+                <li><span class="dot danger" aria-hidden="true"></span><b>Parado</b><span></span><p><span class="mono ident">closed</span> · bloquea todo lo que necesite el NER.</p></li>
               </ul>
             </article>
 
@@ -1116,15 +1146,15 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                 <span class="status ok" data-only="empty data blocked broken"><span class="dot" aria-hidden="true"></span>Todos responden</span>
                 <span class="status warn" data-only="error" hidden><span class="dot" aria-hidden="true"></span>1 no responde</span></div>
               <ul class="prov">
-                <li><span class="nm">Anthropic<span>api.anthropic.com</span></span>
+                <li><span class="nm">Anthropic<span class="ident">api.anthropic.com</span></span>
                   <span class="meter" data-only="empty data blocked broken" aria-hidden="true"><i style="--v:.6"></i></span>
                   <span class="status ok" data-only="empty data blocked broken"><span class="dot" aria-hidden="true"></span><span>Responde · <b>180 ms</b></span></span>
                   <span class="meter is-down" data-only="error" hidden aria-hidden="true"><i></i></span>
                   <span class="status danger" data-only="error" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>No responde · tiempo agotado</span></li>
-                <li><span class="nm">OpenAI<span>api.openai.com</span></span><span class="meter" aria-hidden="true"><i style="--v:.8"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>240 ms</b></span></span></li>
-                <li><span class="nm">Ollama (local)<span>127.0.0.1:11434</span></span><span class="meter" aria-hidden="true"><i style="--v:.1"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>30 ms</b></span></span></li>
+                <li><span class="nm">OpenAI<span class="ident">api.openai.com</span></span><span class="meter" aria-hidden="true"><i style="--v:.8"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>240 ms</b></span></span></li>
+                <li><span class="nm">Ollama (local)<span class="ident">127.0.0.1:11434</span></span><span class="meter" aria-hidden="true"><i style="--v:.1"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>30 ms</b></span></span></li>
               </ul>
-              <p class="cmd">Desde la terminal: <span class="code">antifaz doctor --providers</span></p>
+              <p class="cmd">Desde la terminal: <span class="code ident">antifaz doctor --providers</span></p>
             </article>
 
             <article class="surface scard" aria-labelledby="s-ev">
@@ -1137,7 +1167,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
                 <dt>Punto de control</dt><dd>Firmado hoy a las 00:00</dd>
                 <dt>Guarda</dt><dd>Quién, cuándo, qué tipos y cuántos. Nunca los datos.</dd>
               </dl>
-              <p class="cmd">Desde la terminal: <span class="code">antifaz audit verify</span></p>
+              <p class="cmd">Desde la terminal: <span class="code ident">antifaz audit verify</span></p>
             </article>
           </div>
 
@@ -1155,7 +1185,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
       <p>El logo del proyecto (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color.</p>
     </header>
     <div class="lrow">
-      <div><h3>Logo</h3><p><span class="code">docs/images/logo.svg</span> y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
+      <div><h3>Logo</h3><p><span class="code ident">docs/images/logo.svg</span> y <span class="code ident">design/logo-mark.svg</span> (un color)</p></div>
       <div class="lsets">
         <div class="lset on-light">
           <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
@@ -1265,8 +1295,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     var li=el("li","ev");
     if(isNew){ var fl=el("span","ev-flash"); fl.setAttribute("aria-hidden","true"); li.appendChild(fl); }
     var tm=el("time",null,ev.t); tm.setAttribute("datetime","2026-10-06T"+ev.t); li.appendChild(tm);
-    var main=el("span","ev-main"), who=el("span","ev-who",ev.who);
-    if(ev.app){ who.appendChild(el("span",null," · "+ev.app)); }
+    var main=el("span","ev-main"), who=el("span","ev-who");
+    who.appendChild(/\s/.test(ev.who)?document.createTextNode(ev.who):el("span","ident",ev.who));
+    if(ev.app){ var ap=el("span","ev-app"," · "); ap.appendChild(el("span",null,ev.app)); who.appendChild(ap); }
     main.appendChild(who); main.appendChild(el("span","ev-what",ev.what)); li.appendChild(main);
     var b=BADGE[ev.k], badge=el("span","tag "+b[0]); badge.appendChild(icon(b[1])); badge.appendChild(document.createTextNode(b[2]+(ev.k==="mask"?ev.n:""))); li.appendChild(badge);
     return li; }
@@ -1329,7 +1360,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   var rowsBox=document.getElementById("pol-rows");
   ROWS.forEach(function(r){
     var row=el("div","prow"); row.setAttribute("data-type",r[0]);
-    var nm=el("span","nm"); nm.appendChild(el("b",null,r[1])); nm.appendChild(el("span",null,r[0]+(r[0]==="PERSON"?" · necesita el NER":"")));
+    var nm=el("span","nm"); nm.appendChild(el("b",null,r[1])); var code=el("span"); code.appendChild(el("span","ident",r[0]));
+    if(r[0]==="PERSON") code.appendChild(document.createTextNode(" · necesita el NER")); nm.appendChild(code);
     var cn=el("span","chg-note","cambiado"); cn.hidden=true; nm.appendChild(cn); row.appendChild(nm);
     var fs=el("fieldset","seg"); fs.style.setProperty("--n","4");
     fs.appendChild(el("legend",null,r[1])); var th=el("span","thumb"); th.setAttribute("aria-hidden","true"); fs.appendChild(th);
@@ -1343,7 +1375,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   function loadPreset(name){ var pr=PRESET[name]; polName=name;
     ROWS.forEach(function(r){ document.getElementById("p-"+r[0]+"-"+(pr.e[r[0]]||"mask")).checked=true; });
     document.getElementById(pr.special==="block"?"pol-special-block":"pol-special-local").checked=true;
-    document.getElementById("pol-meta").textContent="Revisión "+pr.rev+" · huella "+pr.hash+" · la usan "+pr.keys+" claves";
+    var meta=document.getElementById("pol-meta"); meta.textContent="";
+    meta.appendChild(el("span",null,"Revisión "+pr.rev)); var fp=el("span",null,"huella "); fp.appendChild(el("span","ident",pr.hash));
+    meta.appendChild(fp); meta.appendChild(el("span",null,"la usan "+pr.keys+" claves"));
     document.getElementById("yaml-name").textContent=name;
     saveBtn.textContent="Guardar como revisión "+(pr.rev+1);
     saved=readPolicy(); renderYaml(); }

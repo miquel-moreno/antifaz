@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check
+.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -29,7 +29,8 @@ help:
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
 	@echo "demo       Regenerate docs/images/demo.gif from real commands (synthetic data, fake provider)"
 	@echo "design-check  Panel prototype in Chromium: console, requests, overflow, motion, axe-core"
-	@echo "           (Playwright + axe in the script's inline metadata; needs Playwright's Chromium)"
+	@echo "           (Playwright, axe and Pillow in the script's inline metadata; needs Playwright's Chromium)"
+	@echo "design-captures  Reference captures of the prototype into design/captures/ (same script)"
 
 install:
 	uv sync
@@ -112,9 +113,15 @@ demo:
 	uv run --with pillow==12.3.0 python -m scripts.demo_gif $(ARGS)
 
 # The panel prototype (design/prototype) in headless Chromium: console, third-party requests,
-# horizontal scroll, clipped or ellipsised text, motion and axe-core, at 390/768/1024/1280 px, both
-# themes and reduced motion. Not part of `check`. Its dependencies (Playwright, axe-playwright-python)
-# are in the script's PEP 723 metadata, never in uv.lock; Chromium comes once with
+# horizontal scroll, clipped or ellipsised text, identifiers broken inside, motion and axe-core, at
+# 390/768/1024/1280 px, both themes and reduced motion. Not part of `check`. Its dependencies
+# (Playwright, axe-playwright-python, Pillow) are in the script's PEP 723 metadata, never in uv.lock;
+# Chromium comes once with
 # `uv run --with playwright==1.63.0 playwright install chromium`.
 design-check:
 	uv run scripts/check_design.py $(ARGS)
+
+# Reference captures of the prototype (design/captures/): the five views in light and dark, desktop
+# and mobile, plus the other states of the Playground. Same script and dependencies as design-check.
+design-captures:
+	uv run scripts/check_design.py --captures
