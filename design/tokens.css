@@ -31,7 +31,7 @@
 :root {
   color-scheme: light;
 
-  /* Page and ambient light. The ambient blobs are decoration only (they move with transform). */
+  /* Page and ambient light. The ambient blobs are decoration only and stay still. */
   --color-bg: #eeeef3;
   --color-ambient-1: rgb(120 104 255 / 0.16);
   --color-ambient-2: rgb(80 160 255 / 0.1);

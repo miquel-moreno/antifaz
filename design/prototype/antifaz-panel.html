@@ -69,20 +69,15 @@ h1,h2,h3{text-wrap:balance}
 .tg input:focus-visible+.sw{box-shadow:0 0 0 2px var(--color-focus)}
 .tg input:disabled+.sw{opacity:.6}
 
-/* ---------- Ambient light behind the window (decoration; moves only with transform) ---------- */
+/* ---------- Ambient light behind the window (decoration; static) ----------
+   It does not move: with the frosted window on top, a moving background would make the browser
+   recompute the 40 px blur on every frame while the tab is visible, which goes against
+   "zero CPU when nobody is watching". */
 .ambient{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
 .ambient-blob{position:absolute;width:52vmax;height:52vmax;border-radius:50%;filter:blur(70px)}
 .ambient-blob.is-1{left:-14vmax;top:-26vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%)}
 .ambient-blob.is-2{right:-18vmax;top:-10vmax;background:radial-gradient(circle,var(--color-ambient-2),transparent 65%)}
 .ambient-blob.is-3{left:30vmax;bottom:-36vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%);opacity:.6}
-@media (prefers-reduced-motion: no-preference){
-  :root:not(.reduce-motion) .ambient-blob{will-change:transform}
-  :root:not(.reduce-motion) .ambient-blob.is-1{animation:ambient-drift-a 26s ease-in-out infinite alternate}
-  :root:not(.reduce-motion) .ambient-blob.is-2{animation:ambient-drift-b 32s ease-in-out infinite alternate}
-  :root:not(.reduce-motion) .ambient-blob.is-3{animation:ambient-drift-a 38s ease-in-out infinite alternate-reverse}
-}
-@keyframes ambient-drift-a{to{transform:translate3d(8vmax,6vmax,0) scale(1.08)}}
-@keyframes ambient-drift-b{to{transform:translate3d(-7vmax,9vmax,0) scale(.94)}}
 /* Fine grain over the page (an SVG noise, no colour of its own) */
 body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;opacity:var(--grain-opacity);mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
