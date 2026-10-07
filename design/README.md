@@ -126,7 +126,7 @@ La primera pasada encontró estas infracciones, todas corregidas:
 
 - **`listitem` (grave)**, en «En directo»: la lista de peticiones era `<ol role="log">`, y el `role` le quitaba la semántica de lista a sus `<li>`. Ahora `role="log"` (con `aria-live="polite"`) va en una caja que envuelve la `<ol>`.
 - **`aria-allowed-role` (menor)**, la misma `<ol>`: `log` no es un rol permitido en una lista. Arreglado con lo anterior.
-- **`region` (moderada)**, en todas las vistas: la marca, la versión y el estado del móvil estaban fuera de cualquier zona (landmark). La barra lateral es ahora `<aside aria-label="Barra lateral">`.
+- **`region` (moderada)**, en todas las vistas: la marca, la versión y el estado del móvil estaban fuera de cualquier zona (landmark). Se arregló primero con `<aside aria-label="Barra lateral">`; después de la revisión de Miquel se cambió (ver «Barra lateral sin zona propia», abajo).
 - **`aria-prohibited-attr` (grave, «por revisar»)**: la explicación de las cuatro acciones (`<dl>`) y la vista previa del YAML (`<pre>`) llevaban `aria-label`, que no vale en elementos sin rol. La lista se nombra con un título oculto («Qué significa cada opción») y el YAML es `role="region"` con su nombre (se puede enfocar porque hace scroll de lado).
 - En `tokens-preview.html`: **`landmark-one-main` y `region` (moderadas)**, la página va ahora dentro de `<main>`; y **`scrollable-region-focusable` (grave)**, el ejemplo de YAML hacía scroll de lado sin poder enfocarse: ahora parte las líneas.
 
@@ -140,6 +140,8 @@ Además, el script encontró **texto cortado con «…»**, que no era de axe: e
 - Ni Firefox ni Safari (solo Chromium), ni un móvil de verdad (el ancho de 390 px se emula), ni el zoom del navegador al 200 %.
 - El contraste de los nodos «por revisar» lo cubre la tabla calculada, no axe.
 - El uso solo con teclado se ha revisado en los pasos anteriores, no en esta comprobación automática.
+
+**Barra lateral sin zona propia** (cambio tras la revisión del paso 6, 7 de octubre de 2026). Un lector de pantalla anunciaba dos zonas seguidas, «Barra lateral» y dentro «Panel, navegación», para lo mismo. Ahora la barra lateral es un `<div>` sin nombre ni rol, y la única zona es la navegación, que ya tenía su nombre («Panel»): el `<nav>` envuelve toda la barra (marca, estado del móvil, botón de tema, pestañas y la nota del pie), así que nada queda fuera de una zona y axe no da `region`. No se ha ocultado nada: en el móvil la cabecera no se ve, y el estado de la barra («Todo en orden», «Sin respuesta», «Cadena rota») sigue siendo el único estado que se lee allí; en escritorio se lee el de la cabecera, porque el de la barra no se muestra. Se repitió `make design-check` completo después del cambio: las mismas **758 combinaciones** (en unos 5,5 minutos) y **104 pasadas de axe con 0 infracciones** (100 en el panel y 4 en `tokens-preview.html`); el resto de la tabla de arriba sigue igual (0 en todo; 10 226 textos con contraste que pasa y 1 578 nodos «por revisar»).
 
 Las capturas de referencia (`captures/`) se harán cuando Miquel apruebe el prototipo.
 
@@ -322,6 +324,7 @@ El apartado Logo del prototipo lo enseña a 64, 32 y 16 px sobre claro y sobre o
 ## Pendiente de decidir (Miquel)
 
 - Aprobar el prototipo (la línea de arriba).
+- Revisión manual de Miquel: móvil real, teclado y zoom al 200 %.
 - Si «Prueba un texto» llama a la IA de verdad (gasta) o usa una respuesta de prueba local. El prototipo enseña una respuesta de ejemplo y el destino real.
 - Qué nombre de cliente se enseña en directo (`Claude Code`, `Codex`…): el prototipo pone el nombre de la clave y, si se sabe, el del programa.
 - Qué hace la pasarela cuando la cadena de evidencias se rompe (seguir sirviendo o parar). El prototipo solo avisa.

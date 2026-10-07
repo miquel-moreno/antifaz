@@ -758,7 +758,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
   <div class="stage-wrap" id="stage-wrap">
   <div class="app-window" id="app" data-state="data"><div class="app-shell">
-    <aside class="app-sidebar" aria-label="Barra lateral"><div class="app-sidebar-inner">
+    <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
       <div class="app-brand rv" style="--i:1">
         <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version">v0.2.0</span>
         <span class="app-bar-tools">
@@ -769,7 +769,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
         </span>
       </div>
       <p class="app-nav-label rv" style="--i:2" id="nav-label">Panel</p>
-      <nav class="app-nav" aria-labelledby="nav-label">
+      <div class="app-nav">
         <div class="app-tablist" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
           <button class="app-tab rv" style="--i:2" role="tab" id="tab-playground" data-name="Prueba un texto" aria-controls="panel-playground" aria-selected="true" aria-keyshortcuts="1" tabindex="0"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto<kbd aria-hidden="true">1</kbd></button>
           <button class="app-tab rv" style="--i:3" role="tab" id="tab-live" data-name="En directo" aria-controls="panel-live" aria-selected="false" aria-keyshortcuts="2" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg>En directo<kbd aria-hidden="true">2</kbd></button>
@@ -777,12 +777,12 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <button class="app-tab rv" style="--i:5" role="tab" id="tab-policies" data-name="Políticas" aria-controls="panel-policies" aria-selected="false" aria-keyshortcuts="4" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-policy"/></svg>Políticas<kbd aria-hidden="true">4</kbd></button>
           <button class="app-tab rv" style="--i:6" role="tab" id="tab-status" data-name="Estado" aria-controls="panel-status" aria-selected="false" aria-keyshortcuts="5" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-status"/></svg>Estado<span class="app-tab-dot is-warn" data-only="error" hidden><span class="sr-only"> (aviso)</span></span><span class="app-tab-dot is-danger" data-only="broken" hidden><span class="sr-only"> (alerta)</span></span><kbd aria-hidden="true">5</kbd></button>
         </div>
-      </nav>
+      </div>
       <div class="app-sidebar-foot rv" style="--i:7">
         <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
         <span class="app-local"><span class="dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
       </div>
-    </div></aside>
+    </nav></div>
 
     <div class="app-main">
       <header class="app-header">
