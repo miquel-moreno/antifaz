@@ -93,6 +93,56 @@ Mismo lenguaje que «Prueba un texto»: superficies blancas con la sombra suave 
 - **Nada se repite sin fin.** El anillo del estado late **tres veces** cuando aparece o cuando cambia el estado, y después se queda quieto (`animation-iteration-count: 3`; el script lo reinicia en cada cambio de estado). Se han buscado y quitado todos los bucles infinitos de las dos páginas (`infinite` en el CSS, `Infinity` como número de repeticiones en el JavaScript): ya no queda ninguno. En `tokens-preview.html` el anillo de muestra también late tres veces al abrir. El único temporizador que se repite es el de las peticiones inventadas de «En directo», que solo corre con la vista abierta y la pestaña a la vista.
 - **El anillo, solo en la cabecera** (y en su pareja, la barra del móvil). El resto usa **puntos quietos**: «Conectado» en directo, las cuatro tarjetas de Estado, la línea «Todo se procesa en tu red» de la barra lateral, las claves y los estados del NER.
 
+## Comprobación final (paso 6)
+
+Hecha el **7 de octubre de 2026** con `make design-check` (`scripts/check_design.py`): Playwright 1.63.0 con Chromium sin ventana (Chrome for Testing 153.0.8010.12) y axe-core 4.12.1. El script sirve el repo en `127.0.0.1` (solo `design/` y `docs/images/`; nunca `.env`), abre las dos páginas y comprueba todo en el estado de reposo (las animaciones se llevan a su final antes de medir). Se puede repetir cuando se quiera; no forma parte de `make check`.
+
+**Qué se ha comprobado**: anchos de 390, 768, 1024 y 1280 px, y 1280 px con «Móvil»; tema claro y oscuro (el del sistema, emulado); tres modos de movimiento: normal, «reducir movimiento» del sistema (emulado por Playwright) y el interruptor «Menos movimiento»; en cada combinación, las cinco vistas en los cinco estados. En total, **758 combinaciones** (750 del panel y 8 de `tokens-preview.html`), en unos 8,5 minutos.
+
+| Comprobación | Resultado |
+|---|---|
+| Consola (errores, avisos y excepciones) | 0 |
+| Peticiones | 190, todas al servidor local; **0 a terceros** |
+| Scroll horizontal de la página | 0 |
+| Texto cortado (fuera de una caja que recorta o de la pantalla) | 0 |
+| Texto cortado con «…» (`text-overflow: ellipsis`) | 0; ya no se usa en ninguna de las dos páginas |
+| Texto que solo se ve haciendo scroll en una caja no prevista | 0 (la fila de pestañas del móvil sí se desliza de lado: es así a propósito) |
+| Animaciones que se repiten sin fin | 0 |
+| Anillo del estado | Reinicia y late 3 veces solo en la cabecera (o la barra del móvil) en los 150 cambios de estado comprobados; 0 con movimiento reducido |
+| Algo que se mueva con movimiento reducido | 0 (en los dos modos; con el del sistema, el interruptor sale activado y bloqueado) |
+
+**axe-core** (todas sus reglas: WCAG 2.0, 2.1 y 2.2 A y AA, y buenas prácticas), en las cinco vistas y los cinco estados, en claro y en oscuro, a 1280 y a 390 px: **100 pasadas en el panel y 4 en `tokens-preview.html`, 0 infracciones** en cada vista y tema:
+
+| Vista | 1280 claro | 1280 oscuro | 390 claro | 390 oscuro |
+|---|---|---|---|---|
+| Prueba un texto | 0 | 0 | 0 | 0 |
+| En directo | 0 | 0 | 0 | 0 |
+| Claves | 0 | 0 | 0 | 0 |
+| Políticas | 0 | 0 | 0 | 0 |
+| Estado | 0 | 0 | 0 | 0 |
+| `tokens-preview.html` | 0 | 0 | 0 | 0 |
+
+La primera pasada encontró estas infracciones, todas corregidas:
+
+- **`listitem` (grave)**, en «En directo»: la lista de peticiones era `<ol role="log">`, y el `role` le quitaba la semántica de lista a sus `<li>`. Ahora `role="log"` (con `aria-live="polite"`) va en una caja que envuelve la `<ol>`.
+- **`aria-allowed-role` (menor)**, la misma `<ol>`: `log` no es un rol permitido en una lista. Arreglado con lo anterior.
+- **`region` (moderada)**, en todas las vistas: la marca, la versión y el estado del móvil estaban fuera de cualquier zona (landmark). La barra lateral es ahora `<aside aria-label="Barra lateral">`.
+- **`aria-prohibited-attr` (grave, «por revisar»)**: la explicación de las cuatro acciones (`<dl>`) y la vista previa del YAML (`<pre>`) llevaban `aria-label`, que no vale en elementos sin rol. La lista se nombra con un título oculto («Qué significa cada opción») y el YAML es `role="region"` con su nombre (se puede enfocar porque hace scroll de lado).
+- En `tokens-preview.html`: **`landmark-one-main` y `region` (moderadas)**, la página va ahora dentro de `<main>`; y **`scrollable-region-focusable` (grave)**, el ejemplo de YAML hacía scroll de lado sin poder enfocarse: ahora parte las líneas.
+
+Además, el script encontró **texto cortado con «…»**, que no era de axe: en «En directo», a 390 px, el nombre de la clave y el programa (por ejemplo «equipo-soporte · Claude Code») se cortaban; ahora pasan a la línea siguiente, con el programa siempre entero. En la cabecera, la ruta tampoco usa ya «…». En `tokens-preview.html`, los valores largos de las muestras de color se cortaban; ahora parten la línea.
+
+**Lo que axe deja «por revisar».** axe calculó el contraste de **10 226 textos** y todos pasan. Quedan **1 578 nodos** en los que no puede decidir porque el fondo es un degradado, una capa `::before`/`::after` o un elemento que tapa en parte (la píldora del control segmentado, el velo de las filas cambiadas): la mayoría en Políticas (unos 60 por estado, los controles segmentados de cada fila), unos 50 en Prueba un texto y menos de 20 en el resto. Esos pares ya están calculados a mano en el peor caso en la tabla de «Contraste» de abajo (y en vivo en `tokens-preview.html`), y todos pasan.
+
+**Lo que no se ha comprobado:**
+
+- **No se ha probado con un lector de pantalla de verdad** (NVDA, JAWS, VoiceOver ni TalkBack). axe solo mira el código; cómo se oyen los anuncios de `role="status"` y `role="log"`, el orden de lectura o los controles segmentados está sin probar.
+- Ni Firefox ni Safari (solo Chromium), ni un móvil de verdad (el ancho de 390 px se emula), ni el zoom del navegador al 200 %.
+- El contraste de los nodos «por revisar» lo cubre la tabla calculada, no axe.
+- El uso solo con teclado se ha revisado en los pasos anteriores, no en esta comprobación automática.
+
+Las capturas de referencia (`captures/`) se harán cuando Miquel apruebe el prototipo.
+
 ## La dirección visual
 
 Miquel eligió la muestra de estilo de «Prueba un texto» y el resto del panel se ha pasado a ese lenguaje:
@@ -112,6 +162,8 @@ python -m http.server 8765 --bind 127.0.0.1
 ```
 
 y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o <http://127.0.0.1:8765/design/prototype/tokens-preview.html> (los tokens). Hace falta el servidor porque las páginas cargan `design/tokens.css`, las fuentes de `design/fonts/` y el icono por ruta relativa. No se pide nada fuera de tu equipo.
+
+Para repetir la comprobación final: `make design-check` (ver «Comprobación final (paso 6)»; la primera vez, `uv run --with playwright==1.63.0 playwright install chromium`).
 
 ## Archivos
 
@@ -171,7 +223,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 - Los interruptores apagados tienen un borde de 3:1 (`--color-control`).
 - **El cuadro de texto y WCAG 1.4.11.** Antes el bloque del texto llevaba el borde de 3:1; Miquel pidió quitarlo y dejar la línea finísima y la sombra de la referencia. 1.4.11 pide 3:1 para lo que hace falta para **identificar** un control, y aquí el campo se identifica sin el borde: tiene su etiqueta visible «Texto de prueba» (en el móvil la etiqueta no se ve, pero está para el lector de pantalla), el texto de ejemplo dentro («Por ejemplo: Hola, soy…», que pasa 4,5:1), y es una tarjeta blanca propia con su barra de botones debajo. Al enfocarlo sale el anillo índigo, que sí pasa 3:1. Es la misma lectura que se hizo con el control segmentado (abajo): el borde sería un refuerzo, no lo único que lo identifica.
 - **Control segmentado y WCAG 1.4.11.** Antes, la píldora de la opción elegida llevaba un borde oscuro de 3:1 para cumplir 1.4.11 (contraste de lo que no es texto), porque la píldora blanca sobre el carril gris no llega a 3:1. Miquel pidió quitarlo. Ahora la píldora es la de la referencia (blanca con `--shadow-pop`, sin borde) y **la opción elegida se reconoce sin mirar la píldora**: su texto va en `--color-text` y peso 600, y el de las demás en `--color-text-muted` y peso 500. Los dos textos pasan 4,5:1 sobre su fondo (texto / tarjeta 16,71 y 16,41; texto secundario / fondo de pistas 5,33 y 5,30). Como el estado ya lo dice el propio texto, que cumple 1.4.3, la píldora es un refuerzo y no tiene que llegar a 3:1. No se depende solo del color (1.4.1): entre los dos grises hay 2,7:1 en claro y 2,5:1 en oscuro, y el cambio de peso es la señal que no es de color. Además siguen siendo botones de opción de verdad (`input type="radio"`, que el lector de pantalla anuncia como «marcado») o botones con `aria-pressed` (las columnas en el móvil), así que el lector de pantalla dice cuál está elegida, y el anillo de foco no cambia. Lo mismo vale para las pestañas en píldora.
-- Teclado: las pestañas usan tabindex itinerante (flechas, Inicio y Fin) y las teclas 1 a 5 saltan a cada sección; todo tiene foco visible (anillo índigo); hay enlace «Saltar al contenido»; cada control tiene su etiqueta. La lista en directo es `role="log"` con `aria-live="polite"`; los mensajes de «Comprobar ahora» y de cambios sin guardar son `role="status"`.
+- Teclado: las pestañas usan tabindex itinerante (flechas, Inicio y Fin) y las teclas 1 a 5 saltan a cada sección; todo tiene foco visible (anillo índigo); hay enlace «Saltar al contenido»; cada control tiene su etiqueta. La lista en directo está dentro de una caja `role="log"` con `aria-live="polite"`; los mensajes de «Comprobar ahora» y de cambios sin guardar son `role="status"`.
 - Movimiento: nada se repite sin fin (el anillo del estado late tres veces y para). Solo se animan `transform` y `opacity`. Excepciones: el ancho de cada dato en la animación del antifaz y las transiciones de color y sombra al pasar el ratón (cortas, provocadas por quien usa el panel y sin mover el diseño). El fondo no se mueve. Todo se apaga con `prefers-reduced-motion` y con el interruptor del prototipo. Las animaciones de JavaScript (Web Animations API) lo comprueban también, porque el CSS de «reducir movimiento» solo para las animaciones y transiciones de CSS.
 - En el panel real el JavaScript y los estilos van en archivos aparte (CSP estricta, sin JS en línea); en el prototipo están dentro de la página para que sea un solo archivo.
 - Coste cero si nadie mira: el flujo en directo se abre al entrar en la sección y se cierra al salir o al esconder la pestaña del navegador.

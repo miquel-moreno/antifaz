@@ -6,7 +6,7 @@ Antifaz se distribuye con licencia **Apache-2.0** (`LICENSE` y `NOTICE`).
 
 En lo que se distribuye (la librería y la imagen) **no entra nada no comercial (NC) ni copyleft fuerte** (GPL, AGPL, SSPL…). Se permiten dependencias de **copyleft débil sin modificar** (LGPL, MPL, EPL), y cada una se anota aquí con su motivo.
 
-`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor) no se distribuyen y no cuentan. El grupo `bench` (Presidio y spaCy, solo para el benchmark) tampoco se distribuye, pero el script lo comprueba con la misma regla (ver más abajo).
+`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor, la comprobación del prototipo del panel) no se distribuyen y no cuentan. El grupo `bench` (Presidio y spaCy, solo para el benchmark) tampoco se distribuye, pero el script lo comprueba con la misma regla (ver más abajo).
 
 La CI no instala el extra `ner` (PyTorch pesa cientos de MB). Para los paquetes que solo trae ese extra, el script usa la licencia que dicen sus metadatos, anotada a mano en `RECORDED_EXTRA` con las versiones de `uv.lock`; un test la compara con los metadatos instalados cuando el extra está (en local).
 
@@ -34,6 +34,23 @@ Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic cont
 | docstring-parser | 0.18.0 | MIT | anthropic |
 
 `httpx2-jsfetch` solo se instala en navegador (emscripten); aquí no se usa.
+
+## Solo para desarrollo: la comprobación del prototipo del panel
+
+`make design-check` (`scripts/check_design.py`, issue #30, paso 6) abre el prototipo del panel en un Chromium sin ventana y le pasa axe-core. Sus dependencias **no están en `pyproject.toml` ni en `uv.lock`**: van en los metadatos en línea del propio script (PEP 723), con versión fija, y `uv run` las instala en un entorno aparte solo para esa ejecución. Por eso `scripts/check_licenses.py` no las ve (solo mira `uv.lock`) y se anotan aquí a mano. **No se distribuyen** (ni en la librería ni en la imagen) y `make check` no las usa. Licencias leídas el 2026-10-07 de los metadatos de cada paquete, y del archivo de licencia cuando los metadatos no la dicen:
+
+| Paquete | Versión | Licencia | Llega por |
+|---|---|---|---|
+| playwright | 1.63.0 | Apache-2.0 | directa (metadatos del script) |
+| axe-playwright-python | 0.1.8 | MIT (sus metadatos no la declaran; leída en su archivo `LICENSE`) | directa (metadatos del script) |
+| axe-core | 4.12.1 | MPL-2.0 | va dentro de axe-playwright-python (`axe.min.js`, sin modificar); se inyecta en la página que se comprueba |
+| greenlet | 3.5.6 | MIT AND PSF-2.0 | playwright |
+| pyee | 13.0.1 | MIT | playwright |
+| typing-extensions | 4.16.0 | PSF-2.0 | playwright |
+
+axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, así que no obliga a nada.
+
+**El navegador.** Playwright necesita su propio Chromium («Chrome for Testing» 153.0.8010.12 y su «headless shell»), que se descarga una vez con `uv run --with playwright==1.63.0 playwright install chromium` a `%LOCALAPPDATA%\ms-playwright` (fuera del repo): unos 205 MB + 120 MB comprimidos y unos 700 MB en disco. Es Chromium (BSD-3-Clause y componentes de terceros); no se ha revisado componente por componente porque solo se usa en local y nunca se distribuye.
 
 ## El extra `ner` (opcional)
 

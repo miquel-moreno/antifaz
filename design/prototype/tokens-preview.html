@@ -35,8 +35,8 @@ h1,h2,h3,p{margin:0}
 .sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 .chip{display:grid;grid-template-columns:30px minmax(0,1fr);gap:2px 10px;align-items:center;padding:6px;border-radius:var(--radius-control);background:var(--color-surface);box-shadow:0 0 0 1px var(--color-line);min-width:0}
 .chip i{grid-row:span 2;width:30px;height:30px;border-radius:var(--radius-control-sm);box-shadow:inset 0 0 0 1px var(--color-line-strong)}
-.chip b{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chip span{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-muted);letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip b{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0;overflow-wrap:anywhere;min-width:0}
+.chip span{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-muted);letter-spacing:0;overflow-wrap:anywhere;min-width:0}
 .chip.adj{box-shadow:0 0 0 1.5px var(--color-accent)}
 .chip.adj span::after{content:" · AA";color:var(--color-accent-ink);font-weight:600}
 .logo-tile{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px var(--logo-ring),inset 0 1px 0 var(--logo-highlight),0 6px 14px -6px var(--logo-shadow)}
@@ -62,7 +62,7 @@ mark.pii{background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;
 mark.pii small{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--color-pii);margin-left:5px}
 .restored{background:linear-gradient(var(--color-ok),var(--color-ok)) 0 100%/100% 1.5px no-repeat;padding-bottom:1px}
 .code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);padding:1px 6px;border-radius:var(--radius-xs);letter-spacing:0}
-pre{margin:0;font-family:var(--font-mono);font-size:12.5px;line-height:1.6;letter-spacing:0;background:var(--color-surface-2);border-radius:var(--radius-control-lg);padding:10px 12px;overflow-x:auto}
+pre{margin:0;font-family:var(--font-mono);font-size:12.5px;line-height:1.6;letter-spacing:0;background:var(--color-surface-2);border-radius:var(--radius-control-lg);padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere}
 pre .k{color:var(--color-accent-ink)}
 
 /* Radii and shadows */
@@ -127,7 +127,7 @@ pre .k{color:var(--color-accent-ink)}
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
   <symbol id="mask" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
 </defs></svg>
-<div class="page">
+<main class="page">
   <header class="head">
     <h1>Tokens del panel · paso 1</h1>
     <p>Todos los valores de <span class="code">design/tokens.css</span>, en claro y en oscuro a la vez, con las fuentes locales (Inter y Geist Mono). Los marcados con «AA» se han cambiado respecto a la referencia para cumplir el contraste; la tabla del final se calcula en vivo con los tokens.</p>
@@ -142,7 +142,7 @@ pre .k{color:var(--color-accent-ink)}
       <tbody></tbody>
     </table>
   </div>
-</div>
+</main>
 
 <template id="col">
   <section class="theme">

@@ -126,6 +126,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-status.is-ok{color:var(--color-ok)} .app-status.is-warn{color:var(--color-warn)} .app-status.is-danger{color:var(--color-danger)}
 .app-status-dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
 .app-status .app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) 3}
+.app-status .app-status-dot.is-reset::after{animation:none}
 
 /* Shared by the views: a static dot (the pulsing ring is only in the header and the phone bar) */
 .dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
@@ -136,7 +137,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 /* ---------- Header: sticky and translucent; hides on scroll down, returns on scroll up ---------- */
 .app-main{min-width:0;display:flex;flex-direction:column}
 .app-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 28px;background:color-mix(in srgb,var(--color-window) var(--chrome-alpha),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));border-bottom:1px solid var(--color-line);transition:transform var(--duration-base) var(--ease-out),opacity var(--duration-base) var(--ease-out)}
-.app-crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.app-crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;min-width:0}
 .app-crumb b{color:var(--color-text);font-weight:550}
 .app-iconbtn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text-muted);cursor:pointer;flex:none;transition:background var(--duration-fast),color var(--duration-fast),transform var(--duration-fast) var(--ease-out)}
 .app-iconbtn:hover{background:var(--color-surface-3);color:var(--color-text)}
@@ -405,8 +406,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .ev-flash{position:absolute;inset:0;background:var(--color-accent-soft);opacity:0;pointer-events:none}
 .ev time{font-family:var(--font-mono);font-size:12.5px;color:var(--color-text-faint);letter-spacing:0;font-variant-numeric:tabular-nums}
 .ev-main{display:flex;flex-direction:column;min-width:0}
-.ev-who{font-size:14px;font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ev-who span{font-weight:var(--weight-regular);color:var(--color-text-muted)}
+.ev-who{font-size:14px;font-weight:var(--weight-semibold);overflow-wrap:anywhere}
+.ev-who span{font-weight:var(--weight-regular);color:var(--color-text-muted);white-space:nowrap}
 .ev-what{font-size:var(--text-sm);color:var(--color-text-muted)}
 .feed-empty{display:grid;justify-items:center;gap:10px;padding:28px 20px 32px;border-top:1px solid var(--color-line);text-align:center;color:var(--color-text-muted);font-size:14px}
 .feed-empty .orb{width:44px;height:44px;border-radius:14px}
@@ -757,7 +758,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
   <div class="stage-wrap" id="stage-wrap">
   <div class="app-window" id="app" data-state="data"><div class="app-shell">
-    <div class="app-sidebar"><div class="app-sidebar-inner">
+    <aside class="app-sidebar" aria-label="Barra lateral"><div class="app-sidebar-inner">
       <div class="app-brand rv" style="--i:1">
         <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version">v0.2.0</span>
         <span class="app-bar-tools">
@@ -781,7 +782,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
         <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
         <span class="app-local"><span class="dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
       </div>
-    </div></div>
+    </div></aside>
 
     <div class="app-main">
       <header class="app-header">
@@ -966,7 +967,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
               <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg></span>
               <p>Hoy aún no ha pasado ninguna petición. Cuando alguien use una clave, lo verás aquí al momento.</p>
             </div>
-            <ol class="feed" id="feed" role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="feed-t" data-only="data blocked error broken"></ol>
+            <div role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="feed-t" data-only="data blocked error broken"><ol class="feed" id="feed"></ol></div>
           </article>
 
           <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Si nadie mira este panel, Antifaz no prepara ni envía nada: 0 % de CPU. El flujo se abre al entrar aquí y se cierra al salir.</p>
@@ -1032,7 +1033,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             </span>
           </div>
 
-          <dl class="help" aria-label="Qué significa cada opción">
+          <h2 class="sr-only">Qué significa cada opción</h2>
+          <dl class="help">
             <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar</dt><dd>Cambia el dato por un marcador y lo devuelve en la respuesta.</dd></div>
             <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg>Permitir</dt><dd>El dato pasa tal cual.</dd></div>
             <div><dt><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</dt><dd>No se envía nada a la IA.</dd></div>
@@ -1070,7 +1072,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
               <article class="surface pol-yaml" aria-labelledby="yaml-t">
                 <div class="sh"><h2 id="yaml-t">Así queda el archivo</h2><span class="aside">policies/<span id="yaml-name">default</span>.yaml</span></div>
-                <pre class="yaml" id="yaml-out" tabindex="0" aria-label="Vista previa de la política en YAML"></pre>
+                <pre class="yaml" id="yaml-out" tabindex="0" role="region" aria-label="Vista previa de la política en YAML"></pre>
               </article>
             </div>
           </div>
@@ -1390,11 +1392,12 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     setTimeout(function(){ chk++; out.textContent="Comprobado a las 10:"+(44+chk>59?59:44+chk); b.disabled=false; growMeters(); },calm()?0:700); });
 
   /* The header (and phone bar) status ring pulses three times (CSS) when it appears or the state
-     changes, then stays still: restart it on every state change. Never with reduced motion (the
-     CSS removes the animation, so there is nothing to restart). */
-  function pulseStatus(){ if(!document.getAnimations) return;
-    document.querySelectorAll(".app-status:not([hidden]) .app-status-dot").forEach(function(d){
-      d.getAnimations({subtree:true}).forEach(function(a){ a.cancel(); a.play(); }); }); }
+     changes, then stays still: restart it on every state change, also when the same status stays
+     on screen (its three pulses may be long over). The CSS animation is removed for one style
+     pass and put back. With reduced motion the CSS has no animation, so nothing moves. */
+  function pulseStatus(){ var d=document.querySelectorAll(".app-status:not([hidden]) .app-status-dot");
+    d.forEach(function(x){ x.classList.add("is-reset"); }); void app.offsetWidth;
+    d.forEach(function(x){ x.classList.remove("is-reset"); }); }
 
   /* ---- Prototype states. Only the synthetic example is ever shown in the results: what
      someone types is never copied anywhere on the page. ---- */
