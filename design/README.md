@@ -9,11 +9,11 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
 2. Ventana, barra lateral, cabecera y móvil. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
 3. Vista «Prueba un texto» con sus cinco estados. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
-4. Animación del antifaz y entrada. **Hecho** (esta versión).
-5. Las otras cuatro vistas con el mismo lenguaje.
+4. Animación del antifaz y entrada. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
+5. Las otras cuatro vistas con el mismo lenguaje. **Hecho** (esta versión).
 6. Comprobación final.
 
-Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana, «Prueba un texto», la animación del antifaz y la entrada nuevos, pero las otras cuatro vistas son todavía las anteriores: es normal que se vea a medias.
+Desde el paso 5, las cinco vistas usan el lenguaje nuevo. Queda la comprobación final (paso 6).
 
 ### Paso 2: la ventana
 
@@ -72,6 +72,21 @@ Decisiones de Miquel: **Web Animations API** del navegador (`element.animate`, s
 - **Fondo quieto**: las tres manchas de luz ya no se mueven (antes derivaban sin parar con `transform`). Con la ventana de vidrio esmerillado encima, un fondo que se mueve obliga al navegador a recalcular el desenfoque de 40 px en cada fotograma mientras la pestaña está a la vista, y eso choca con «si nadie mira, 0 % de CPU».
 - **Excepción en «solo `transform` y `opacity`»**: las transiciones de color y de sombra al pasar el ratón (botones, pestañas, filas) se permiten, porque son cortas, las provoca quien usa el panel y no mueven el diseño. Nada más anima color, sombra, fondo, ancho ni posición (aparte del ancho de los datos en la animación del antifaz).
 
+### Paso 5: las otras cuatro vistas
+
+Mismo lenguaje que «Prueba un texto»: superficies blancas con la sombra suave de las tarjetas, esquinas de 18 px, líneas finas solo donde separan y casi sin color. El color solo sale para decir un estado (punto o icono, siempre con su palabra). Se mantienen los textos, el contenido y las reglas de cada vista.
+
+- **Etiquetas tranquilas** (`.tag`) en lugar de las pastillas de color: icono y palabra sobre un gris neutro; el color va solo en el icono (índigo para «Ocultar», ámbar para el error, rojo para bloqueo y alerta). Así una lista llena de etiquetas no se convierte en un arcoíris.
+- **En directo**: los contadores del día son una sola superficie dividida por líneas (datos protegidos con sus barras por tipo; bloqueos; IA local; cadena de evidencias). La cadena dibujada inclina el eslabón roto y apaga los de después, que ya no sirven como prueba. Las barras se escalan con `transform: scaleX()` desde la izquierda (nunca con el ancho). **Llega una petición nueva**: la fila entra desde arriba, las demás le hacen sitio (con `transform`), el total sube con un pequeño salto y la fila se ilumina con una **capa propia que solo cambia de opacidad** (no se anima el fondo). Solo tipos y cantidades. La simulación solo corre si la vista está abierta **y** la pestaña del navegador se ve (`visibilitychange`); si no, no hay ningún temporizador. El vacío explica qué se verá.
+- **Claves**: tabla con cabecera gris suave y título «Claves virtuales» con el recuento. «Revocar» es un botón neutro (una acción destructiva no va en índigo). La tabla necesita unos 780 px: cuando la superficie es más estrecha (tableta con la barra lateral, móvil), cada fila pasa a ser una tarjeta compacta (nombre, estado y «Revocar» arriba; los cuatro datos debajo con su etiqueta). Lo decide el ancho de la propia superficie (container query), no el de la pantalla. La clave nunca aparece.
+- **Políticas**: una barra de herramientas arriba con la política que se edita, su revisión y huella, el mensaje de cambios y «Guardar como revisión N» (antes estaba debajo del YAML; así se ve siempre). Una fila cambiada lleva un velo índigo suave, una barrita a la izquierda (capas que solo cambian de opacidad) **y la palabra «cambiado»**, para no depender del color. En el YAML, cada línea cambiada lleva su resaltado como capa aparte, que aparece con un fundido solo cuando la línea acaba de cambiar. Las reglas fijas van en columnas (qué, acción, candado). **En el móvil**, un control segmentado como el de «Prueba un texto» enseña una parte cada vez: Tipos, Reglas o Archivo.
+- **Estado**: las cuatro tarjetas con el estado en la cabecera (punto con anillo y palabra). Las barras de latencia se escalan con `transform: scaleX()` desde la izquierda y crecen al entrar en la vista y al pulsar «Comprobar ahora» (nunca solas). Con Anthropic caído, su barra queda vacía y el estado en rojo con icono.
+- **Luz que sigue al cursor** (solo con ratón) también en las superficies de estas vistas.
+- **Accesibilidad**: la lista en directo sigue siendo `role="log"` con `aria-live="polite"`; el resaltado de la fila nueva es `aria-hidden`. Las pestañas siguen con tabindex itinerante; los controles segmentados son botones de opción o botones con `aria-pressed`; el NER marca el estado actual con `aria-current` y la palabra «Ahora». Texto pequeño sin espaciado negativo. Sin contraste nuevo: todas las parejas de color nuevas ya están en la tabla (por ejemplo, texto terciario sobre fondo 2, 4,52 y 4,53).
+- **Movimiento**: solo `transform` y `opacity` (más los cambios de color o sombra al pasar el ratón). Con «reducir movimiento» o «Menos movimiento» no se anima nada: las filas nuevas aparecen sin más y, si se activa a mitad, lo que estaba en marcha salta a su final.
+- **Antes**, sin que lo pidiera nadie, se animaban algunas cosas que no eran `transform` ni `opacity` y que no eran al pasar el ratón: el color del control segmentado y de los chips del prototipo, el fondo de los interruptores, la sombra del cuadro de texto al enfocarlo, el ancho y las esquinas de la ventana al pulsar «Móvil» y la posición del enlace «Saltar al contenido». Ahora cambian sin transición (el enlace se mueve con `transform`).
+- Sin scroll horizontal, sin textos cortados ni piezas montadas a 390, 768 y 1280 px y con «Móvil», en los cinco estados, las cinco vistas y los dos temas; consola limpia.
+
 ## La dirección visual
 
 Miquel eligió la muestra de estilo de «Prueba un texto» y el resto del panel se ha pasado a ese lenguaje:
@@ -116,10 +131,10 @@ La fila de arriba, fuera de la ventana y con el borde discontinuo y la etiqueta 
 ## Las secciones
 
 1. **Prueba un texto** (Playground). Cuadro de texto con selector de política (`default`/`rrhh`), «Usar el ejemplo» y «Probar» (también con Ctrl o ⌘ + Intro); la tarjeta «Así viaja tu texto»; las tres columnas (lo que escribes, lo que recibe la IA, lo que te vuelve) como una sola superficie; la línea de datos encontrados y los metadatos. En el móvil, las tres columnas pasan a un selector de columna para no hacer scroll. Detalle en «Paso 3».
-2. **En directo**. Cabecera con «Conectado» y la fecha. Una superficie con los contadores del día: datos protegidos (número grande y barras por tipo), bloqueos, envíos a IA local y la cadena de evidencias (con una cadena dibujada que marca el eslabón roto). Debajo, «Últimas peticiones»: hora, clave y programa, qué ha pasado y una etiqueta (ocultados N, bloqueado, IA local, sin datos, error, alerta). **Solo tipos y cantidades: nunca un valor ni un marcador.** En el prototipo llega una petición inventada cada 6 segundos mientras se mira la vista y los contadores suben; al salir de la vista o esconder la pestaña, se para. Al pie, el aviso de que si nadie mira no se gasta CPU (0 %).
-3. **Claves**. Botón «Crear clave» y una tabla en una superficie: nombre e id, qué puede usar, política, límites, último uso, estado (punto y palabra) y «Revocar». Una clave revocada sale tachada y en gris. **La clave nunca aparece, ni un trozo**: el pie lo explica. En el móvil, cada fila pasa a ser una tarjeta con sus etiquetas.
-4. **Políticas**. Selector de la política que se edita (`default`/`rrhh`) con su revisión, huella y cuántas claves la usan; la explicación de las cuatro acciones; una fila por tipo de dato con el control de cuatro opciones **Ocultar / Permitir / Bloquear / IA local**; las reglas de seguridad fijas (con candado) y la de categorías especiales (IA local o bloquear); y la vista previa del YAML, que cambia al tocar una opción y resalta en índigo las líneas cambiadas. «Guardar como revisión N» solo se activa si hay cambios, y un mensaje dice cuántos hay.
-5. **Estado**. Cuatro tarjetas: pasarela (versión, `/healthz`, dirección, base de datos), detector de nombres (NER) con sus cuatro estados explicados y el actual marcado, proveedores de IA con su latencia (barra y milisegundos) y evidencias. Se comprueba solo al pulsar «Comprobar ahora»: no hay sondeos en segundo plano.
+2. **En directo**. Cabecera con «Conectado» y la fecha. Una superficie con los contadores del día: datos protegidos (número grande y barras por tipo), bloqueos, envíos a IA local y la cadena de evidencias (con una cadena dibujada que marca el eslabón roto). Debajo, «Últimas peticiones»: hora, clave y programa, qué ha pasado y una etiqueta tranquila (ocultados N, bloqueado, IA local, sin datos, error, alerta). **Solo tipos y cantidades: nunca un valor ni un marcador.** En el prototipo llega una petición inventada cada 6 segundos mientras se mira la vista y los contadores suben; al salir de la vista o esconder la pestaña, se para. Al pie, el aviso de que si nadie mira no se gasta CPU (0 %).
+3. **Claves**. Botón «Crear clave» y una tabla en una superficie: nombre e id, qué puede usar, política, límites, último uso, estado (punto y palabra) y «Revocar». Una clave revocada sale tachada y en gris. **La clave nunca aparece, ni un trozo**: el pie lo explica. Cuando no cabe (tableta con la barra lateral, móvil), cada fila pasa a ser una tarjeta compacta con sus etiquetas.
+4. **Políticas**. Selector de la política que se edita (`default`/`rrhh`) con su revisión, huella y cuántas claves la usan; la explicación de las cuatro acciones; una fila por tipo de dato con el control de cuatro opciones **Ocultar / Permitir / Bloquear / IA local**; las reglas de seguridad fijas (con candado) y la de categorías especiales (IA local o bloquear); y la vista previa del YAML, que cambia al tocar una opción y resalta en índigo las líneas cambiadas. «Guardar como revisión N» (en la barra de arriba) solo se activa si hay cambios, y un mensaje dice cuántos hay. Las filas cambiadas dicen «cambiado». En el móvil, un selector enseña Tipos, Reglas o Archivo.
+5. **Estado**. Cuatro tarjetas: pasarela (versión, `/healthz`, dirección, base de datos), detector de nombres (NER) con sus cuatro estados explicados y el actual marcado, proveedores de IA con su latencia (barra escalada con `transform` y milisegundos) y evidencias. Se comprueba solo al pulsar «Comprobar ahora»: no hay sondeos en segundo plano.
 
 Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 
@@ -132,7 +147,7 @@ Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 | Bloqueo | El texto habla de salud y la política `rrhh` lo bloquea: «no se ha enviado nada», con el motivo fijo (`special_category`); el evento aparece arriba en directo y los bloqueos suben a 4 |
 | Error | Anthropic no responde: aviso ámbar arriba en todas las vistas, la tercera columna sin respuesta, el evento «Error 504», un punto en la pestaña Estado y Anthropic en rojo en proveedores |
 | Cadena rota | Aviso rojo arriba con qué ha pasado y qué hacer, el estado de la cabecera en rojo, la cadena rota en En directo (eslabón marcado), el evento «Alerta» y Evidencias en rojo en Estado |
-| Móvil | Cualquiera de los anteriores con «Móvil»: pestañas en fila arriba, una columna, selector de columna en el Playground y la tabla de claves en tarjetas |
+| Móvil | Cualquiera de los anteriores con «Móvil»: pestañas en fila arriba, una columna, selector de columna en el Playground, selector de parte en Políticas y la tabla de claves en tarjetas |
 
 ## La animación del antifaz (F3)
 
