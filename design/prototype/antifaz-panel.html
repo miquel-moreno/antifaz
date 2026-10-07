@@ -319,8 +319,14 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .reduce-motion .journey{display:none}
 .reduce-motion .rm-note{display:flex}
 
-/* Three panes as one surface with hairlines */
-.pswitch{display:none}
+/* Three panes as one surface with hairlines. Where they do not fit side by side, the switcher
+   (Escribes / Recibe la IA / Te vuelve) shows one at a time; it is hidden until then. */
+.pswitch{display:none;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
+.pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-pop);transition:transform .45s var(--ease-spring)}
+.pswitch[data-p="2"] .thumb{transform:translateX(100%)}
+.pswitch[data-p="3"] .thumb{transform:translateX(200%)}
+.pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:var(--weight-medium);color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
+.pswitch button[aria-pressed="true"]{color:var(--color-text);font-weight:var(--weight-semibold)}
 .panes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
 .pane{display:flex;flex-direction:column;gap:10px;padding:18px 20px 20px;min-width:0}
 .pane+.pane{border-left:1px solid var(--color-line)}
@@ -576,12 +582,17 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.lrow p,.num,
 .pswitch button{letter-spacing:var(--tracking-small)}
 
-/* ---------- Medium: panes and grids stack ---------- */
-/* The three panes need about 230 px each so an IBAN fits whole on one line: they stack a bit
-   earlier than the rest */
-@container app (max-width: 1040px){
+/* ---------- Medium: one pane at a time, grids stack ---------- */
+/* The three panes need about 230 px each so an IBAN fits whole on one line. Below 1040 px of
+   window they are never stacked (a long page of three texts): the phone switcher shows one at a
+   time, «Recibe la IA» first. */
+@container app (width < 1040px){
+  .pswitch[aria-controls="pg-panes"]{display:grid}
   .panes{grid-template-columns:minmax(0,1fr)}
-  .pane+.pane{border-left:0;border-top:1px solid var(--color-line)}
+  .pane+.pane{border-left:0}
+  .panes[data-p="1"] .pane:not(.p1),.panes[data-p="2"] .pane:not(.p2),.panes[data-p="3"] .pane:not(.p3){display:none}
+  .panes .ph{display:none}
+  .pane{animation:rise .4s var(--ease-out)}
 }
 @container app (max-width: 980px){
   .app-content{padding:30px 30px 44px}
@@ -632,16 +643,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .flight{font-size:11.5px;gap:8px}
   .flight .lbl2{display:none}
   .callout{padding:12px 14px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
-  .pswitch{display:grid;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
-  .pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-pop);transition:transform .45s var(--ease-spring)}
-  .pswitch[data-p="2"] .thumb{transform:translateX(100%)}
-  .pswitch[data-p="3"] .thumb{transform:translateX(200%)}
-  .pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:var(--weight-medium);color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
-  .pswitch button[aria-pressed="true"]{color:var(--color-text);font-weight:var(--weight-semibold)}
-  .pane+.pane{border-top:0}
-  .panes[data-p="1"] .pane:not(.p1),.panes[data-p="2"] .pane:not(.p2),.panes[data-p="3"] .pane:not(.p3){display:none}
-  .panes .ph{display:none}
-  .pane{padding:14px 16px;animation:rise .4s var(--ease-out)}
+  .pswitch{display:grid}
+  .pane{padding:14px 16px}
   .ptext{font-size:13.5px;line-height:1.75}
   .pfoot{font-size:11.5px}
   .found{gap:5px}

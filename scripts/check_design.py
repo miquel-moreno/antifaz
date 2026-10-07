@@ -34,6 +34,10 @@ views in the five states:
 - identifiers never break inside: every .ident (key, team, model and policy names, ids, versions,
   markers, codes) renders on one line box, unless it is at least as wide as its container (then
   the break is the last resort and is listed apart, as info);
+- «Prueba un texto» never stacks its three panes: with a window of 1040 px or more they sit side
+  by side (same top, no overlap) and the switcher is hidden; below, the switcher is shown with
+  exactly one pane visible, «Recibe la IA» after every state change (the «Bloqueo» default), and
+  each of its buttons shows its own pane alone (inspected like the rest);
 - motion: no animation repeats forever, the status ring (only in the header and the phone bar)
   pulses three times, and with reduced motion nothing animates at all;
 - accessibility: axe-core on the five views and five states, light and dark, at 1280 and 390 px
@@ -62,6 +66,7 @@ import time
 from collections import Counter, defaultdict
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -253,6 +258,7 @@ class Run:
         self.findings: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.checked = 0
         self.rings = 0
+        self.panes = 0
         self.idents = 0
         self.axe: list[dict[str, Any]] = []
 
@@ -358,6 +364,77 @@ def check_rings(page: Page, run: Run, where: str, motion: str) -> None:
         run.add("ring", where, rings)
 
 
+# «Prueba un texto»: where the three panes go. The window (.app-window) is the size container
+# the CSS asks, so its content width decides: from 1040 px the three panes sit side by side on one
+# surface and the switcher is hidden; below, the switcher shows and exactly one pane is visible
+# (never stacked panes).
+PANES_MIN_WINDOW = 1040
+PANES_JS = """
+() => {
+  const vis = (el) => !!el && el.checkVisibility() && el.getBoundingClientRect().width > 0;
+  const box = document.getElementById('pg-panes');
+  const sw = document.querySelector('.pswitch[aria-controls="pg-panes"]');
+  const pressed = sw.querySelector('button[aria-pressed="true"]');
+  return {
+    win: document.querySelector('.app-window').clientWidth,
+    switcher: vis(sw), shown: box.dataset.p, pressed: pressed && pressed.dataset.p,
+    panes: [...box.querySelectorAll('.pane')].map((p) => {
+      const r = p.getBoundingClientRect();
+      return {p: p.className.match(/\\bp(\\d)\\b/)[1], visible: vis(p),
+              left: r.left, right: r.right, top: r.top};
+    }),
+  };
+}
+"""
+
+
+def panes_problem(res: dict[str, Any], state: str, want: str) -> str | None:
+    """What is wrong with the panes of «Prueba un texto», or None."""
+    visible = [p for p in res["panes"] if p["visible"]]
+    if state == "empty":
+        if visible or res["switcher"]:
+            return f"empty state shows panes {[p['p'] for p in visible]} or the switcher"
+        return None
+    if res["win"] >= PANES_MIN_WINDOW:
+        side_by_side = (
+            len(visible) == 3
+            and max(p["top"] for p in visible) - min(p["top"] for p in visible) < 1
+            and all(a["right"] <= b["left"] + 1 for a, b in pairwise(visible))
+        )
+        if res["switcher"] or not side_by_side:
+            return f"window {res['win']} px: expected three panes side by side, no switcher"
+        return None
+    if not res["switcher"] or [p["p"] for p in visible] != [want]:
+        return (
+            f"window {res['win']} px: expected the switcher and only pane {want},"
+            f" got switcher={res['switcher']} panes={[p['p'] for p in visible]}"
+        )
+    if res["shown"] != want or res["pressed"] != want:
+        return f"switcher says pane {res['pressed']} but pane {res['shown']} is shown"
+    return None
+
+
+def check_panes(page: Page, run: Run, where: str, state: str, motion: str, wait: int) -> None:
+    """Default pane «Recibe la IA» (2) after every state change; below the breakpoint, each
+    button of the switcher shows its pane alone, and the identifiers in it stay whole."""
+    res = page.evaluate(PANES_JS)
+    run.panes += 1
+    problem = panes_problem(res, state, "2")
+    if problem:
+        run.add("panes", where, problem)
+    if state == "empty" or res["win"] >= PANES_MIN_WINDOW:
+        return
+    for p in ("1", "3", "2"):
+        page.click(f'.pswitch[aria-controls="pg-panes"] button[data-p="{p}"]')
+        settle(page, wait)
+        run.panes += 1
+        problem = panes_problem(page.evaluate(PANES_JS), state, p)
+        if problem:
+            run.add("panes", f"{where} · pane {p}", problem)
+        if p != "2":  # pane 2 is inspected with the view
+            inspect(page, run, f"{where} · pane {p}", motion)
+
+
 def check_panel(browser: Browser, run: Run, quick: bool) -> None:
     url = f"{run.origin}/{PANEL}"
     groups: list[tuple[int, int, bool]] = [(w, h, False) for w, h in WIDTHS] + [(1280, 800, True)]
@@ -390,6 +467,8 @@ def check_panel(browser: Browser, run: Run, quick: bool) -> None:
                         page.evaluate(f"() => document.getElementById('tab-{view}').click()")
                         settle(page, wait)
                         where = f"{label} · {state} · {view}"
+                        if view == "playground":
+                            check_panes(page, run, where, state, motion, wait)
                         inspect(page, run, where, motion)
                         if do_axe:
                             axe_page(page, run, f"panel {width}px {theme}", state, view)
@@ -563,6 +642,10 @@ def report(run: Run, seconds: float) -> int:
         "infinite": "Animations that repeat forever",
         "ring": f"Status ring not restarted, 3 pulses, header only ({run.rings} state changes)",
         "motion-in-reduce": "Motion with reduced motion",
+        "panes": (
+            f"«Prueba un texto» panes not side by side (window >= {PANES_MIN_WINDOW} px) or not"
+            f" one at a time with the switcher (below) ({run.panes} layouts checked)"
+        ),
         "ident-broken": f"Identifiers broken inside ({run.idents} identifier boxes checked)",
         "scrolled-intended": "Text in containers meant to scroll (info)",
         "ident-forced": "Identifiers wider than their container, broken as a last resort (info)",
