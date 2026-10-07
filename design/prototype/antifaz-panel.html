@@ -117,17 +117,18 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
 .app-sidebar-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
 .app-local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
-.app-local .app-status-dot{color:var(--color-ok)}
+.app-local .dot{color:var(--color-ok)}
 
-/* Status: a dot with a pulsing ring and always a word (never colour alone) */
+/* Status in the header and the phone bar: a dot with a ring that pulses three times when it
+   appears or the state changes (the script restarts it), then stays still; and always a word
+   (never colour alone). No infinite loops anywhere: nothing moves while nobody acts. */
 .app-status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
 .app-status.is-ok{color:var(--color-ok)} .app-status.is-warn{color:var(--color-warn)} .app-status.is-danger{color:var(--color-danger)}
 .app-status-dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
+.app-status .app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) 3}
 
-/* Shared by the views: a plain dot (pulse adds the ring) */
+/* Shared by the views: a static dot (the pulsing ring is only in the header and the phone bar) */
 .dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.dot.pulse::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
 @keyframes ring{0%{transform:scale(.4);opacity:.6}70%,100%{transform:scale(1.3);opacity:0}}
 .status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
 .status.ok{color:var(--color-ok)} .status.warn{color:var(--color-warn)} .status.danger{color:var(--color-danger)} .status.neutral{color:var(--color-text-muted)}
@@ -358,7 +359,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .tag.is-warn,.tag.is-danger{color:var(--color-text)}
 .foot{display:flex;align-items:flex-start;gap:9px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px}
 .foot .ic{width:16px;height:16px;margin-top:2px}
-/* Status in a card header: dot with the pulsing ring + word (the dot is decoration) */
+/* Status in a card header: a static dot + word (the dot is decoration) */
 .status .dot{color:inherit}
 /* Neutral button (destructive or secondary actions are never indigo) */
 .btn.quiet{background:transparent;color:var(--color-text-muted);padding:0 12px;min-height:30px;font-size:var(--text-sm)}
@@ -778,7 +779,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
       </nav>
       <div class="app-sidebar-foot rv" style="--i:7">
         <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
-        <span class="app-local"><span class="app-status-dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
+        <span class="app-local"><span class="dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
       </div>
     </div></div>
 
@@ -926,7 +927,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
               <h1>En directo</h1>
               <p>Lo que pasa ahora por Antifaz. Solo tipos y cantidades: nunca un dato ni un marcador.</p>
             </div>
-            <span class="live-pill"><span class="dot pulse" aria-hidden="true"></span>Conectado · hoy, martes 6 de octubre</span>
+            <span class="live-pill"><span class="dot" aria-hidden="true"></span>Conectado · hoy, martes 6 de octubre</span>
           </div>
 
           <div class="surface stats">
@@ -1087,7 +1088,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
           <div class="sgrid">
             <article class="surface scard" aria-labelledby="s-gw">
-              <div class="sh"><h2 id="s-gw">Pasarela</h2><span class="status ok"><span class="dot pulse" aria-hidden="true"></span>Funciona</span></div>
+              <div class="sh"><h2 id="s-gw">Pasarela</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funciona</span></div>
               <dl class="kv">
                 <dt>Versión</dt><dd class="mono">0.2.0</dd>
                 <dt>/healthz</dt><dd class="mono">"status": "ok"</dd>
@@ -1098,7 +1099,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
             </article>
 
             <article class="surface scard" aria-labelledby="s-ner">
-              <div class="sh"><h2 id="s-ner">Detector de nombres (NER)</h2><span class="status ok"><span class="dot pulse" aria-hidden="true"></span>Funcionando</span></div>
+              <div class="sh"><h2 id="s-ner">Detector de nombres (NER)</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funcionando</span></div>
               <p class="desc">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido. Sus cuatro estados:</p>
               <ul class="ner" aria-label="Estados posibles del detector">
                 <li class="now" aria-current="true"><span class="dot ok" aria-hidden="true"></span><b>Funcionando</b><span class="tag">Ahora</span><p><span class="mono">ok</span> · busca nombres.</p></li>
@@ -1110,8 +1111,8 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
             <article class="surface scard" aria-labelledby="s-prov">
               <div class="sh"><h2 id="s-prov">Proveedores de IA</h2>
-                <span class="status ok" data-only="empty data blocked broken"><span class="dot pulse" aria-hidden="true"></span>Todos responden</span>
-                <span class="status warn" data-only="error" hidden><span class="dot pulse" aria-hidden="true"></span>1 no responde</span></div>
+                <span class="status ok" data-only="empty data blocked broken"><span class="dot" aria-hidden="true"></span>Todos responden</span>
+                <span class="status warn" data-only="error" hidden><span class="dot" aria-hidden="true"></span>1 no responde</span></div>
               <ul class="prov">
                 <li><span class="nm">Anthropic<span>api.anthropic.com</span></span>
                   <span class="meter" data-only="empty data blocked broken" aria-hidden="true"><i style="--v:.6"></i></span>
@@ -1126,7 +1127,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
             <article class="surface scard" aria-labelledby="s-ev">
               <div class="sh"><h2 id="s-ev">Evidencias</h2>
-                <span class="status ok" data-only="empty data blocked error"><span class="dot pulse" aria-hidden="true"></span>Cadena íntegra</span>
+                <span class="status ok" data-only="empty data blocked error"><span class="dot" aria-hidden="true"></span>Cadena íntegra</span>
                 <span class="status danger" data-only="broken" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Cadena rota</span></div>
               <dl class="kv">
                 <dt>Registros</dt><dd data-only="data blocked error">18.204, encadenados</dd><dd data-only="empty" hidden>0 hoy</dd><dd data-only="broken" hidden>Rota en el 18.193 de 18.204</dd>
@@ -1388,6 +1389,13 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     var out=document.getElementById("check-time"), b=this; b.disabled=true; out.textContent="Comprobando…";
     setTimeout(function(){ chk++; out.textContent="Comprobado a las 10:"+(44+chk>59?59:44+chk); b.disabled=false; growMeters(); },calm()?0:700); });
 
+  /* The header (and phone bar) status ring pulses three times (CSS) when it appears or the state
+     changes, then stays still: restart it on every state change. Never with reduced motion (the
+     CSS removes the animation, so there is nothing to restart). */
+  function pulseStatus(){ if(!document.getAnimations) return;
+    document.querySelectorAll(".app-status:not([hidden]) .app-status-dot").forEach(function(d){
+      d.getAnimations({subtree:true}).forEach(function(a){ a.cancel(); a.play(); }); }); }
+
   /* ---- Prototype states. Only the synthetic example is ever shown in the results: what
      someone types is never copied anywhere on the page. ---- */
   var EX="Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
@@ -1402,7 +1410,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   function setState(s,announce,play){ app.setAttribute("data-state",s);
     document.querySelectorAll("[data-only]").forEach(function(n){ n.hidden=n.getAttribute("data-only").split(" ").indexOf(s)===-1; });
     txt.value=TXT[s]; document.getElementById(s==="blocked"?"pg-pol-rrhh":"pg-pol-default").checked=true;
-    setPane("2"); renderLive(s); syncLive(); if(announce) say(s);
+    setPane("2"); renderLive(s); syncLive(); if(announce) say(s); pulseStatus();
     if(play) playMask(); else cancelMask(); }
   document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value,true,true); }); });
   function useExample(){ document.getElementById("st-data").checked=true; setState("data",true,true); }

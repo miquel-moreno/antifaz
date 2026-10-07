@@ -74,11 +74,12 @@ pre .k{color:var(--color-accent-ink)}
 .sh-card{box-shadow:var(--shadow-card);border-radius:var(--radius-card)}
 .sh-pop{box-shadow:var(--shadow-pop);border-radius:var(--radius-pill)}
 
-/* Status: a dot with a ring that pulses, plus a word. Never colour alone. */
+/* Status: a dot with a ring that pulses three times on load and then stays still, plus a word.
+   Never colour alone. No infinite loops (in the panel the ring is only in the header). */
 .status{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;white-space:nowrap}
 .status.ok{color:var(--color-ok)} .status.warn{color:var(--color-warn)} .status.danger{color:var(--color-danger)}
 .status i{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.status i::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) infinite}
+.status i::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) 3}
 @keyframes ring{0%{transform:scale(.4);opacity:.6}70%,100%{transform:scale(1.3);opacity:0}}
 .callout{padding:12px 14px;border-radius:var(--radius-callout);font-size:13.5px;display:grid;gap:2px}
 .callout.warn{background:var(--color-warn-soft)} .callout.warn strong{color:var(--color-warn)}
