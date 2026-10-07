@@ -29,7 +29,8 @@ repos:
         types_or: [python, pyi, markdown]
       # Names that must never appear (text, file names, image metadata; never pixels). The list
       # is private and lives outside the repo (ANTIFAZ_FORBIDDEN_NAMES_FILE, by default
-      # ../_privado/forbidden-names.txt); without it the hook warns and passes.
+      # ../_privado/forbidden-names.txt); without it the hook fails and says where to put it,
+      # except in CI (CI=true), where it only warns.
       - id: forbidden-names
         name: forbidden names (list kept outside the repo)
         entry: uv run python -m scripts.check_forbidden_names

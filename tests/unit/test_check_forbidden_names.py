@@ -21,7 +21,6 @@ def names_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "# a comment\n\nFooBarName\nquuxname\nallow:SafeFooBarNameWord\n", encoding="utf-8"
     )
     monkeypatch.setenv(hook.ENV_VAR, str(path))
-    monkeypatch.setattr("shutil.which", lambda _: None)  # the stdlib reader, not exiftool
     return path
 
 
@@ -210,50 +209,58 @@ def test_svg_is_text(names_file: Path, tmp_path: Path, capsys: pytest.CaptureFix
     assert run(capsys, f) == (1, f"forbidden name in {f.as_posix()}:2\n")
 
 
-def test_exiftool_is_used_when_on_the_path(
-    names_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def no_list(kind: str, tmp_path: Path) -> Path:
+    """A list path that gives no names: missing, an empty file or a file with only comments."""
+    path = tmp_path / "names.txt"
+    if kind == "empty":
+        path.write_bytes(b"")
+    elif kind == "comments":
+        path.write_text("# only comments\nallow:word\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("kind", ["missing", "empty", "comments"])
+@pytest.mark.parametrize("ci", [None, "false", "1"])
+def test_without_a_list_it_fails_locally_and_says_where_to_put_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    ci: str | None,
 ) -> None:
-    f = tmp_path / "shot.png"
-    f.write_bytes(png())
-    seen: list[list[str]] = []
-
-    class Done:
-        stdout = (
-            b'[{"SourceFile": "x", "System:FileName": "foobarname.png",'
-            b' "PNG:Author": "FooBarName"}]'
-        )
-
-    def fake_run(args: list[str], **_: object) -> Done:
-        seen.append(args)
-        return Done()
-
-    monkeypatch.setattr("shutil.which", lambda _: "exiftool")
-    monkeypatch.setattr("subprocess.run", fake_run)
-    texts = list(hook.metadata_texts(f))
-    assert seen and seen[0][0] == "exiftool"
-    assert texts == ["PNG:Author FooBarName"]  # the file-system fields are not metadata
-
-
-def test_a_missing_list_warns_and_passes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv(hook.ENV_VAR, str(tmp_path / "nowhere.txt"))
+    if ci is None:
+        monkeypatch.delenv("CI", raising=False)
+    else:
+        monkeypatch.setenv("CI", ci)  # only "true" counts as CI
+    monkeypatch.setenv(hook.ENV_VAR, str(no_list(kind, tmp_path)))
     f = tmp_path / "x.txt"
     f.write_text(NAME, encoding="utf-8")
     code = hook.main([str(f)])
     err = capsys.readouterr().err
-    assert code == 0
-    assert "warning: no forbidden-names list" in err
+    assert code == 1
+    assert err.startswith("error: no forbidden-names list at")
+    assert str(hook.DEFAULT_LIST) in err  # the default path
+    assert hook.ENV_VAR in err  # and the variable that overrides it
 
 
-def test_a_list_without_names_warns_and_passes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("kind", ["missing", "empty", "comments"])
+@pytest.mark.parametrize("ci", ["true", "TRUE", " True "])
+def test_without_a_list_it_only_warns_in_ci(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    ci: str,
 ) -> None:
-    empty = tmp_path / "names.txt"
-    empty.write_text("# only comments\nallow:word\n", encoding="utf-8")
-    monkeypatch.setenv(hook.ENV_VAR, str(empty))
-    assert hook.main([]) == 0
-    assert "warning" in capsys.readouterr().err
+    monkeypatch.setenv("CI", ci)
+    monkeypatch.setenv(hook.ENV_VAR, str(no_list(kind, tmp_path)))
+    f = tmp_path / "x.txt"
+    f.write_text(NAME, encoding="utf-8")
+    code = hook.main([str(f)])
+    out = capsys.readouterr()
+    assert code == 0
+    assert out.err.startswith("warning: no forbidden-names list at")
+    assert out.out == ""
 
 
 def test_the_default_list_is_outside_the_repository() -> None:

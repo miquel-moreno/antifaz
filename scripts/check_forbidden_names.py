@@ -7,15 +7,17 @@ ANTIFAZ_FORBIDDEN_NAMES_FILE or, by default, `../_privado/forbidden-names.txt` n
 One name per line, matched case-insensitively as a substring; blank lines and lines starting with
 `#` are ignored; a line `allow:<word>` marks a benign word that happens to contain a name (a known
 false positive), which is then skipped wherever it appears. If the file is missing or lists no
-name, the hook prints a warning and passes: it never blocks CI or another machine.
+name, the hook fails (exit 1) and says where to put the list, so a clone without it cannot commit
+unchecked. Only in CI (environment variable CI equal to "true", any case), where the private list
+never is, it prints a warning and passes.
 
 What is scanned:
 - the path of every file;
 - text files, decoded as UTF-8 (Latin-1 if that fails), line by line;
 - images, only their metadata, never the compressed pixels: PNG text and EXIF chunks (tEXt,
   zTXt, iTXt, eXIf, the ICC profile name), JPEG APPn segments (EXIF, XMP, IPTC...) and comments,
-  WebP EXIF and XMP chunks, GIF comment and application extensions. SVG is text. With `exiftool`
-  on the PATH, it reads the image metadata instead;
+  WebP EXIF and XMP chunks, GIF comment and application extensions, read by this script itself
+  (no external tool). SVG is text;
 - other binary files (fonts, archives) are skipped.
 
 The output never shows the name that matched: only `forbidden name in <file>:<line>` (or `in
@@ -24,12 +26,9 @@ metadata`), with any name in the path itself replaced by `***`. Exit code 1 if a
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import shutil
 import struct
-import subprocess
 import sys
 import zlib
 from collections.abc import Iterator, Sequence
@@ -39,8 +38,6 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_VAR = "ANTIFAZ_FORBIDDEN_NAMES_FILE"
 DEFAULT_LIST = ROOT.parent / "_privado" / "forbidden-names.txt"
 IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-# exiftool groups that describe the file on disk, not its metadata (the path is checked apart)
-EXIFTOOL_SKIP = ("SourceFile", "System:", "ExifTool:")
 
 
 class Names:
@@ -195,18 +192,6 @@ READERS = {
 
 def metadata_texts(path: Path) -> Iterator[str]:
     """Every metadata string of an image, never its pixels."""
-    exiftool = shutil.which("exiftool")
-    if exiftool:
-        out = subprocess.run(  # noqa: S603 (fixed arguments, no shell)
-            [exiftool, "-json", "-a", "-u", "-G1", "-b", "--", str(path)],
-            capture_output=True,
-            check=False,
-        ).stdout
-        for record in json.loads(out or b"[]"):
-            for key, value in record.items():
-                if not key.startswith(EXIFTOOL_SKIP):
-                    yield f"{key} {value}"
-        return
     data = path.read_bytes()
     for chunk in READERS[path.suffix.lower()](data):
         yield decode(chunk)
@@ -234,17 +219,25 @@ def scan_file(path: Path, names: Names) -> list[str]:
     return hits
 
 
+def in_ci() -> bool:
+    return os.environ.get("CI", "").strip().lower() == "true"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     files = list(sys.argv[1:] if argv is None else argv)
     list_file = Path(os.environ.get(ENV_VAR) or DEFAULT_LIST)
     names = load_names(list_file)
     if names is None:
+        problem = f"no forbidden-names list at {list_file} (or it lists no name)"
+        if in_ci():
+            print(f"warning: {problem}; skipping the check in CI.", file=sys.stderr)
+            return 0
         print(
-            f"warning: no forbidden-names list at {list_file} (or it is empty); skipping the check."
-            f" Set {ENV_VAR} to the private list to enable it.",
+            f"error: {problem}. Put the private list (one name per line) at the default path"
+            f" {DEFAULT_LIST}, or set the environment variable {ENV_VAR} to its path.",
             file=sys.stderr,
         )
-        return 0
+        return 1
     hits = [hit for name in files for hit in scan_file(Path(name), names)]
     for hit in hits:
         print(hit)
