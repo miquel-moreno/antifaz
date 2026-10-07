@@ -8,7 +8,7 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 
 1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
 2. Ventana, barra lateral, cabecera y móvil. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
-3. Vista «Prueba un texto» con sus cinco estados. **Hecho** (esta versión).
+3. Vista «Prueba un texto» con sus cinco estados. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
 4. Animación del antifaz y entrada.
 5. Las otras cuatro vistas con el mismo lenguaje.
 6. Comprobación final.
@@ -44,6 +44,13 @@ Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana y «Pru
 - **Privacidad**: los resultados solo enseñan el ejemplo inventado. Lo que alguien escriba en el cuadro no se copia a ningún sitio de la página: «Probar» enseña el resultado del ejemplo.
 - Sin scroll horizontal ni textos cortados a 390, 768 y 1280 px, en los cinco estados y en los dos temas; consola limpia.
 
+### Paso 3: ajustes tras la revisión de Miquel
+
+- **Compositor sin el borde gris de 3:1**: el bloque del texto lleva solo una línea finísima (`--color-line`) y la sombra suave de las tarjetas (`--shadow-card`), como la referencia. Ver «El cuadro de texto y WCAG 1.4.11» en las reglas.
+- **Se quedan como están**: en el móvil, el bloqueo abre en «Recibe la IA»; la pestaña activa de la barra lateral con peso 600; «Probar» con el cuadro vacío carga el ejemplo.
+- **Un solo archivo del logo**: se borra `design/logo.svg` (era una copia de `docs/images/logo.svg`) y las dos propuestas antiguas (`logo-option-a.svg`, `logo-option-b.svg`), que nada usaba. Los favicons de las dos páginas, el apartado Logo y los comentarios apuntan a `docs/images/logo.svg`; `design/logo-mark.svg` (un color) se queda.
+- **Texto pequeño sin espaciado negativo**: el texto de 11 a 13 px (pies, chips, metadatos, etiquetas, `kbd`, la etiqueta «Panel», insignias) usa el token nuevo `--tracking-small` (0). El −0,011em del cuerpo va bien de 15 px para arriba, pero en letra pequeña junta demasiado las letras. Las insignias en mayúsculas y mono mantienen su espaciado.
+
 ## La dirección visual
 
 Miquel eligió la muestra de estilo de «Prueba un texto» y el resto del panel se ha pasado a ese lenguaje:
@@ -72,9 +79,7 @@ y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o 
 | `prototype/tokens-preview.html` | Página de revisión de los tokens: colores de los dos temas lado a lado, tipografía, radios, sombras, estados y la tabla de contraste calculada en vivo. No es parte del panel |
 | `tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras, vidrio y movimiento, en claro y oscuro. Es la única fuente de colores |
 | `fonts/` | Inter y Geist Mono (woff2 oficiales, sin modificar), sus licencias OFL y `fonts.css` con los `@font-face` |
-| `logo.svg` | El logo del proyecto: el antifaz blanco en el cuadro con degradado índigo. Es una copia idéntica de `docs/images/logo.svg`, que es el publicado |
-| `logo-mark.svg` | Solo el antifaz, en un color (`currentColor`: toma el color del texto donde se use) |
-| `logo-option-a.svg`, `logo-option-b.svg` | Las dos propuestas anteriores. Se guardan como referencia; el apartado Logo ya no las enseña |
+| `logo-mark.svg` | Solo el antifaz, en un color (`currentColor`: toma el color del texto donde se use). El logo con el cuadro está en `docs/images/logo.svg` |
 | `captures/` | **Pendiente**: capturas de referencia de cada estado, que se harán con Playwright cuando Miquel apruebe el prototipo |
 
 ## Controles del prototipo
@@ -121,7 +126,8 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 - `--color-text-faint` (texto terciario) nunca va sobre `--color-surface-3`: ahí no llega a 4,5:1.
 - Contraste WCAG AA en los dos temas (tabla abajo).
 - Nada se comunica solo con color: cada estado lleva icono o punto **y** palabra; los datos resaltados llevan su tipo escrito; el punto de aviso en la pestaña Estado lleva texto para lectores de pantalla.
-- Los controles que lo necesitan tienen un borde de 3:1 (`--color-control`): los interruptores apagados y el cuadro de texto del Playground. Es un poco más marcado que en la muestra, a propósito.
+- Los interruptores apagados tienen un borde de 3:1 (`--color-control`).
+- **El cuadro de texto y WCAG 1.4.11.** Antes el bloque del texto llevaba el borde de 3:1; Miquel pidió quitarlo y dejar la línea finísima y la sombra de la referencia. 1.4.11 pide 3:1 para lo que hace falta para **identificar** un control, y aquí el campo se identifica sin el borde: tiene su etiqueta visible «Texto de prueba» (en el móvil la etiqueta no se ve, pero está para el lector de pantalla), el texto de ejemplo dentro («Por ejemplo: Hola, soy…», que pasa 4,5:1), y es una tarjeta blanca propia con su barra de botones debajo. Al enfocarlo sale el anillo índigo, que sí pasa 3:1. Es la misma lectura que se hizo con el control segmentado (abajo): el borde sería un refuerzo, no lo único que lo identifica.
 - **Control segmentado y WCAG 1.4.11.** Antes, la píldora de la opción elegida llevaba un borde oscuro de 3:1 para cumplir 1.4.11 (contraste de lo que no es texto), porque la píldora blanca sobre el carril gris no llega a 3:1. Miquel pidió quitarlo. Ahora la píldora es la de la referencia (blanca con `--shadow-pop`, sin borde) y **la opción elegida se reconoce sin mirar la píldora**: su texto va en `--color-text` y peso 600, y el de las demás en `--color-text-muted` y peso 500. Los dos textos pasan 4,5:1 sobre su fondo (texto / tarjeta 16,71 y 16,41; texto secundario / fondo de pistas 5,33 y 5,30). Como el estado ya lo dice el propio texto, que cumple 1.4.3, la píldora es un refuerzo y no tiene que llegar a 3:1. No se depende solo del color (1.4.1): entre los dos grises hay 2,7:1 en claro y 2,5:1 en oscuro, y el cambio de peso es la señal que no es de color. Además siguen siendo botones de opción de verdad (`input type="radio"`, que el lector de pantalla anuncia como «marcado») o botones con `aria-pressed` (las columnas en el móvil), así que el lector de pantalla dice cuál está elegida, y el anillo de foco no cambia. Lo mismo vale para las pestañas en píldora.
 - Teclado: las pestañas usan tabindex itinerante (flechas, Inicio y Fin) y las teclas 1 a 5 saltan a cada sección; todo tiene foco visible (anillo índigo); hay enlace «Saltar al contenido»; cada control tiene su etiqueta. La lista en directo es `role="log"` con `aria-live="polite"`; los mensajes de «Comprobar ahora» y de cambios sin guardar son `role="status"`.
 - Movimiento: todo se apaga con `prefers-reduced-motion` y con el interruptor del prototipo.
@@ -132,7 +138,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 
 - **Inter** para la interfaz y los títulos (variable, con eje de tamaño óptico: con `font-optical-sizing: auto` los títulos grandes usan su corte Display) y **Geist Mono** para marcadores, códigos y el YAML. Las dos tienen licencia **SIL Open Font License 1.1**.
 - **Van dentro del proyecto**, en `design/fonts/`, y se cargan con `design/fonts/fonts.css` (`font-display: swap`). Nada de Google Fonts: Antifaz no hace peticiones a terceros. Si no cargan, se usa la lista de fuentes del sistema de `--font-sans` y `--font-mono` (`tokens.css`).
-- Ajustes de Inter en los tokens: `--font-features` (`"cv05", "cv08"`), `--tracking-body` (−0,011em), `--font-numeric` (`tabular-nums`, también la clase `.tabular-nums`) y la escala de títulos `--text-title` (`clamp(30px, 4.4cqi, 50px)`, peso 650, −0,034em).
+- Ajustes de Inter en los tokens: `--font-features` (`"cv05", "cv08"`), `--tracking-body` (−0,011em), `--tracking-small` (0, para el texto de 11 a 13 px), `--font-numeric` (`tabular-nums`, también la clase `.tabular-nums`) y la escala de títulos `--text-title` (`clamp(30px, 4.4cqi, 50px)`, peso 650, −0,034em).
 - **Por qué los archivos oficiales enteros y no los recortes por alfabeto** (aprobado por Miquel al revisar el paso 1). Los recortes de Google Fonts / Fontsource (latín y latín extendido por separado, 238 KB) **quitan las variantes `cv05` y `cv08`** de Inter, que pide el diseño. Los archivos oficiales las tienen todas, también `tnum` y el eje `opsz`, y caben de sobra en el límite (414 KB los dos). Cubren latín, latín extendido y más, así que no hace falta `unicode-range`.
 
 | Archivo | Fuente | Versión | Tamaño | SHA-256 |
@@ -215,9 +221,9 @@ El resto de colores de la referencia pasan tal cual: acento, marcadores, ámbar,
 
 **Logo del proyecto** (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo (155°, de `#7363f7` a `#3b2db0`) y un borde interior muy suave, el mismo que lleva el panel. Los ojos son un poco más grandes que en la muestra para que se lean a 16 px. La versión de un color (`logo-mark.svg`) es solo el antifaz con los ojos recortados y toma el color del texto (`currentColor`).
 
-Ya es el logo publicado: **`docs/images/logo.svg` es ahora este archivo** (mismo nombre, así que los README y `LICENSE-ASSETS.md` siguen enlazando bien), y `design/logo.svg` es una copia idéntica. Mide 128 px y los README lo enseñan a 120 px. Como el cuadro tiene su propio fondo, se ve igual con el tema claro y con el oscuro de GitHub. `LICENSE-ASSETS.md` ya lo cubre: habla de `docs/images/logo.svg` «and any later version of it» («y sus versiones futuras»), así que no hace falta cambiarlo. El favicon del prototipo es el logo publicado.
+Ya es el logo publicado y vive en un solo sitio: **`docs/images/logo.svg`** (mismo nombre que el anterior, así que los README y `LICENSE-ASSETS.md` siguen enlazando bien). Ya no hay copia en `design/`. Mide 128 px y los README lo enseñan a 120 px. Como el cuadro tiene su propio fondo, se ve igual con el tema claro y con el oscuro de GitHub. `LICENSE-ASSETS.md` ya lo cubre: habla de `docs/images/logo.svg` «and any later version of it» («y sus versiones futuras»), así que no hace falta cambiarlo. El favicon de las dos páginas del prototipo es el logo publicado.
 
-El apartado Logo del prototipo lo enseña a 64, 32 y 16 px sobre claro y sobre oscuro, y la versión de un color sobre los dos fondos. Las propuestas A y B anteriores se guardan en esta carpeta como referencia.
+El apartado Logo del prototipo lo enseña a 64, 32 y 16 px sobre claro y sobre oscuro, y la versión de un color sobre los dos fondos.
 
 ## Pendiente de decidir (Miquel)
 

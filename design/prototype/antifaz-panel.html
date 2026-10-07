@@ -97,7 +97,7 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-wordmark{font-size:16.5px;font-weight:var(--weight-bold);letter-spacing:-.025em}
 .app-version{font-size:var(--text-2xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0;margin-left:auto}
 .app-bar-tools{display:none}
-.app-nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px;letter-spacing:.01em}
+.app-nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px}
 .app-tablist{position:relative;display:flex;flex-direction:column;gap:2px}
 .app-tab{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font-size:14px;font-weight:450;transition:background var(--duration-fast) var(--ease-out),box-shadow var(--duration-fast) var(--ease-out),transform var(--duration-fast) var(--ease-out)}
 .app-tab .ic{color:var(--color-text-muted);transition:color var(--duration-fast)}
@@ -189,7 +189,9 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .btn .ic{width:16px;height:16px}
 
 /* Composer (Playground) */
-.composer{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:0 0 0 1px var(--color-control),var(--shadow-drop);overflow:hidden;transition:box-shadow .3s var(--ease-out)}
+/* The field is the card itself: a hairline (--color-line) and the soft drop, as in the reference. It is
+   identified by its visible label, its placeholder and the card (WCAG 1.4.11 note in design/README.md). */
+.composer{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden;transition:box-shadow .3s var(--ease-out)}
 .composer:has(textarea:focus){box-shadow:0 0 0 1.5px var(--color-focus),0 0 0 6px var(--color-accent-soft),0 10px 28px -12px var(--color-glow)}
 .composer textarea:focus-visible{box-shadow:none}
 .composer label.cap{display:block;padding:16px 20px 0;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
@@ -413,6 +415,14 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .lset figcaption{font-size:var(--text-2xs);font-family:var(--font-mono);opacity:.75}
 .lset svg{display:block}
 
+/* Small text (11-13 px): no negative tracking (--tracking-small = 0). The body's -0.011em suits
+   15 px and up; below that it closes the letters. Uppercase mono badges keep their own spacing. */
+.proto-strip,.chips label,.app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
+.composer label.cap,.bar .lbl,.kh,.hint,.seg label,.eyebrow,.mcap,.flight,.rm-note,.pfoot,.note .sub,.found dt,.found dd,.found dd b,
+.meta,.sh .aside,.badge,.foot,.live-pill,.stat-sub,.bars li,.ev-what,.keys th,.pol-bar .lbl,.help dt,.help dd,.rules .fixed,
+.rules-foot,.save .msg,.scard .desc,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.lrow p,.num,
+.pswitch button{letter-spacing:var(--tracking-small)}
+
 /* ---------- Medium: panes and grids stack ---------- */
 @container app (max-width: 980px){
   .app-content{padding:30px 30px 44px}
@@ -440,7 +450,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .app-tablist{flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;padding:3px;margin:-3px;overscroll-behavior-x:contain}
   .app-tablist::-webkit-scrollbar{display:none}
   .app-nav-label,.app-sidebar-foot,.app-header,.app-tab kbd{display:none}
-  .app-tab{width:auto;flex:none;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm)}
+  .app-tab{width:auto;flex:none;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
   .app-tab .ic{width:15px;height:15px}
   .app-tab-dot{margin-left:2px}
   .app-content{padding:18px 14px 24px;gap:14px}
@@ -452,7 +462,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .composer textarea{min-height:0;height:74px;font-size:14.5px;line-height:1.5;padding:12px 14px 8px;resize:none}
   .bar{padding:8px 8px 8px 12px;gap:8px;flex-wrap:nowrap}
   .bar .lbl,.kh{display:none}
-  .btn{min-height:32px;padding:0 13px;font-size:var(--text-sm)}
+  .btn{min-height:32px;padding:0 13px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
   #pg-example .full{display:none}
   #pg-example .short{display:inline}
   .seg label{padding:4px 9px}
@@ -462,7 +472,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .jline{font-size:14.5px;line-height:1.7}
   .flight{font-size:11.5px;gap:8px}
   .flight .lbl2{display:none}
-  .callout{padding:12px 14px;font-size:var(--text-sm)}
+  .callout{padding:12px 14px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
   .pswitch{display:grid;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
   .pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-pop);transition:transform .45s var(--ease-spring)}
   .pswitch[data-p="2"] .thumb{transform:translateX(100%)}
@@ -977,7 +987,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
       <p>El logo del proyecto (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color.</p>
     </header>
     <div class="lrow">
-      <div><h3>Logo</h3><p><span class="code">docs/images/logo.svg</span> (copia en <span class="code">design/logo.svg</span>) y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
+      <div><h3>Logo</h3><p><span class="code">docs/images/logo.svg</span> y <span class="code">design/logo-mark.svg</span> (un color)</p></div>
       <div class="lsets">
         <div class="lset on-light">
           <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>

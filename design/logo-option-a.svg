@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="128" height="128" role="img" aria-label="Antifaz, propuesta A">
-  <title>Antifaz · propuesta A: antifaz geométrico</title>
-  <!-- Tile in the logo indigo; the mask is one path with the eyes cut out (evenodd),
-       so the mono version is the same path filled with a single colour. -->
-  <rect width="32" height="32" rx="8" fill="#4b3fb8"/>
-  <path fill="#ffffff" fill-rule="evenodd" d="M5 16C5 12.7 7.3 11 10.5 11H13.5C14.8 11 15.3 12 16 12C16.7 12 17.2 11 18.5 11H21.5C24.7 11 27 12.7 27 16C27 19.6 24.6 21.5 21.5 21.5C19.2 21.5 17.8 19.5 16 19.5C14.2 19.5 12.8 21.5 10.5 21.5C7.4 21.5 5 19.6 5 16ZM9 16A2.5 2.2 0 1 0 14 16A2.5 2.2 0 1 0 9 16ZM18 16A2.5 2.2 0 1 0 23 16A2.5 2.2 0 1 0 18 16Z"/>
-</svg>
