@@ -168,7 +168,7 @@ Después de los cambios, `make design-check` completo: **758 combinaciones** en 
 
 **«Prueba un texto» ya no apila las tres columnas.** Entre 640 y 1040 px de ventana salían una debajo de otra: una página larga con tres textos casi iguales. Había dos opciones: estrecharlas para que cupieran de lado (a 1024 px el IBAN no cabe en una columna sin partirse) o enseñar una cada vez. Ahora, **por debajo de 1040 px de ventana** (la consulta es sobre la ventana, `@container app`, no sobre la pantalla) sale el mismo selector del móvil, «Escribes / Recibe la IA / Te vuelve», con una sola columna visible; al cambiar de estado vuelve a «Recibe la IA» (también en «Bloqueo», que es donde está el aviso). **Con 1040 px o más**, las tres van de lado en una sola superficie con líneas finas, como antes; a 1040 px cada columna mide 239 px y el IBAN cabe entero. `make design-check` lo comprueba en cada ancho, tema, movimiento y estado: o tres columnas de lado (misma altura, sin solaparse, sin selector) o el selector con exactamente una columna, la que marca; y pulsa cada botón del selector y revisa esa columna como el resto (texto cortado, identificadores). Con el CSS anterior, el script falla a 768 y 1024 px.
 
-**El gancho de nombres prohibidos falla sin la lista** (antes avisaba y dejaba pasar) y solo avisa en la CI; y lee los metadatos solo con su propio lector (ya no usa `exiftool`). Detalle en el párrafo de arriba.
+**El gancho de nombres prohibidos falla sin la lista** (antes avisaba y dejaba pasar) y solo avisa en la CI; y lee los metadatos solo con su propio lector. Detalle en el párrafo de arriba.
 
 Las capturas de referencia están en `captures/` (ver su `README.md`; se repiten con `make design-captures`).
 
