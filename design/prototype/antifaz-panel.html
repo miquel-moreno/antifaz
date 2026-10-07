@@ -8,15 +8,23 @@
 <!-- Fonts bundled with Antifaz (design/fonts, OFL-1.1): no external requests. -->
 <link rel="stylesheet" href="../fonts/fonts.css">
 <link rel="stylesheet" href="../tokens.css">
+<script>
+/* Entry: only the first time per session and never with reduced motion. Decided here, before the
+   first paint, so the panel never flashes behind the doors. If the browser does not let the page
+   use sessionStorage, there is no entry (better than repeating it on every load). */
+(function(){ try{ var r=document.documentElement;
+  if(!r.animate||matchMedia("(prefers-reduced-motion: reduce)").matches||sessionStorage.getItem("antifaz-intro")) return;
+  sessionStorage.setItem("antifaz-intro","1"); r.classList.add("intro-pending","intro"); }catch(e){} })();
+</script>
 <style>
 /* Layout: a macOS-style window (translucent sidebar + main view) floating on a soft ambient
    glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
    The window is a size container, so "Móvil" and a real phone use the same rules.
    Colours come only from design/tokens.css.
-   Redesign, step 3: the shell (frosted window, sidebar, header, phone bar) and «Prueba un
-   texto» with its five states are the new ones. The mask animation and the intro come in
-   step 4 (until then the journey card shows its resting state, the final frame) and the
-   other four views in step 5.
+   Redesign, step 4: the shell (frosted window, sidebar, header, phone bar), «Prueba un texto»
+   with its five states, the mask animation and the entry are the new ones; the other four
+   views come in step 5. Motion uses the Web Animations API (no library) and moves only
+   transform and opacity, plus the width of each datum while it becomes its marker.
    Shell pieces use their own prefixed class names (app-*, ambient-*, proto-*) so nothing
    collides with the views (in the reference, the intro doors were called .top like the header
    and took its z-index). */
@@ -157,9 +165,31 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .vh-side{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:var(--text-sm);color:var(--color-text-muted)}
 
 /* Intro: an orchestrated first appearance (runs once, ends at the normal resting state) */
-@keyframes rise{from{opacity:0;transform:translateY(12px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
-.intro .rv{animation:rise .8s var(--ease-out) both;animation-delay:calc(120ms + var(--i,0)*70ms)}
-.intro .app-window{animation:win 1s var(--ease-out) both}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.intro .rv{animation:rise .8s var(--ease-out) both;animation-delay:calc(var(--intro-offset,0ms) + 120ms + var(--i,0)*70ms)}
+.intro .app-window{animation:win 1s var(--ease-out) var(--intro-offset,0ms) both}
+/* The pieces start rising while the doors open (1.25 s into the entry) */
+.intro-pending{--intro-offset:1250ms}
+
+/* Entry overlay: the mask appears and lights up indigo from left to right, «ANTIFAZ», then the
+   screen opens like two doors (upper and lower). Own class names: in the reference the doors were
+   called .top like the header and took its z-index. Decoration only: aria-hidden, no clicks, and
+   it fades by itself after 4 s if the script ever fails. */
+.intro-overlay{display:none}
+.intro-pending .intro-overlay{display:block;position:fixed;inset:0;z-index:200;pointer-events:none;animation:intro-failsafe .3s 4s forwards}
+@keyframes intro-failsafe{to{opacity:0;visibility:hidden}}
+.intro-door{position:absolute;left:0;right:0;height:50.2%;background:var(--color-bg)}
+.intro-door-upper{top:0;border-bottom:1px solid var(--color-line)}
+.intro-door-lower{bottom:0;border-top:1px solid var(--color-line)}
+.intro-logo{position:absolute;left:50%;top:50%;width:92px;height:46px;margin:-23px 0 0 -46px;opacity:0}
+.intro-logo svg{position:absolute;inset:0;width:100%;height:100%;fill:var(--color-text)}
+/* The indigo layer is revealed with two opposite translations (window in, picture held still) */
+.intro-lit{position:absolute;inset:0;overflow:hidden;transform:translateX(-100%)}
+.intro-lit svg{fill:var(--color-accent);filter:drop-shadow(0 0 14px var(--color-glow));transform:translateX(100%)}
+.intro-name{position:absolute;left:0;right:0;top:calc(50% + 40px);text-align:center;font-size:var(--text-sm);font-weight:var(--weight-semibold);letter-spacing:.32em;text-transform:uppercase;color:var(--color-text-muted);padding-left:.32em;opacity:0}
+/* The view title rises word by word (only during the entry; the plain text comes back after) */
+.intro-word{display:inline-block;overflow:hidden;vertical-align:top;padding-bottom:.1em;margin-bottom:-.1em}
+.intro-word>span{display:inline-block}
 @keyframes win{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
 
 /* Callouts */
@@ -180,12 +210,15 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .btn.primary{position:relative;overflow:hidden;background:var(--color-accent);color:var(--color-on-accent);box-shadow:inset 0 1px 0 var(--color-highlight),0 6px 16px -6px var(--color-glow)}
 .btn.primary::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,var(--color-sheen) 50%,transparent 70%);transform:translateX(-120%);transition:transform .8s var(--ease-out)}
 .btn.primary:not(:disabled):hover{filter:brightness(1.06);box-shadow:inset 0 1px 0 var(--color-highlight),0 10px 22px -8px var(--color-glow)}
-.btn.primary:not(:disabled):hover::after{transform:translateX(120%)}
+@media (hover:hover) and (pointer:fine){ .btn.primary:not(:disabled):hover::after{transform:translateX(120%)} }
+/* «Probar» is magnetic with a mouse (moves with the translate property; springs back on leave) */
+.btn.magnet{transition:transform .2s var(--ease-out),translate .5s var(--ease-out),background .2s,filter .2s,box-shadow .3s}
+.btn.magnet.is-released{transition:transform .2s var(--ease-out),translate .9s var(--ease-pop),background .2s,filter .2s,box-shadow .3s}
 .btn.primary:focus-visible{box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
 .btn.ghost{background:transparent;color:var(--color-accent-ink);padding:0 10px}
 .btn.ghost:hover{background:var(--color-accent-soft)}
 .btn.ghost .ic.spin{transition:transform .6s var(--ease-spring)}
-.btn.ghost:hover .ic.spin{transform:rotate(-180deg)}
+@media (hover:hover) and (pointer:fine){ .btn.ghost:hover .ic.spin{transform:rotate(-180deg)} }
 .btn .ic{width:16px;height:16px}
 
 /* Composer (Playground) */
@@ -230,8 +263,8 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .empty p b{color:var(--color-text);font-weight:var(--weight-semibold)}
 
 /* ---------- «Así viaja tu texto»: card with a gradient border and a glow on top ----------
-   Step 3 shows only its resting state (the final frame: what the AI receives and the reply
-   with the data back). The mask animation and «Ver otra vez» come in step 4. */
+   At rest it shows the last frame of the mask animation (what the AI receives and the reply with
+   the data back). The animation (script below) plays over that same markup. */
 .journey{position:relative;border-radius:20px;padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid transparent;
   background:linear-gradient(color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent),color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent)) padding-box,linear-gradient(135deg,var(--color-edge),transparent 35%,transparent 65%,var(--color-edge)) border-box;
   box-shadow:0 10px 30px -16px var(--color-glow)}
@@ -240,11 +273,44 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .eyebrow{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
 .jstage{position:relative;display:flex;flex-direction:column;gap:16px}
 .mrow{display:grid;gap:6px}
-.mcap{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
+.mcap{display:grid;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
+.mcap>span{grid-area:1/1}
+.mcap-before{opacity:0}
+.wipe{position:relative}
 .jline{font-size:19px;line-height:1.8;letter-spacing:-.016em;overflow-wrap:anywhere}
+/* The mask: a line of light with a trail, moved only with transform: translateX */
+.gtrack{position:absolute;top:-10px;bottom:-10px;left:0;right:0;pointer-events:none}
+.jstage.is-running .gtrack{will-change:transform}
+.glider{position:absolute;top:0;bottom:0;left:-1px;width:2px;opacity:0}
+.glider::before{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(180deg,transparent,var(--color-accent) 18%,var(--color-accent) 82%,transparent);box-shadow:0 0 16px 3px var(--color-glow)}
+.glider::after{content:"";position:absolute;top:8%;bottom:8%;right:1px;width:90px;background:linear-gradient(90deg,transparent,var(--color-accent-soft));filter:blur(2px)}
+.glider svg{position:absolute;top:50%;left:50%;width:50px;height:25px;margin:-12.5px 0 0 -24px;fill:var(--color-accent);filter:drop-shadow(0 0 12px var(--color-glow))}
+/* A datum that turns into its marker (or back). At rest only the second child (.tok-b) is there;
+   while playing, the first (.tok-a) and a blurred copy (.tok-ghost, a fixed blur that only fades)
+   sit in the same grid cell, and the box width goes from one to the other. */
+.tok{position:relative;display:inline-grid;align-items:baseline;white-space:nowrap}
+.tok>.tok-a,.tok>.tok-ghost,.tok>.tok-b{grid-area:1/1;justify-self:start;transform-origin:0 50%}
+.tok-a,.tok-ghost{display:none;opacity:0}
+.jstage:is(.is-running,.is-measuring) .tok-a,.jstage:is(.is-running,.is-measuring) .tok-ghost{display:block}
+.tok-ghost{filter:blur(4px)}
+.jstage.is-running .tok{clip-path:inset(-12px -6px -12px -12px)}
+.tok-flash{position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 5px var(--color-scan-glow);opacity:0;pointer-events:none}
+.tok-glow{position:absolute;inset:-2px -4px;border-radius:8px;box-shadow:0 0 14px 2px var(--color-restore-glow);opacity:0;pointer-events:none}
 .flight{display:flex;align-items:center;gap:12px;font-size:var(--text-sm);color:var(--color-text-muted)}
 .flight span{white-space:nowrap}
-.flight .track{flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent)}
+.flight .track{position:relative;flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent);transform-origin:0 50%}
+.flight .track i{position:absolute;top:-3px;left:0;width:7px;height:7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 12px 2px var(--color-glow);opacity:0}
+
+/* Mouse-only details: a light that follows the cursor on the cards (moved with transform) and a
+   ~2° tilt of the journey card. The script adds them only for (hover: hover) and (pointer: fine). */
+.spot{position:relative}
+:where(.spot>:not(.spot-light,.sr-only)){position:relative}
+.spot-light{position:absolute;left:0;top:0;width:840px;height:840px;margin:-420px 0 0 -420px;border-radius:50%;background:radial-gradient(circle closest-side,var(--color-accent-soft),transparent);opacity:0;pointer-events:none;transition:opacity .4s var(--ease-out)}
+.spot.is-lit>.spot-light{opacity:1}
+@media (hover:hover) and (pointer:fine){
+  .journey.spot{transition:transform .6s var(--ease-out)}
+  .journey.spot.is-released{transition:transform .9s var(--ease-pop)}
+}
 
 /* Tokens in text */
 mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;border-radius:6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
@@ -544,14 +610,22 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 
 /* Reduced motion: the system setting, or the prototype toggle that previews it */
 .reduce-motion *,.reduce-motion *::before,.reduce-motion *::after{animation:none!important;transition:none!important}
+.reduce-motion .intro-overlay{display:none!important}
 @media (prefers-reduced-motion: reduce){
-  .journey{display:none}
+  .journey,.intro-overlay{display:none!important}
   .rm-note{display:flex}
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
 </style>
 </head>
 <body>
+
+<!-- Entry, only the first time per session (decoration: hidden from screen readers, takes no clicks) -->
+<div class="intro-overlay" id="intro" aria-hidden="true">
+  <div class="intro-door intro-door-upper"></div><div class="intro-door intro-door-lower"></div>
+  <div class="intro-logo"><svg viewBox="0 0 52 26"><use href="#mask"/></svg><span class="intro-lit"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></div>
+  <p class="intro-name">Antifaz</p>
+</div>
 
 <!-- Shapes reused across the page -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
@@ -698,19 +772,25 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
           <section class="journey rv" style="--i:6" data-only="data broken" aria-labelledby="j-t">
             <div class="jhead">
               <h2 class="eyebrow" id="j-t">Así viaja tu texto</h2>
-              <!-- «Ver otra vez» replays the mask animation: it comes with the animation (step 4). -->
-              <button class="btn ghost" type="button" id="anim-replay" hidden><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
+              <button class="btn ghost" type="button" id="anim-replay"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
             </div>
-            <p class="sr-only">La IA recibe el texto con marcadores en lugar del nombre, el DNI, el email y el IBAN, y su respuesta te llega con los datos otra vez en su sitio. Abajo tienes el mismo contenido, columna por columna.</p>
+            <p class="sr-only">Animación: el antifaz pasa por encima de tu texto y cambia el nombre, el DNI, el email y el IBAN por marcadores. La IA solo recibe los marcadores. Su respuesta vuelve y el antifaz pone cada dato otra vez en su sitio. Abajo tienes el mismo contenido, columna por columna.</p>
+            <!-- At rest this is the last frame. While it plays, each datum (.tok-a) turns into its marker (.tok-b). -->
             <div class="jstage" id="mask-anim" aria-hidden="true">
               <div class="mrow">
-                <p class="mcap">La IA recibe</p>
-                <p class="jline">Hola, soy <span class="marker">[[PERSON_1]]</span>, con DNI <span class="marker">[[ES_DNI_1]]</span>. Escribid a <span class="marker">[[EMAIL_1]]</span> y pagad en <span class="marker">[[IBAN_1]]</span>.</p>
+                <p class="mcap"><span class="mcap-before">Tú escribes</span><span class="mcap-after">La IA recibe</span></p>
+                <div class="wipe">
+                  <p class="jline">Hola, soy <span class="tok"><span class="tok-a"><mark class="pii">Carmen Prueba López</mark></span><span class="tok-b marker">[[PERSON_1]]</span></span>, con DNI <span class="tok"><span class="tok-a"><mark class="pii">12345678Z</mark></span><span class="tok-b marker">[[ES_DNI_1]]</span></span>. Escribid a <span class="tok"><span class="tok-a"><mark class="pii">ana.prueba@example.com</mark></span><span class="tok-b marker">[[EMAIL_1]]</span></span> y pagad en <span class="tok"><span class="tok-a"><mark class="pii">ES9121000418450200051332</mark></span><span class="tok-b marker">[[IBAN_1]]</span></span>.</p>
+                  <span class="gtrack"><span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></span>
+                </div>
               </div>
-              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"></span><span class="lbl2">vuelve la respuesta</span></div>
+              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"><i></i><i></i><i></i></span><span class="lbl2">vuelve la respuesta</span></div>
               <div class="mrow">
-                <p class="mcap">Te llega, con tus datos</p>
-                <p class="jline">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored">ES9121000418450200051332</span>.</p>
+                <p class="mcap"><span class="mcap-before">La IA responde</span><span class="mcap-after">Te llega, con tus datos</span></p>
+                <div class="wipe">
+                  <p class="jline">Gracias, <span class="tok"><span class="tok-a"><span class="marker">[[PERSON_1]]</span></span><span class="tok-b restored">Carmen Prueba López</span></span>. Enviaremos el recibo a <span class="tok"><span class="tok-a"><span class="marker">[[EMAIL_1]]</span></span><span class="tok-b restored">ana.prueba@example.com</span></span> cuando llegue el pago a <span class="tok"><span class="tok-a"><span class="marker">[[IBAN_1]]</span></span><span class="tok-b restored">ES9121000418450200051332</span></span>.</p>
+                  <span class="gtrack"><span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></span>
+                </div>
               </div>
             </div>
           </section>
@@ -1018,7 +1098,6 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   var root=document.documentElement, app=document.getElementById("app");
   var reduceQ=matchMedia("(prefers-reduced-motion: reduce)");
   function calm(){ return root.classList.contains("reduce-motion"); }
-  if(!reduceQ.matches){ root.classList.add("intro"); setTimeout(function(){ root.classList.remove("intro"); },1900); }
   function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
   function icon(id){ var s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("class","ic"); s.setAttribute("aria-hidden","true");
     var u=document.createElementNS("http://www.w3.org/2000/svg","use"); u.setAttribute("href","#"+id); s.appendChild(u); return s; }
@@ -1042,6 +1121,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   function enter(v){ v.classList.remove("enter"); void v.offsetWidth; [].forEach.call(v.children,function(c,i){ c.style.setProperty("--i",i); }); v.classList.add("enter"); }
   function current(){ return document.getElementById(tabs.filter(function(t){ return t.getAttribute("aria-selected")==="true"; })[0].getAttribute("aria-controls")); }
   function select(tab,focus){
+    var before=current();
     tabs.forEach(function(t){ var on=t===tab; t.setAttribute("aria-selected",on?"true":"false"); t.tabIndex=on?0:-1;
       document.getElementById(t.getAttribute("aria-controls")).hidden=!on; });
     var view=document.getElementById(tab.getAttribute("aria-controls"));
@@ -1049,7 +1129,9 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     if(!calm()) enter(view);
     if(focus) tab.focus();
     reveal(tab);
-    syncLive(); }
+    syncLive();
+    /* The mask animation stops when the view changes and plays again when its view comes back */
+    if(view!==before){ if(tab.id==="tab-playground") queueMask(250); else cancelMask(); } }
   tabs.forEach(function(tab,i){
     tab.addEventListener("click",function(){ select(tab,false); });
     tab.addEventListener("keydown",function(e){ var to=null;
@@ -1200,19 +1282,197 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   var txt=document.getElementById("pg-text"), live=document.getElementById("pg-live");
   /* Cleared first so the same message is read again after another «Probar» */
   function say(s){ live.textContent=""; if(SAY[s]) setTimeout(function(){ live.textContent=SAY[s]; },60); }
-  function setState(s,announce){ app.setAttribute("data-state",s);
+  function setState(s,announce,play){ app.setAttribute("data-state",s);
     document.querySelectorAll("[data-only]").forEach(function(n){ n.hidden=n.getAttribute("data-only").split(" ").indexOf(s)===-1; });
     txt.value=TXT[s]; document.getElementById(s==="blocked"?"pg-pol-rrhh":"pg-pol-default").checked=true;
-    setPane("2"); renderLive(s); syncLive(); if(announce) say(s); }
-  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value,true); }); });
-  function useExample(){ document.getElementById("st-data").checked=true; setState("data",true); }
+    setPane("2"); renderLive(s); syncLive(); if(announce) say(s);
+    if(play) playMask(); else cancelMask(); }
+  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value,true,true); }); });
+  function useExample(){ document.getElementById("st-data").checked=true; setState("data",true,true); }
   document.getElementById("pg-example").addEventListener("click",useExample);
   document.querySelector('[data-action="example"]').addEventListener("click",function(){ useExample(); txt.focus(); });
   var form=document.getElementById("pg-form");
   form.addEventListener("submit",function(e){ e.preventDefault();
-    if(app.getAttribute("data-state")==="empty") useExample(); else say(app.getAttribute("data-state")); });
+    var s=app.getAttribute("data-state");
+    if(s==="empty") useExample(); else { say(s); playMask(); } });
   txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
   if(/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent)) document.getElementById("pg-mod").textContent="⌘";
+
+  /* ---- Motion: Web Animations API, no library. Easing curves come from design/tokens.css. ---- */
+  function token(n,fb){ return getComputedStyle(root).getPropertyValue(n).trim()||fb; }
+  var EASE={out:token("--ease-out","cubic-bezier(.22,1,.36,1)"),pop:token("--ease-pop","cubic-bezier(.34,1.56,.64,1)"),
+    sweep:token("--ease-sweep","cubic-bezier(.45,0,.55,1)"),inout:token("--ease-in-out","cubic-bezier(.65,0,.35,1)"),
+    door:token("--ease-door","cubic-bezier(.87,0,.13,1)"),expo:token("--ease-expo-out","cubic-bezier(.16,1,.3,1)")};
+  function bezier(str){ var m=/cubic-bezier\(([^)]*)\)/.exec(str), n=m?m[1].split(",").map(parseFloat):[];
+    return n.length===4&&n.every(isFinite)?n:[.45,0,.55,1]; }
+  function bz(p1,p2,t){ var u=1-t; return 3*u*u*t*p1+3*u*t*t*p2+t*t*t; }
+  /* The mask crosses a line with the sweep curve: at time fraction x(s) it has covered y(s) of the
+     line. To know WHEN it reaches a datum that sits at fraction p, invert the curve: find s with
+     y(s) = p (bisection, y only grows) and return x(s). */
+  function arrival(c,p){ var lo=0,hi=1; for(var k=0;k<32;k++){ var m=(lo+hi)/2; if(bz(c[1],c[3],m)<p) lo=m; else hi=m; }
+    return bz(c[0],c[2],(lo+hi)/2); }
+  /* The other way round: how far an eased motion has gone at time fraction f */
+  function progress(c,f){ var lo=0,hi=1; for(var k=0;k<32;k++){ var m=(lo+hi)/2; if(bz(c[0],c[2],m)<f) lo=m; else hi=m; }
+    return bz(c[1],c[3],(lo+hi)/2); }
+  function px(n){ return n+"px"; }
+
+  /* ---- «Así viaja tu texto»: the mask animation (about 7.5 s, --duration-mask).
+     At rest the card shows the last frame. Playing builds every animation at once, each with its
+     delay; they hold their first values until their turn (fill: both), so the card starts in the
+     "before" picture. When all have finished they are cancelled, which leaves the resting CSS: the
+     same picture as the last frame, so nothing jumps. Only transform and opacity move, plus the
+     width of each datum while it turns into its marker (short and small). ---- */
+  var stage=document.getElementById("mask-anim"), journey=stage.parentNode;
+  var wipes=[].slice.call(stage.querySelectorAll(".wipe")), mrows=stage.querySelectorAll(".mrow");
+  var flight=stage.querySelector(".flight"), track=flight.querySelector(".track"), dots=track.querySelectorAll("i");
+  var replay=document.getElementById("anim-replay");
+  var running=[], runId=0, maskTimer=0, stageW=0, pendingPlay=false;
+  var SWEEP=[[1300,2100],[5300,1900]], MORPH=550; /* when each line is crossed (start, length) and how long a datum morphs */
+  var TOKS=wipes.map(function(w,ri){ return [].map.call(w.querySelectorAll(".tok"),function(t){
+    var a=t.querySelector(".tok-a"), b=t.querySelector(".tok-b"), g=a.cloneNode(true), o={t:t,a:a,b:b,g:g};
+    g.className="tok-ghost"; t.insertBefore(g,b);
+    if(ri===0){ o.f=el("span","tok-flash"); a.firstElementChild.appendChild(o.f); }
+    else { o.l=el("span","tok-glow"); t.appendChild(o.l); }
+    return o; }); });
+  function wOf(x){ return parseFloat(getComputedStyle(x).width)||0; }
+  /* Measures both pictures of each line and keeps the taller one as its min-height, so the card
+     never changes height while data turn into markers and back (no layout shift around it).
+     With timing, it also works out WHEN the mask reaches each datum (o.t0, ms): its distance along
+     the line is turned into a time by inverting the sweep curve. A datum's place depends on the
+     data that have already started to change width (lines can rewrap), so this walks forward in
+     time: at each moment the line is laid out as it will be then, every datum still waiting gets
+     its arrival time from the inverted curve, and the walk moves to the earliest one (or 40 ms on,
+     whichever comes first) and measures again. A datum the mask has already passed (it rewrapped
+     behind it) changes at that moment. */
+  function measure(timing){
+    stage.classList.add("is-measuring");
+    var out=wipes.map(function(w,ri){
+      var line=w.querySelector(".jline"), list=TOKS[ri], W=w.offsetWidth||1;
+      line.style.minHeight="";
+      list.forEach(function(o){ o.t.style.width=""; o.wA=wOf(o.a); o.wB=wOf(o.b); });
+      list.forEach(function(o){ o.t.style.width=px(o.wA); }); var hA=line.offsetHeight;
+      list.forEach(function(o){ o.t.style.width=px(o.wB); }); var hB=line.offsetHeight;
+      if(timing){ var at=SWEEP[ri][0], d=SWEEP[ri][1], cs=bezier(EASE.sweep), cw=bezier(EASE.inout), t=at, wait=list.slice();
+        list.forEach(function(o){ o.t0=Infinity; });
+        while(wait.length&&t<at+d){
+          list.forEach(function(q){ var f=(t-q.t0)/MORPH;
+            q.t.style.width=px(f>0?q.wA+(q.wB-q.wA)*progress(cw,Math.min(1,f)):q.wA); });
+          var next=null, nt=Infinity;
+          wait.forEach(function(o){ var ta=at+d*arrival(cs,Math.min(1,Math.max(0,(o.t.offsetLeft+o.wA*.2)/W))); if(ta<nt){ nt=ta; next=o; } });
+          if(nt<=t+1){ next.t0=Math.round(t); wait.splice(wait.indexOf(next),1); }
+          else t=Math.min(nt,t+40); }
+        wait.forEach(function(o){ o.t0=at+d; }); }
+      list.forEach(function(o){ o.t.style.width=""; });
+      line.style.minHeight=px(Math.max(hA,hB));
+      return list; });
+    stage.classList.remove("is-measuring");
+    stageW=stage.clientWidth;
+    return out; }
+  function reserve(){ if(stage.clientWidth>0&&!running.length) measure(false); }
+  function cancelMask(){ runId++; clearTimeout(maskTimer); pendingPlay=false;
+    running.forEach(function(a){ a.cancel(); }); running=[]; stage.classList.remove("is-running"); }
+  function queueMask(ms){ clearTimeout(maskTimer); maskTimer=setTimeout(playMask,ms); }
+  function playMask(){
+    cancelMask();
+    var s=app.getAttribute("data-state");
+    if(calm()||!stage.animate||(s!=="data"&&s!=="broken")||document.getElementById("panel-playground").hidden||!stage.clientWidth) return;
+    if(document.hidden){ pendingPlay=true; return; }
+    var T=measure(true), id=runId;
+    stage.classList.add("is-running");
+    function A(node,kf,at,d,e){ var a=node.animate(kf,{duration:d,delay:at,easing:e||EASE.out,fill:"both"}); running.push(a); return a; }
+    /* 1 · the data flash amber, one after another */
+    T[0].forEach(function(o,i){ A(o.f,[{opacity:0},{opacity:1},{opacity:0}],200+i*180,600,"ease-in-out"); });
+    /* 2-3 and 6 · the mask crosses a line; each datum changes in place exactly when it is reached:
+       it blurs away, its slot narrows or widens to the new width and the new text pops in */
+    function sweep(w,list,at,d,glow){ var g=w.querySelector(".glider"), fade=250/d;
+      A(w.querySelector(".gtrack"),[{transform:"translateX(0)"},{transform:"translateX(100%)"}],at,d,EASE.sweep);
+      A(g,[{opacity:0},{opacity:1,offset:fade},{opacity:1,offset:1-fade},{opacity:0}],at,d,"linear");
+      A(g.querySelector("svg"),[{transform:"rotate(-10deg)"},{transform:"rotate(8deg)"}],at,d,"ease-in-out");
+      list.forEach(function(o){ var t0=o.t0;
+        A(o.t,[{width:px(o.wA)},{width:px(o.wB)}],t0,MORPH,EASE.inout);
+        A(o.a,[{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.9)"}],t0,300,"ease-in");
+        A(o.g,[{opacity:0,transform:"scale(1)"},{opacity:.9,transform:"scale(.96)",offset:.4},{opacity:0,transform:"scale(.9)"}],t0,380,"ease-out");
+        A(o.b,[{opacity:0,transform:"scale(.6)"},{opacity:1,transform:"scale(1)"}],t0+120,650,EASE.pop);
+        if(glow) A(o.l,[{opacity:0},{opacity:1},{opacity:0}],t0+150,700,"ease-in-out"); }); }
+    function caption(row,at){
+      A(row.querySelector(".mcap-before"),[{opacity:1,transform:"translateY(0)"},{opacity:0,transform:"translateY(-5px)"}],at,300);
+      A(row.querySelector(".mcap-after"),[{opacity:0,transform:"translateY(5px)"},{opacity:1,transform:"translateY(0)"}],at+50,450); }
+    sweep(wipes[0],T[0],SWEEP[0][0],SWEEP[0][1],false);
+    /* 4 · «Tú escribes» → «La IA recibe» */
+    caption(mrows[0],3300);
+    /* 5 · three dots travel to Anthropic */
+    A(flight,[{opacity:0},{opacity:1}],3400,400);
+    A(track,[{transform:"scaleX(0)"},{transform:"scaleX(1)"}],3500,600);
+    var TW=Math.max(0,track.offsetWidth-7);
+    [].forEach.call(dots,function(dot,i){ A(dot,[{opacity:0,transform:"translateX(0)"},{opacity:1,offset:.14},{opacity:1,offset:.8},{opacity:0,transform:"translateX("+TW+"px)"}],3800+i*120,900,EASE.sweep); });
+    /* 6 · the reply rises and the mask comes back: each marker opens to the real value */
+    A(mrows[1],[{opacity:0,transform:"translateY(12px)"},{opacity:1,transform:"translateY(0)"}],4600,700);
+    sweep(wipes[1],T[1],SWEEP[1][0],SWEEP[1][1],true);
+    /* 7 · «Te llega, con tus datos»; the last animation ends at 7.5 s */
+    caption(mrows[1],7000);
+    Promise.all(running.map(function(a){ return a.finished; })).then(function(){ if(id===runId) cancelMask(); },function(){}); }
+  function pauseMask(){ running.forEach(function(a){ if(a.playState==="running") a.pause(); }); }
+  function resumeMask(){ running.forEach(function(a){ if(a.playState==="paused") a.play(); }); }
+  /* Hidden tab: the animation pauses and goes on where it was when the tab comes back */
+  document.addEventListener("visibilitychange",function(){ if(document.hidden) pauseMask(); else { resumeMask(); if(pendingPlay) queueMask(200); } });
+  replay.addEventListener("click",function(){ var ic=replay.querySelector(".ic");
+    if(!calm()&&ic.animate) ic.animate([{transform:"rotate(0deg)"},{transform:"rotate(-360deg)"}],{duration:700,easing:EASE.pop});
+    playMask(); });
+  /* A new width (window, phone toggle) changes the lines: stop and measure again */
+  if(window.ResizeObserver) new ResizeObserver(function(){ var w=stage.clientWidth; if(!w||w===stageW) return;
+    if(running.length) cancelMask(); measure(false); }).observe(stage);
+
+  /* ---- Entry: only the first time per session (decided in <head>, before the first paint) ---- */
+  var introAnims=[], introTimer=0, title=document.querySelector("#panel-playground .vh h1"), titleText=title.textContent;
+  function restoreTitle(){ if(title.querySelector(".intro-word")) title.textContent=titleText; }
+  function endIntro(){ clearTimeout(introTimer); introAnims.forEach(function(a){ a.cancel(); }); introAnims=[];
+    var ov=document.getElementById("intro"); if(ov) ov.remove();
+    restoreTitle(); root.classList.remove("intro-pending","intro"); }
+  function runIntro(){
+    var ov=document.getElementById("intro");
+    if(!root.classList.contains("intro-pending")||!ov||!ov.animate||calm()){ endIntro(); return false; }
+    function A(n,kf,o){ o.fill=o.fill||"both"; var a=n.animate(kf,o); introAnims.push(a); return a; }
+    var shown="translateY(0) scale(1)";
+    /* the mask appears (0-0.5 s), lights up indigo from left to right (0.3-0.9 s), then leaves (1-1.3 s) */
+    A(ov.querySelector(".intro-logo"),[{opacity:0,transform:"translateY(0) scale(.86)",easing:EASE.out},{opacity:1,transform:shown,offset:.385},{opacity:1,transform:shown,offset:.77,easing:"ease-in"},{opacity:0,transform:"translateY(0) scale(1.06)"}],{duration:1300});
+    A(ov.querySelector(".intro-name"),[{opacity:0,transform:"translateY(6px) scale(1)",easing:EASE.out},{opacity:1,transform:shown,offset:.583},{opacity:1,transform:shown,offset:.75,easing:"ease-in"},{opacity:0,transform:"translateY(0) scale(1.06)"}],{duration:1200,delay:100});
+    A(ov.querySelector(".intro-lit"),[{transform:"translateX(-100%)"},{transform:"translateX(0)"}],{duration:600,delay:300,easing:EASE.sweep});
+    A(ov.querySelector(".intro-lit svg"),[{transform:"translateX(100%)"},{transform:"translateX(0)"}],{duration:600,delay:300,easing:EASE.sweep});
+    /* the doors open (1.1-1.9 s); the pieces rise from 1.25 s (CSS, --intro-offset) */
+    A(ov.querySelector(".intro-door-upper"),[{transform:"translateY(0)"},{transform:"translateY(-101%)"}],{duration:800,delay:1100,easing:EASE.door});
+    var doors=A(ov.querySelector(".intro-door-lower"),[{transform:"translateY(0)"},{transform:"translateY(101%)"}],{duration:800,delay:1100,easing:EASE.door});
+    /* the view title rises word by word */
+    title.textContent="";
+    titleText.split(" ").forEach(function(w,i){ if(i) title.appendChild(document.createTextNode(" "));
+      var box=el("span","intro-word"), word=el("span",null,w); box.appendChild(word); title.appendChild(box);
+      A(word,[{transform:"translateY(115%)"},{transform:"translateY(0)"}],{duration:1000,delay:1500+i*90,easing:EASE.expo,fill:"backwards"}); });
+    /* the mask animation starts 0.2 s after the doors are open (tied to the doors, not to the clock:
+       a page opened in a background tab does not animate until it is shown) */
+    doors.finished.then(function(){ queueMask(200); },function(){});
+    Promise.all(introAnims.map(function(a){ return a.finished; })).then(function(){ introTimer=setTimeout(endIntro,600); },function(){});
+    return true; }
+
+  /* ---- Details for a mouse only ((hover: hover) and (pointer: fine)), never with reduced motion ---- */
+  var fineQ=matchMedia("(hover: hover) and (pointer: fine)");
+  function lively(e){ return fineQ.matches&&!calm()&&e.pointerType==="mouse"; }
+  var probar=form.querySelector(".btn.primary"), mx=0, my=0;
+  probar.classList.add("magnet");
+  probar.addEventListener("pointermove",function(e){ if(!lively(e)) return; var r=probar.getBoundingClientRect();
+    mx=(e.clientX-(r.left-mx)-r.width/2)*.3; my=(e.clientY-(r.top-my)-r.height/2)*.45;
+    probar.classList.remove("is-released"); probar.style.translate=mx.toFixed(1)+"px "+my.toFixed(1)+"px"; });
+  probar.addEventListener("pointerleave",function(){ mx=my=0; probar.classList.add("is-released"); probar.style.translate=""; });
+  var spots=[form,journey,panes];
+  spots.forEach(function(card){
+    var light=el("span","spot-light"); light.setAttribute("aria-hidden","true"); card.insertBefore(light,card.firstChild); card.classList.add("spot");
+    card.addEventListener("pointermove",function(e){ if(!lively(e)) return;
+      var r=card.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+      light.style.transform="translate("+Math.round(x)+"px,"+Math.round(y)+"px)"; card.classList.add("is-lit");
+      if(card===journey){ journey.classList.remove("is-released");
+        journey.style.transform="perspective(1400px) rotateX("+(-(y/r.height-.5)*3).toFixed(2)+"deg) rotateY("+((x/r.width-.5)*4).toFixed(2)+"deg)"; } });
+    card.addEventListener("pointerleave",function(){ card.classList.remove("is-lit");
+      if(card===journey){ journey.classList.add("is-released"); journey.style.transform=""; } }); });
+  function stillDetails(){ mx=my=0; probar.style.translate=""; journey.style.transform="";
+    spots.forEach(function(c){ c.classList.remove("is-lit"); }); }
 
   /* ---- Window size: the tab list is vertical on the sidebar and a row on the phone bar ---- */
   function syncOrientation(){ tablist.setAttribute("aria-orientation", app.clientWidth<=640?"horizontal":"vertical"); }
@@ -1225,15 +1485,22 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
     root.classList.toggle("chrome-hidden", d>0 && y>140); lastY=y; },{passive:true});
 
   /* ---- Simulated phone ---- */
-  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked); });
+  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked);
+    cancelMask(); queueMask(620); });
 
   /* ---- Reduced motion: system setting, or the toggle to preview it ---- */
   var mBox=document.getElementById("proto-motion");
-  function syncM(){ if(reduceQ.matches){ mBox.checked=true; mBox.disabled=true; } root.classList.toggle("reduce-motion",mBox.checked); }
-  mBox.addEventListener("change",syncM); reduceQ.addEventListener("change",syncM); syncM();
+  /* Reduced motion: no animation at all, the static before/after (the three columns) is shown */
+  function syncM(){ if(reduceQ.matches){ mBox.checked=true; mBox.disabled=true; } root.classList.toggle("reduce-motion",mBox.checked);
+    if(calm()){ cancelMask(); endIntro(); stillDetails(); } }
+  mBox.addEventListener("change",function(){ syncM(); if(!calm()) queueMask(100); });
+  reduceQ.addEventListener("change",syncM); syncM();
 
   loadPreset("default");
   setState("data");
+  reserve();
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(reserve);
+  if(!runIntro()) queueMask(400);
 })();
 </script>
 </body>

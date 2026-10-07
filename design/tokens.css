@@ -195,6 +195,11 @@
   /* Motion. All of it is switched off with prefers-reduced-motion (final state shown). */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1); /* small spring: markers popping in, magnet and tilt returning */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* a datum's width while it becomes its marker */
+  --ease-sweep: cubic-bezier(0.45, 0, 0.55, 1); /* the mask crossing a line (inverted in JS to time each datum) */
+  --ease-door: cubic-bezier(0.87, 0, 0.13, 1); /* the entry doors */
+  --ease-expo-out: cubic-bezier(0.16, 1, 0.3, 1); /* the view title rising word by word */
   --duration-fast: 200ms;
   --duration-base: 350ms;
   --duration-spring: 450ms; /* segmented thumbs sliding */

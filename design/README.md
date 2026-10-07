@@ -9,11 +9,11 @@ Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especifi
 1. Tokens nuevos (claro y oscuro), fuentes locales y contraste. **Hecho** (aprobado por Miquel).
 2. Ventana, barra lateral, cabecera y móvil. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
 3. Vista «Prueba un texto» con sus cinco estados. **Hecho** (aprobado por Miquel, con los ajustes de abajo).
-4. Animación del antifaz y entrada.
+4. Animación del antifaz y entrada. **Hecho** (esta versión).
 5. Las otras cuatro vistas con el mismo lenguaje.
 6. Comprobación final.
 
-Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana y «Prueba un texto» nuevos, pero las otras cuatro vistas son todavía las anteriores, y la animación del antifaz y la entrada llegan en el paso 4: es normal que se vea a medias.
+Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana, «Prueba un texto», la animación del antifaz y la entrada nuevos, pero las otras cuatro vistas son todavía las anteriores: es normal que se vea a medias.
 
 ### Paso 2: la ventana
 
@@ -50,6 +50,21 @@ Hasta el paso 5, el prototipo ya usa los tokens, las fuentes, la ventana y «Pru
 - **Se quedan como están**: en el móvil, el bloqueo abre en «Recibe la IA»; la pestaña activa de la barra lateral con peso 600; «Probar» con el cuadro vacío carga el ejemplo.
 - **Un solo archivo del logo**: se borra `design/logo.svg` (era una copia de `docs/images/logo.svg`) y las dos propuestas antiguas (`logo-option-a.svg`, `logo-option-b.svg`), que nada usaba. Los favicons de las dos páginas, el apartado Logo y los comentarios apuntan a `docs/images/logo.svg`; `design/logo-mark.svg` (un color) se queda.
 - **Texto pequeño sin espaciado negativo**: el texto de 11 a 13 px (pies, chips, metadatos, etiquetas, `kbd`, la etiqueta «Panel», insignias) usa el token nuevo `--tracking-small` (0). El −0,011em del cuerpo va bien de 15 px para arriba, pero en letra pequeña junta demasiado las letras. Las insignias en mayúsculas y mono mantienen su espaciado.
+
+### Paso 4: la animación del antifaz y la entrada
+
+Decisiones de Miquel: **Web Animations API** del navegador (`element.animate`, sin GSAP ni ninguna dependencia nueva); la entrada **solo la primera vez por sesión**; y solo se animan `transform` y `opacity`, con una única excepción: el ancho de cada dato mientras se convierte en su marcador (y al revés), que es corto y pequeño.
+
+- **Entrada (≈ 2 s, solo la primera vez por sesión)**: el antifaz aparece, se ilumina en índigo de izquierda a derecha y sale «ANTIFAZ»; la pantalla se abre como dos puertas (arriba y abajo); la interfaz entra escalonada y el título sube palabra a palabra. Se decide en el `<head>`, antes de pintar nada, con `sessionStorage` dentro de un `try/catch`: si el navegador no deja usarlo, no hay entrada (mejor que repetirla en cada carga) y la página se ve bien igual. Las puertas tienen nombres propios (`.intro-door-upper`, `.intro-door-lower`). Es decoración: `aria-hidden`, no recibe clics ni atrapa el foco, y si el script fallara se desvanece sola a los 4 s. La animación del antifaz empieza 0,2 s después de que se abran las puertas, atada a ellas y no al reloj (una página abierta en una pestaña de fondo no anima hasta que se ve).
+- **Animación del antifaz (7,5 s, medido en el navegador)**, en este orden: los datos destellan en ámbar uno tras otro; el antifaz cruza el texto con una estela de luz (se mueve con `transform: translateX`, nunca con `left`); **cada dato cambia en su sitio justo cuando el antifaz lo alcanza** (se desenfoca y se va, su hueco se estrecha hasta el ancho del marcador y el marcador entra con un pequeño rebote); el rótulo pasa de «Tú escribes» a «La IA recibe»; tres puntos viajan hacia Anthropic; sube la respuesta y el antifaz vuelve: cada marcador se abre hasta el dato real, con el subrayado verde y un brillo; y el rótulo pasa a «Te llega, con tus datos». «Ver otra vez» la repite (su icono gira) tantas veces como se quiera.
+- **Cómo se calcula cuándo llega el antifaz a cada dato.** El antifaz recorre la línea con una curva (`--ease-sweep`): en cada fracción del tiempo ha avanzado una fracción de la línea. Para saber *cuándo* llega a un dato que está a cierta distancia, se invierte la curva (se busca por bisección el punto de la curva con esa distancia y se lee su tiempo). Como al cambiar de ancho los datos pueden mover las líneas, el cálculo avanza en el tiempo: en cada momento coloca la línea como estará entonces, invierte la curva para los datos que faltan y salta al siguiente. Medido en el navegador: el antifaz está a 0–5 px del punto previsto de cada dato a 390, 768, 1024 y 1280 px (el cálculo avanza a saltos de 40 ms como mucho; 5 px son unos 10 ms).
+- **Sin saltos de diseño.** Antes de animar se miden las dos versiones de cada línea (con datos y con marcadores) y la línea se queda con la altura de la mayor. Así la tarjeta no cambia de altura y nada de lo que hay debajo se mueve (medido: 0 px en los cinco estados, a 390, 768, 1024 y 1280 px y con «Móvil»). A cambio, en reposo puede quedar un poco de aire bajo la primera frase cuando la versión con datos ocupa una línea más.
+- **En reposo** la tarjeta enseña el último fotograma. Al terminar, las animaciones se cancelan y queda el CSS de reposo, que es la misma imagen: no hay salto final.
+- **Rendimiento**: solo `transform` y `opacity` (más el ancho de los datos). El desenfoque es una copia del dato con un desenfoque fijo que solo cambia de opacidad; el destello ámbar y el brillo verde son capas con una sombra fija que solo cambian de opacidad. Las manchas de luz del fondo solo se mueven con `transform`. La animación se **pausa** si se esconde la pestaña (y sigue donde estaba al volver) y se **cancela** al cambiar de vista, de estado o de ancho; vuelve a empezar al volver a «Prueba un texto». Prepararla cuesta unos 30 ms, una vez por reproducción.
+- **Detalles solo con ratón** (`(hover: hover) and (pointer: fine)`): «Probar» es magnético y lo cruza un brillo; las tarjetas tienen una luz que sigue al cursor (movida con `transform`); la tarjeta de la animación se inclina unos 2°; el icono de «Ver otra vez» gira. El control segmentado ya se deslizaba con rebote desde el paso 2.
+- **Accesibilidad**: nada importante va solo en el movimiento (las tres columnas dicen lo mismo, siempre). La animación es `aria-hidden` y la sustituye una frase para lectores de pantalla. El texto se puede seleccionar. Con «reducir movimiento» del sistema **o** con el interruptor «Menos movimiento» del prototipo no se anima nada: ni entrada, ni antifaz, ni detalles; se ve el antes y el después estáticos (las tres columnas) con la nota de siempre. Si se activa a mitad, todo se para y queda el estado final.
+- **La subida de las piezas (paso 2) ya no usa desenfoque**: anima solo `transform` y `opacity`.
+- Curvas nuevas en `tokens.css`: `--ease-pop` (rebote pequeño), `--ease-in-out` (ancho de los datos), `--ease-sweep` (el recorrido del antifaz), `--ease-door` (puertas) y `--ease-expo-out` (título).
 
 ## La dirección visual
 
@@ -90,7 +105,7 @@ La fila de arriba, fuera de la ventana y con el borde discontinuo y la etiqueta 
 - **Móvil (390 px)**: estrecha la ventana a 390 px. Un móvil de verdad ve lo mismo, porque el diseño se adapta al ancho de la ventana (container queries) y no al de la pantalla.
 - **Menos movimiento**: enseña lo que ve quien tiene activado «reducir movimiento» en su sistema. Si el sistema ya lo tiene, el interruptor sale activado y bloqueado.
 - El botón de tema (claro u oscuro) está en la cabecera del panel, porque sí es parte del producto. Al abrir, sigue el tema del sistema.
-- Al abrir la página hay una entrada animada corta (la ventana sube y aparecen las piezas en orden). Solo una vez, y nunca con «reducir movimiento».
+- Al abrir la página por primera vez en la sesión hay una entrada animada de unos 2 s (el antifaz, las puertas y las piezas en orden). Nunca con «reducir movimiento». Para volver a verla, abre la página en una pestaña nueva.
 
 ## Las secciones
 
@@ -107,7 +122,7 @@ Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 | Estado | Qué se ve |
 |---|---|
 | Vacío | Playground sin texto y con una explicación; en directo a cero y sin peticiones; sin claves (con «Crear la primera clave»); aviso en Políticas de que se usa la política por defecto |
-| Con datos | El caso normal: la tarjeta «Así viaja tu texto» (la animación llega en el paso 4), las tres columnas y los datos encontrados |
+| Con datos | El caso normal: la tarjeta «Así viaja tu texto» con la animación del antifaz, las tres columnas y los datos encontrados |
 | Bloqueo | El texto habla de salud y la política `rrhh` lo bloquea: «no se ha enviado nada», con el motivo fijo (`special_category`); el evento aparece arriba en directo y los bloqueos suben a 4 |
 | Error | Anthropic no responde: aviso ámbar arriba en todas las vistas, la tercera columna sin respuesta, el evento «Error 504», un punto en la pestaña Estado y Anthropic en rojo en proveedores |
 | Cadena rota | Aviso rojo arriba con qué ha pasado y qué hacer, el estado de la cabecera en rojo, la cadena rota en En directo (eslabón marcado), el evento «Alerta» y Evidencias en rojo en Estado |
@@ -115,7 +130,7 @@ Debajo de la ventana, fuera del panel, el apartado **Logo** (ver más abajo).
 
 ## La animación del antifaz (F3)
 
-**Se rehace en el paso 4** (la de antes se ha quitado del prototipo). Lo que tendrá, según el encargo: el antifaz pasa por encima de la frase como una línea de luz; a su paso, cada dato (nombre, DNI, email e IBAN) se convierte en su marcador justo cuando el antifaz lo alcanza. Tres puntos viajan hacia la IA, aparece la respuesta con marcadores, el antifaz vuelve a pasar y los datos vuelven a su sitio con un subrayado verde. Se repite con «Ver otra vez». En reposo enseña el final, que es lo que ya se ve en el paso 3.
+Detalle en «Paso 4». Solo sale en los estados con datos (con datos y cadena rota): en vacío, bloqueo y error no hay nada que animar. Se reproduce al abrir la página, al pulsar «Probar» o «Usar el ejemplo», al cambiar a un estado con datos, al volver a la vista y con «Ver otra vez». En reposo enseña el final.
 
 Con «reducir movimiento» no se anima nada: la animación se oculta y quedan las tres columnas, que son el antes y el después estático. Para lectores de pantalla, la animación está oculta y la sustituye una frase que cuenta lo mismo.
 
@@ -130,7 +145,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 - **El cuadro de texto y WCAG 1.4.11.** Antes el bloque del texto llevaba el borde de 3:1; Miquel pidió quitarlo y dejar la línea finísima y la sombra de la referencia. 1.4.11 pide 3:1 para lo que hace falta para **identificar** un control, y aquí el campo se identifica sin el borde: tiene su etiqueta visible «Texto de prueba» (en el móvil la etiqueta no se ve, pero está para el lector de pantalla), el texto de ejemplo dentro («Por ejemplo: Hola, soy…», que pasa 4,5:1), y es una tarjeta blanca propia con su barra de botones debajo. Al enfocarlo sale el anillo índigo, que sí pasa 3:1. Es la misma lectura que se hizo con el control segmentado (abajo): el borde sería un refuerzo, no lo único que lo identifica.
 - **Control segmentado y WCAG 1.4.11.** Antes, la píldora de la opción elegida llevaba un borde oscuro de 3:1 para cumplir 1.4.11 (contraste de lo que no es texto), porque la píldora blanca sobre el carril gris no llega a 3:1. Miquel pidió quitarlo. Ahora la píldora es la de la referencia (blanca con `--shadow-pop`, sin borde) y **la opción elegida se reconoce sin mirar la píldora**: su texto va en `--color-text` y peso 600, y el de las demás en `--color-text-muted` y peso 500. Los dos textos pasan 4,5:1 sobre su fondo (texto / tarjeta 16,71 y 16,41; texto secundario / fondo de pistas 5,33 y 5,30). Como el estado ya lo dice el propio texto, que cumple 1.4.3, la píldora es un refuerzo y no tiene que llegar a 3:1. No se depende solo del color (1.4.1): entre los dos grises hay 2,7:1 en claro y 2,5:1 en oscuro, y el cambio de peso es la señal que no es de color. Además siguen siendo botones de opción de verdad (`input type="radio"`, que el lector de pantalla anuncia como «marcado») o botones con `aria-pressed` (las columnas en el móvil), así que el lector de pantalla dice cuál está elegida, y el anillo de foco no cambia. Lo mismo vale para las pestañas en píldora.
 - Teclado: las pestañas usan tabindex itinerante (flechas, Inicio y Fin) y las teclas 1 a 5 saltan a cada sección; todo tiene foco visible (anillo índigo); hay enlace «Saltar al contenido»; cada control tiene su etiqueta. La lista en directo es `role="log"` con `aria-live="polite"`; los mensajes de «Comprobar ahora» y de cambios sin guardar son `role="status"`.
-- Movimiento: todo se apaga con `prefers-reduced-motion` y con el interruptor del prototipo.
+- Movimiento: todo se apaga con `prefers-reduced-motion` y con el interruptor del prototipo. Las animaciones de JavaScript (Web Animations API) lo comprueban también, porque el CSS de «reducir movimiento» solo para las animaciones y transiciones de CSS.
 - En el panel real el JavaScript y los estilos van en archivos aparte (CSP estricta, sin JS en línea); en el prototipo están dentro de la página para que sea un solo archivo.
 - Coste cero si nadie mira: el flujo en directo se abre al entrar en la sección y se cierra al salir o al esconder la pestaña del navegador.
 
@@ -228,7 +243,6 @@ El apartado Logo del prototipo lo enseña a 64, 32 y 16 px sobre claro y sobre o
 ## Pendiente de decidir (Miquel)
 
 - Aprobar el prototipo (la línea de arriba).
-- Rediseño, pasos 2 a 6: GSAP o Web Animations API, y si la entrada con puertas sale solo la primera vez por sesión (recomendado).
 - Si «Prueba un texto» llama a la IA de verdad (gasta) o usa una respuesta de prueba local. El prototipo enseña una respuesta de ejemplo y el destino real.
 - Qué nombre de cliente se enseña en directo (`Claude Code`, `Codex`…): el prototipo pone el nombre de la clave y, si se sabe, el del programa.
 - Qué hace la pasarela cuando la cadena de evidencias se rompe (seguir sirviendo o parar). El prototipo solo avisa.
