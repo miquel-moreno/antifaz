@@ -22,3 +22,4 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0015](0015-puerta-cerrada-por-defecto.md) | La puerta cerrada por defecto | Aceptada |
 | [0016](0016-ner-en-procesos-aparte.md) | El NER en procesos aparte, con caché y manifiesto | Aceptada |
 | [0017](0017-instalacion-y-secretos-en-la-cli.md) | Instalación y secretos en la CLI (`init`, imagen, `setup`) | Aceptada |
+| [0018](0018-el-panel-y-su-puerta.md) | El panel y su puerta | Aceptada |
