@@ -1,0 +1,29 @@
+/*
+ * The panel's two typefaces, bundled with Antifaz (no request to any third party).
+ * Both are the official variable woff2 files, unmodified, under the SIL Open Font License 1.1
+ * (Inter-OFL.txt, GeistMono-OFL.txt). Source, version and SHA-256: design/README.md and
+ * docs/licencias.md.
+ *
+ * One file per family, not split by subset: the official files keep every OpenType feature
+ * the design uses (Inter's cv05/cv08 and tabular figures, and its opsz axis), which the
+ * per-subset builds of Google Fonts / Fontsource drop. Each file covers Latin, Latin Extended
+ * and more, so a single face needs no unicode-range.
+ * The family names match --font-sans / --font-mono in tokens.css, whose fallback stacks are
+ * used while the files load (font-display: swap) or if they never do.
+ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("GeistMono-Variable.woff2") format("woff2");
+}

@@ -3,8 +3,12 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
     hooks:
+      # The font licences in design/fonts/ stay byte-identical to the upstream release
+      # (their SHA-256 is recorded in design/README.md).
       - id: trailing-whitespace
+        exclude: ^design/fonts/.*-OFL\.txt$
       - id: end-of-file-fixer
+        exclude: ^design/fonts/.*-OFL\.txt$
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
@@ -23,6 +27,15 @@ repos:
         entry: uv run ruff format
         language: system
         types_or: [python, pyi, markdown]
+      # Names that must never appear (text, file names, image metadata; never pixels). The list
+      # is private and lives outside the repo (ANTIFAZ_FORBIDDEN_NAMES_FILE, by default
+      # ../_privado/forbidden-names.txt); without it the hook fails and says where to put it,
+      # except in CI (CI=true), where it only warns.
+      - id: forbidden-names
+        name: forbidden names (list kept outside the repo)
+        entry: uv run python -m scripts.check_forbidden_names
+        language: system
+        types: [file]
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
     hooks:
