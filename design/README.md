@@ -2,7 +2,7 @@
 
 Prototipo estático del panel de Antifaz (issue #30, sección 9.1 de la especificación). Es la **fuente de verdad visual**: el panel de la v0.2 se construye para que se vea igual que esto.
 
-**Estado: pendiente de aprobación.** Aprobado por Miquel el: \_\_\_ / \_\_\_ / 2026. Hasta que esta línea tenga fecha, no se construye nada del panel.
+**Estado: aprobado.** Aprobado por Miquel el: 08/10/2026.
 
 **Rediseño en curso** (encargo de Miquel, octubre de 2026): un estilo más cercano a Apple, casi monocromo, con la ventana de vidrio esmerillado sobre una luz ambiental muy suave. Se hace en seis pasos, cada uno con el visto bueno de Miquel:
 
