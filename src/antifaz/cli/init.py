@@ -2,6 +2,8 @@
 
 - ANTIFAZ_API_KEY is made here (`secrets.token_hex(32)`, drawn again in the very unlikely case
   it fails the startup check). It is shown once, only on a terminal or with --show-key.
+- ANTIFAZ_ADMIN_TOKEN (the panel, ADR-0018) is always made the same way, drawn again if it
+  equals the key, and shown under the same rule. Deleting its line turns the panel off.
 - Provider keys never come from argv: hidden input (getpass) when interactive; with
   --non-interactive, from an environment variable named by --*-key-env or from stdin
   (--*-key-stdin, one stdin source at most). Spaces, quotes and "Bearer " are trimmed.
@@ -59,6 +61,7 @@ _BACKUP_TRIES = 1000
 # Longest key read from stdin (real provider keys are well under 300 characters).
 MAX_STDIN_KEY = 4096
 _BOM = "﻿"
+PANEL_URL = "http://localhost:8000/panel"
 
 PROVIDERS = (
     # (name shown, variable written, usual prefix, option stem)
@@ -142,7 +145,7 @@ def add_parser(commands: "argparse._SubParsersAction[Any]") -> None:
     command.add_argument(
         "--show-key",
         action="store_true",
-        help="print the new Antifaz key even when the output is not a terminal",
+        help="print the new Antifaz key and panel token even when the output is not a terminal",
     )
 
 
@@ -155,6 +158,15 @@ def generate_gateway_key(token_hex: Callable[[int], str] = secrets.token_hex) ->
         key = token_hex(32)
         if _gateway_key_problem(key) is None:
             return key
+    raise InitError("could not make a random key; try again", code=1)
+
+
+def generate_admin_token(key: str, token_hex: Callable[[int], str] = secrets.token_hex) -> str:
+    """A panel token made like the gateway key and never equal to it (drawn again if it is)."""
+    for _ in range(_KEY_TRIES):
+        token = generate_gateway_key(token_hex)
+        if token != key:
+            return token
     raise InitError("could not make a random key; try again", code=1)
 
 
@@ -437,11 +449,20 @@ def _confirm_replace(env: Path, args: argparse.Namespace, interactive: bool) -> 
 
 
 def _report(
-    env: Path, key: str, backup: Path | None, keys: dict[str, str | None], show: bool
+    env: Path,
+    key: str,
+    token: str,
+    backup: Path | None,
+    keys: dict[str, str | None],
+    show: bool,
 ) -> None:
     lines = [f"antifaz init: wrote {env}"]
     if backup is not None:
         lines.append(f"  the previous file is kept as {backup.name}")
+        lines.append(
+            "  that copy holds the old keys and panel token: delete it once you have rotated "
+            "them (revoked the old provider keys)"
+        )
     for name, variable, _, _ in PROVIDERS:
         state = "set" if keys.get(variable) else "not set (its routes answer 503)"
         lines.append(f"  {name} key: {state}")
@@ -452,12 +473,22 @@ def _report(
             "Clients send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>'.",
             key,
             "",
+            "Your panel token (ANTIFAZ_ADMIN_TOKEN). It is shown only this once; it is also in "
+            ".env.",
+            f"It opens the panel at {PANEL_URL} (from v0.2). It is not the Antifaz key.",
+            token,
+            "",
         ]
     else:
         lines.append(
-            "  the Antifaz key is in .env as ANTIFAZ_API_KEY; it is not shown because the "
-            "output is not a terminal (use --show-key to print it)"
+            "  the Antifaz key is in .env as ANTIFAZ_API_KEY and the panel token as "
+            "ANTIFAZ_ADMIN_TOKEN; they are not shown because the output is not a terminal "
+            "(use --show-key to print them)"
         )
+        lines.append(f"  the panel token opens the panel at {PANEL_URL} (from v0.2)")
+    lines.append(
+        "  to turn the panel off, delete the ANTIFAZ_ADMIN_TOKEN line from .env and restart"
+    )
     lines.append("  next: docker compose up -d")
     _say("\n".join(lines))
 
@@ -479,7 +510,15 @@ def run(args: argparse.Namespace) -> int:
         replace_existing = _confirm_replace(env, args, interactive)
         keys = _provider_keys(args, interactive)
         key = generate_gateway_key()
-        content = render({env_template.API_KEY: key, env_template.ALLOWED_HOSTS: hosts, **keys})
+        token = generate_admin_token(key)
+        content = render(
+            {
+                env_template.API_KEY: key,
+                env_template.ADMIN_TOKEN: token,
+                env_template.ALLOWED_HOSTS: hosts,
+                **keys,
+            }
+        )
         backup = write_env(folder, content, replace_existing=replace_existing)
     except InitError as error:
         _warn(str(error))
@@ -487,5 +526,5 @@ def run(args: argparse.Namespace) -> int:
     except (EOFError, KeyboardInterrupt):
         _warn("cancelled")
         return 2
-    _report(env, key, backup, keys, show=args.show_key or sys.stdout.isatty())
+    _report(env, key, token, backup, keys, show=args.show_key or sys.stdout.isatty())
     return 0

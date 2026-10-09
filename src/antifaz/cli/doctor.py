@@ -5,7 +5,8 @@ Three checks, in order (issue 43, ADR-0017):
 1. Configuration: the settings the gateway would read (the .env in --path, default the current
    folder, with ANTIFAZ_* environment variables on top, as pydantic-settings does) and
    `check_safe_to_start`. It names variables, never values, and says which providers have a
-   key (names only) and whether the NER is on.
+   key (names only), whether the NER and the panel are on and how many trusted proxies there
+   are (a count, never the addresses), with a warning when a range is wider than /24 or /64.
 2. Gateway: `GET {url}/healthz` (public: no key is sent) with a Host the gateway accepts and
    never through a proxy (HTTP(S)_PROXY is ignored: the gateway is local), no redirects, no
    compression (so the 64 KiB cap on the answer is real).
@@ -48,6 +49,7 @@ from pydantic import ValidationError
 from antifaz.config import Settings, UnsafeConfigError, _format_problem, check_safe_to_start
 from antifaz.healthcheck import host_header
 from antifaz.logging import QUIET_LOGGERS
+from antifaz.trusted_networks import is_wide, parse_proxy_network, proxy_network_problem
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 5.0
@@ -217,6 +219,15 @@ def configured_providers(settings: Settings) -> list[tuple[str, str]]:
     return providers
 
 
+def _wide_proxy_ranges(entries: Sequence[str]) -> int:
+    """How many entries are valid but wider than a /24 or a /64 (a count: never the entries)."""
+    wide = 0
+    for entry in entries:
+        if proxy_network_problem(entry) is None and is_wide(parse_proxy_network(entry)):
+            wide += 1
+    return wide
+
+
 def check_config(folder: Path, report: Report) -> Settings | None:
     found = (folder / ".env").is_file()
     settings, problem = load_settings(folder)
@@ -238,6 +249,17 @@ def check_config(folder: Path, report: Report) -> Settings | None:
         + (", ".join(names) if names else "none (every proxy route answers 503)"),
     )
     report.add("note", f"NER (names and addresses): {'on' if settings.ner_enabled else 'off'}")
+    # Only whether the token is set and how many proxies: never the token nor the addresses.
+    report.add("note", f"panel: {'on' if settings.admin_token is not None else 'off'}")
+    report.add("note", f"trusted proxies: {len(settings.trusted_proxies)}")
+    wide = _wide_proxy_ranges(settings.trusted_proxies)
+    if wide:
+        report.add(
+            "note",
+            f"warning: {wide} trusted proxy range(s) wider than /24 (IPv4) or /64 (IPv6) in "
+            "ANTIFAZ_TRUSTED_PROXIES: trust the exact IP of the proxy (/32 or /128), never the "
+            "Docker gateway or the whole network",
+        )
     for _, variable, attribute in BASE_URLS:
         if has_userinfo(getattr(settings, attribute)):
             report.add(

@@ -23,6 +23,7 @@ MINIMUMS = {
     "restore": 90.0,
     "providers": 90.0,
     "api": 90.0,
+    "web": 90.0,
 }
 
 
