@@ -1,8 +1,8 @@
 """The .env that `antifaz init` writes (issue 41), embedded so the published image has it too.
 
 The same variables, in the same order, as .env.example (a test keeps them in sync); the
-values of ANTIFAZ_API_KEY, the provider keys and ANTIFAZ_ALLOWED_HOSTS are filled in by
-cli/init.py, and a provider without a key loses its line.
+values of ANTIFAZ_API_KEY, ANTIFAZ_ADMIN_TOKEN, the provider keys and ANTIFAZ_ALLOWED_HOSTS
+are filled in by cli/init.py, and a provider without a key loses its line.
 
 Written for pydantic-settings AND `docker --env-file` at once: one VAR=VALUE per line, no
 quotes, no comment after a value and no `$` anywhere (Compose would expand it).
@@ -37,6 +37,13 @@ ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],antifaz
 # "*" and "null" are refused. There is no CORS either way.
 ANTIFAZ_ALLOWED_ORIGINS=
 
+# Token that opens the panel in the browser at /panel (from v0.2). Random, made by antifaz
+# init, different from ANTIFAZ_API_KEY. To turn the panel off, remove this line and restart.
+ANTIFAZ_ADMIN_TOKEN=
+# Only behind a reverse proxy: its IP addresses or CIDR ranges (10.0.0.0/8), comma-separated.
+# Only a request from one of them may set X-Forwarded-For / X-Forwarded-Proto for the panel.
+ANTIFAZ_TRUSTED_PROXIES=
+
 ANTIFAZ_UPSTREAM_TIMEOUT_SECONDS=120
 ANTIFAZ_UPSTREAM_CONNECT_TIMEOUT_SECONDS=10
 ANTIFAZ_MAX_BODY_BYTES=4194304
@@ -59,12 +66,14 @@ ANTIFAZ_NER_TORCH_THREADS=0
 
 # Filled in by init; a provider key left empty removes its line.
 API_KEY = "ANTIFAZ_API_KEY"
+ADMIN_TOKEN = "ANTIFAZ_ADMIN_TOKEN"  # noqa: S105 - the variable name, not a token
 OPENAI_KEY = "ANTIFAZ_OPENAI_API_KEY"
 ANTHROPIC_KEY = "ANTIFAZ_ANTHROPIC_API_KEY"
 ALLOWED_HOSTS = "ANTIFAZ_ALLOWED_HOSTS"
 DEFAULT_ALLOWED_HOSTS = "localhost,127.0.0.1,[::1],antifaz"
 
 __all__ = [
+    "ADMIN_TOKEN",
     "ALLOWED_HOSTS",
     "ANTHROPIC_KEY",
     "API_KEY",

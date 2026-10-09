@@ -78,7 +78,7 @@ def test_a_safe_configuration_starts() -> None:
         ("0123456" * 6, "different characters"),
         ("CHANGE-ME-to-a-long-random-value-0123456789", "example value"),
         ("test key with spaces not real 0123456789abc", "printable ASCII"),
-        ("test-key-not-real-ñ-0123456789abcdefghijklm", "printable ASCII"),
+        ("test-key-not-real-\u00f1-0123456789abcdefghijklm", "printable ASCII"),
         ("test-key-not-real-\t-0123456789abcdefghijklm", "printable ASCII"),
     ],
 )
@@ -281,3 +281,164 @@ def test_gate_refuses_to_be_built_with_a_weak_key(key: str) -> None:
 
     with pytest.raises(ValueError, match="key"):
         GateMiddleware(app, api_key=key, allowed_origins=[])  # type: ignore[arg-type]
+
+
+# --- The panel's door (issue 53, ADR-0018): admin token and trusted proxies ------------------
+
+ADMIN_TOKEN = "test-admin-token-not-real-fedcba9876543210"
+PROVIDER_KEY = "test-provider-key-not-real-0123456789"
+
+
+def test_without_an_admin_token_the_panel_is_off_and_the_gateway_starts() -> None:
+    settings = _safe()
+
+    assert settings.admin_token is None
+    assert settings.trusted_proxies == []
+    check_safe_to_start(settings)
+
+
+def test_a_good_admin_token_starts() -> None:
+    check_safe_to_start(_safe(admin_token=SecretStr(ADMIN_TOKEN)))
+
+
+def test_the_admin_token_is_read_from_its_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTIFAZ_ADMIN_TOKEN", ADMIN_TOKEN)
+    monkeypatch.setenv("ANTIFAZ_TRUSTED_PROXIES", "10.0.0.0/8, 192.168.1.10")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.admin_token is not None
+    assert settings.admin_token.get_secret_value() == ADMIN_TOKEN
+    assert settings.trusted_proxies == ["10.0.0.0/8", "192.168.1.10"]
+
+
+@pytest.mark.parametrize(
+    ("token", "reason"),
+    [
+        ("", "is empty: set a value or remove the variable"),
+        ("short-admin-token-not-real", "at least 32"),
+        ("x" * (MIN_KEY_LENGTH - 1), "at least 32"),
+        ("change-me-to-another-random-value-of-32-characters", "example value"),
+        ("Change_Me-admin-token-not-real-0123456789", "example value"),
+        ("ab" * 20, "different characters"),
+        ("test admin token with spaces 0123456789abc", "printable ASCII"),
+        ("test-admin-token-not-real-\u00f1-0123456789abcdef", "printable ASCII"),
+        ("test-admin-token-not-real-\t-0123456789abcdef", "printable ASCII"),
+    ],
+)
+def test_an_unsafe_admin_token_refuses_to_start(token: str, reason: str) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        create_app(_safe(admin_token=SecretStr(token)))
+
+    message = str(info.value)
+    assert message.startswith("ANTIFAZ_ADMIN_TOKEN ")
+    assert reason in message
+    if token:
+        assert token not in message
+    assert info.value.__cause__ is None
+
+
+def test_an_admin_token_equal_to_the_api_key_refuses_to_start() -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(admin_token=SecretStr(GOOD_KEY)))
+
+    message = str(info.value)
+    assert "ANTIFAZ_ADMIN_TOKEN" in message and "ANTIFAZ_API_KEY" in message
+    assert GOOD_KEY not in message
+
+
+@pytest.mark.parametrize(
+    ("field", "variable"),
+    [
+        ("openai_api_key", "ANTIFAZ_OPENAI_API_KEY"),
+        ("anthropic_api_key", "ANTIFAZ_ANTHROPIC_API_KEY"),
+    ],
+)
+def test_an_admin_token_equal_to_a_provider_key_refuses_to_start(field: str, variable: str) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(
+            _safe(admin_token=SecretStr(PROVIDER_KEY), **{field: SecretStr(PROVIDER_KEY)})
+        )
+
+    message = str(info.value)
+    assert "ANTIFAZ_ADMIN_TOKEN" in message and variable in message
+    assert PROVIDER_KEY not in message
+
+
+def test_a_canary_admin_token_never_appears_in_any_refusal() -> None:
+    canary = "test-admin-canary-" + "0123456789abcdef" * 2
+    cases = [
+        {"admin_token": SecretStr(canary[:20])},
+        {"admin_token": SecretStr("change-me-" + canary)},
+        {"admin_token": SecretStr(canary + " x")},
+        {"admin_token": SecretStr(canary), "antifaz_api_key": SecretStr(canary)},
+        {"admin_token": SecretStr(canary), "openai_api_key": SecretStr(canary)},
+    ]
+    for overrides in cases:
+        with pytest.raises(UnsafeConfigError) as info:
+            check_safe_to_start(_safe(**overrides))
+        assert canary not in str(info.value)
+        assert canary[:20] not in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "proxies",
+    [
+        [],
+        ["10.0.0.1"],
+        ["10.0.0.0/8"],
+        ["172.18.0.0/16", "192.168.1.10"],
+        ["::1"],
+        ["fd00::/8", "127.0.0.1/32"],
+    ],
+)
+def test_good_trusted_proxies_start(proxies: list[str]) -> None:
+    check_safe_to_start(_safe(trusted_proxies=proxies))
+
+
+@pytest.mark.parametrize(
+    "proxies",
+    [
+        ["172.16.5.4/12"],  # host bits
+        ["0.0.0.0/0"],
+        ["::/0"],
+        ["172.18.0.0/16", "0.0.0.0/0"],
+        ["proxy.internal"],
+        ["10.0.0.0/33"],
+        ["999.1.1.1"],
+        ["10.0.0.1:8080"],
+        ["fe80::1%eth0"],
+        ["*"],
+        [""],
+    ],
+)
+def test_bad_trusted_proxies_refuse_to_start(proxies: list[str]) -> None:
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(trusted_proxies=proxies))
+
+    message = str(info.value)
+    assert "ANTIFAZ_TRUSTED_PROXIES" in message
+    for entry in proxies:
+        if entry not in ("0.0.0.0/0", "::/0", ""):  # the rule itself names those two
+            assert entry not in message
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", []),
+        ("10.0.0.1", ["10.0.0.1"]),
+        ("10.0.0.0/8, 192.168.1.10", ["10.0.0.0/8", "192.168.1.10"]),
+        ('["10.0.0.0/8", "::1"]', ["10.0.0.0/8", "::1"]),
+        ("[ ]", []),
+    ],
+)
+def test_trusted_proxies_are_read_as_json_or_commas(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: list[str]
+) -> None:
+    monkeypatch.setenv("ANTIFAZ_TRUSTED_PROXIES", raw)
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.trusted_proxies == expected
+    check_safe_to_start(_safe(trusted_proxies=settings.trusted_proxies))

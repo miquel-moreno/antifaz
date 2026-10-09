@@ -31,8 +31,16 @@ from antifaz.vault import Vault
 
 
 def configured_keys(settings: Settings) -> list[str]:
-    """Every key in the settings: none of them may ever reach the client (invariant 13)."""
-    secrets = (settings.antifaz_api_key, settings.openai_api_key, settings.anthropic_api_key)
+    """Every key in the settings: none of them may ever reach the client (invariant 13).
+
+    The panel's admin token too (ADR-0018): no client value may carry it to a provider and no
+    provider answer may carry it back."""
+    secrets = (
+        settings.antifaz_api_key,
+        settings.openai_api_key,
+        settings.anthropic_api_key,
+        settings.admin_token,
+    )
     return [secret.get_secret_value() for secret in secrets if secret is not None]
 
 

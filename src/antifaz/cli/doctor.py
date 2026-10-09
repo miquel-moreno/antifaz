@@ -5,7 +5,8 @@ Three checks, in order (issue 43, ADR-0017):
 1. Configuration: the settings the gateway would read (the .env in --path, default the current
    folder, with ANTIFAZ_* environment variables on top, as pydantic-settings does) and
    `check_safe_to_start`. It names variables, never values, and says which providers have a
-   key (names only) and whether the NER is on.
+   key (names only), whether the NER and the panel are on and how many trusted proxies there
+   are (a count, never the addresses).
 2. Gateway: `GET {url}/healthz` (public: no key is sent) with a Host the gateway accepts and
    never through a proxy (HTTP(S)_PROXY is ignored: the gateway is local), no redirects, no
    compression (so the 64 KiB cap on the answer is real).
@@ -238,6 +239,9 @@ def check_config(folder: Path, report: Report) -> Settings | None:
         + (", ".join(names) if names else "none (every proxy route answers 503)"),
     )
     report.add("note", f"NER (names and addresses): {'on' if settings.ner_enabled else 'off'}")
+    # Only whether the token is set and how many proxies: never the token nor the addresses.
+    report.add("note", f"panel: {'on' if settings.admin_token is not None else 'off'}")
+    report.add("note", f"trusted proxies: {len(settings.trusted_proxies)}")
     for _, variable, attribute in BASE_URLS:
         if has_userinfo(getattr(settings, attribute)):
             report.add(

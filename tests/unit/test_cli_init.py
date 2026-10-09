@@ -582,6 +582,104 @@ def test_on_a_terminal_the_key_is_shown_once_with_a_warning(
     assert "only" in shown.lower()
 
 
+# --- The panel token (issue 53, ADR-0018) ------------------------------------------------------
+
+
+def _written_token(tmp_path: Path) -> str:
+    value = dotenv_values(env_file(tmp_path))["ANTIFAZ_ADMIN_TOKEN"]
+    assert value
+    return value
+
+
+def test_init_always_writes_a_panel_token_of_64_hex_different_from_the_key(
+    tmp_path: Path, no_tty: None
+) -> None:
+    assert run(tmp_path, "--non-interactive") == 0
+    token = _written_token(tmp_path)
+    assert re.fullmatch(r"[0-9a-f]{64}", token)
+    assert token != _written_key(tmp_path)
+    loaded = settings_of(env_file(tmp_path))
+    check_safe_to_start(loaded)
+    assert loaded.admin_token is not None
+    assert loaded.admin_token.get_secret_value() == token
+    assert loaded.trusted_proxies == []
+
+
+# Random-looking draws made at runtime (no key-like literal in the source).
+FIRST = secrets.token_hex(32)
+SECOND = secrets.token_hex(32)
+
+
+def test_a_panel_token_equal_to_the_key_is_drawn_again() -> None:
+    draws = iter([FIRST, FIRST, SECOND])
+    assert init_module.generate_admin_token(FIRST, lambda _: next(draws)) == SECOND
+
+
+def test_a_panel_token_that_always_equals_the_key_gives_up() -> None:
+    with pytest.raises(init_module.InitError):
+        init_module.generate_admin_token(FIRST, lambda _: FIRST)
+
+
+def test_the_panel_token_is_not_shown_when_the_output_is_not_a_terminal(
+    tmp_path: Path, no_tty: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(tmp_path, "--non-interactive") == 0
+    shown = "".join(capsys.readouterr())
+    assert _written_token(tmp_path) not in shown
+    assert _written_token(tmp_path)[:16] not in shown
+    assert "ANTIFAZ_ADMIN_TOKEN" in shown
+    assert "http://localhost:8000/panel" in shown
+    assert "delete the ANTIFAZ_ADMIN_TOKEN line" in shown
+
+
+def test_show_key_prints_the_panel_token_once(
+    tmp_path: Path, no_tty: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(tmp_path, "--non-interactive", "--show-key") == 0
+    shown = "".join(capsys.readouterr())
+    assert shown.count(_written_token(tmp_path)) == 1
+    assert shown.count(_written_key(tmp_path)) == 1
+    assert "http://localhost:8000/panel" in shown
+    assert "delete the ANTIFAZ_ADMIN_TOKEN line" in shown
+
+
+def test_on_a_terminal_the_panel_token_is_shown_once(
+    tmp_path: Path, no_tty: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminal = _Terminal()
+    monkeypatch.setattr("sys.stdout", terminal)
+    assert run(tmp_path, "--non-interactive") == 0
+    shown = terminal.getvalue()
+    assert shown.count(_written_token(tmp_path)) == 1
+    assert "http://localhost:8000/panel" in shown
+
+
+def test_a_canary_panel_token_never_reaches_output_that_is_not_a_terminal(
+    tmp_path: Path,
+    no_tty: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    token = "c0ffee" + secrets.token_hex(29)  # a canary, different on every run
+    # The key still comes from the real generator; only the panel token is the canary.
+    monkeypatch.setattr(init_module, "generate_admin_token", lambda key: token)
+    assert run(tmp_path, "--non-interactive") == 0
+    assert _written_token(tmp_path) == token
+    assert token not in output(capsys, caplog)
+
+
+def test_deleting_the_panel_token_line_turns_the_panel_off(tmp_path: Path, no_tty: None) -> None:
+    assert run(tmp_path, "--non-interactive") == 0
+    path = env_file(tmp_path)
+    kept = [x for x in path.read_text(encoding="utf-8").splitlines() if "ADMIN_TOKEN=" not in x]
+    path.write_text(NL.join(kept) + NL, encoding="utf-8", newline=NL)
+    loaded = settings_of(path)
+    check_safe_to_start(loaded)
+    assert loaded.admin_token is None
+
+
 # --- An existing .env -------------------------------------------------------------------------
 
 
