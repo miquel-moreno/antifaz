@@ -40,7 +40,8 @@ ANTIFAZ_ALLOWED_ORIGINS=
 # Token that opens the panel in the browser at /panel (from v0.2). Random, made by antifaz
 # init, different from ANTIFAZ_API_KEY. To turn the panel off, remove this line and restart.
 ANTIFAZ_ADMIN_TOKEN=
-# Only behind a reverse proxy: its IP addresses or CIDR ranges (10.0.0.0/8), comma-separated.
+# Only behind a reverse proxy: the EXACT IP of the proxy (e.g. 172.20.0.10), comma-separated.
+# Never the Docker gateway or the whole Docker network: any client could fake the headers.
 # Only a request from one of them may set X-Forwarded-For / X-Forwarded-Proto for the panel.
 ANTIFAZ_TRUSTED_PROXIES=
 

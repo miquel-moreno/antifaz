@@ -933,3 +933,21 @@ def test_init_never_uses_the_network(
 ) -> None:
     monkeypatch.setenv("CI_OPENAI", canary("sk-"))
     assert run(tmp_path, "--non-interactive", "--openai-key-env", "CI_OPENAI") == 0
+
+
+def test_a_backup_comes_with_a_reminder_that_it_holds_the_old_secrets(
+    tmp_path: Path, no_tty: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    env_file(tmp_path).write_bytes(OLD)
+    assert run(tmp_path, "--non-interactive", "--force") == 0
+    shown = "".join(capsys.readouterr())
+    assert backups(tmp_path)[0].name in shown
+    assert "holds the old keys and panel token" in shown
+    assert "delete it once you have rotated them" in shown
+
+
+def test_without_a_backup_there_is_no_reminder(
+    tmp_path: Path, no_tty: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(tmp_path, "--non-interactive") == 0
+    assert "holds the old keys" not in "".join(capsys.readouterr())

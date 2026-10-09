@@ -459,6 +459,10 @@ def _report(
     lines = [f"antifaz init: wrote {env}"]
     if backup is not None:
         lines.append(f"  the previous file is kept as {backup.name}")
+        lines.append(
+            "  that copy holds the old keys and panel token: delete it once you have rotated "
+            "them (revoked the old provider keys)"
+        )
     for name, variable, _, _ in PROVIDERS:
         state = "set" if keys.get(variable) else "not set (its routes answer 503)"
         lines.append(f"  {name} key: {state}")

@@ -290,3 +290,40 @@ def test_small_body_limit_cannot_verify_and_is_not_a_privacy_failure(
     assert "ANTIFAZ_MAX_BODY_BYTES" in output
     assert "FAIL" not in output and "LEAK" not in output
     _output_is_clean(output)
+
+
+def test_verify_watches_a_canary_panel_token_instead_of_the_real_one(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Invariant 13: the run's settings carry a canary admin token, never the user's, and it is
+    among the keys every answer is checked against."""
+    import antifaz.cli.verify as module
+
+    user_token = "verify-test-admin-token-0123456789abcdef"
+    seen_settings: list[Settings] = []
+    seen_keys: list[Sequence[str]] = []
+    real_create_app = module.create_app
+    real_check = module._check
+
+    def spy_app(settings: Settings, *args: Any, **kwargs: Any) -> Any:
+        seen_settings.append(settings)
+        return real_create_app(settings, *args, **kwargs)
+
+    def spy_check(*args: Any) -> Any:
+        seen_keys.append(args[4])
+        return real_check(*args)
+
+    monkeypatch.setattr(module, "create_app", spy_app)
+    monkeypatch.setattr(module, "_check", spy_check)
+
+    assert verify(_settings(admin_token=SecretStr(user_token))) == 0
+
+    (run_settings,) = seen_settings
+    assert run_settings.admin_token is not None
+    canary = run_settings.admin_token.get_secret_value()
+    assert canary.startswith("verify-canary-") and canary != user_token
+    assert seen_keys and all(canary in keys for keys in seen_keys)
+    assert all(user_token not in keys for keys in seen_keys)
+    captured = capsys.readouterr()
+    assert canary not in captured.out + captured.err
+    assert user_token not in captured.out + captured.err
