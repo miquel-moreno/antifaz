@@ -105,7 +105,7 @@ docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
 Antifaz habla HTTP sin cifrar: para usarlo desde otras máquinas, ponlo detrás de un proxy inverso con HTTPS (Caddy, nginx, Traefik) en la misma máquina o red privada, y no publiques el puerto en `0.0.0.0`.
 
 - Añade a `ANTIFAZ_ALLOWED_HOSTS` el nombre que usan los clientes (por ejemplo `antifaz.empresa.internal`).
-- uvicorn arranca con `--no-proxy-headers`: Antifaz no se fía de `X-Forwarded-For` ni `X-Forwarded-Proto`. Hoy no los necesita (no usa la IP del cliente ni construye URLs). Si algún día hicieran falta, se activarían solo para la IP del proxy (`--forwarded-allow-ips`), nunca para todas.
+- uvicorn arranca con `--no-proxy-headers`: la pasarela no se fía de `X-Forwarded-For` ni `X-Forwarded-Proto` y no los usa (no construye URLs). La única excepción es el panel (ADR-0018, a partir del PR 11b-2): usa la IP del cliente **solo** para el límite de intentos de login, y el esquema para exigir HTTPS fuera de `localhost`. Esas dos cabeceras solo cuentan si la conexión llega de una IP de `ANTIFAZ_TRUSTED_PROXIES` (vacía por defecto); de cualquier otra, se ignoran. uvicorn sigue igual. Ver [Puerta del panel](#puerta-del-panel-issue-53-configuración-11b-1).
 - El proxy no debe guardar los cuerpos de las peticiones en sus logs: llevan los datos personales antes de enmascararse.
 
 ### Extremo a extremo: `make e2e`
@@ -683,6 +683,8 @@ La app ya no se crea al importar el módulo: `uvicorn --factory antifaz.api.app:
 |---|---|---|
 | `ANTIFAZ_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Valores aceptados en la cabecera `Host` (sin el puerto y sin distinguir mayúsculas). Otro → 400. Admite `*.ejemplo.com`, no `*` ni `*.com` |
 | `ANTIFAZ_ALLOWED_ORIGINS` | vacía | Orígenes de navegador aceptados, exactos y sin barra final (`https://intranet.ejemplo.com`). Vacía: toda petición con `Origin` → 403 |
+| `ANTIFAZ_ADMIN_TOKEN` | sin definir | Token que abre el panel en `/panel` (ADR-0018, issue 53). Sin la variable, el panel no existe. Mismas reglas que `ANTIFAZ_API_KEY` y distinto de ella y de las claves de los proveedores. Vacía (`ANTIFAZ_ADMIN_TOKEN=`) es un error: "is empty: set a value or remove the variable" |
+| `ANTIFAZ_TRUSTED_PROXIES` | vacía | IP o rangos CIDR del proxy inverso que tiene delante el panel (`172.18.0.0/16`). Solo una conexión desde ellos puede fijar `X-Forwarded-For` y `X-Forwarded-Proto` para el panel. Se rechazan `0.0.0.0/0`, `::/0`, rangos con bits de host (`10.0.0.1/8`) y cualquier otra cosa |
 
 **En cada petición**, en este orden:
 
@@ -704,6 +706,20 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - `root_path` no está soportado: si la sirves bajo un prefijo (`--root-path`), `/healthz` puede pedir clave, porque la lista pública compara la ruta exacta y, si no coincide, falla cerrada.
 
 **Tests.** `tests/redteam/test_invariants_12_13.py` recorre las rutas que la app registra de verdad (con `iter_route_contexts`, porque en FastAPI `app.routes` guarda los routers incluidos y no sus rutas), cada una con GET, HEAD, POST, PUT, PATCH, DELETE y OPTIONS y con alias (barra final, doble barra, mayúsculas, último carácter codificado): sin clave, 401 salvo `/healthz`. Cada ruta del proxy pasa por la guardia de salida con los mismos bytes que recibe el proveedor, y si la guardia bloquea no sale nada (invariante 12). Otro test usa claves canario y recorre 401, 400, 403, 404, 413, 415, 502 y 504, errores del proveedor y un proveedor que devuelve las cabeceras que recibió, con los loggers en `DEBUG`: ninguna clave aparece en logs, cuerpos ni cabeceras (invariante 13). Los ataques están en `tests/redteam/test_gateway.py`.
+
+## Puerta del panel (issue 53): configuración (11b-1)
+
+Primer PR de la puerta del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)). **No añade ninguna ruta ni toca `api/gate.py`**: la pasarela se comporta igual que antes. Solo deja lista la configuración y las piezas puras que usará la puerta en el PR 11b-2.
+
+- **Variables**: `ANTIFAZ_ADMIN_TOKEN` y `ANTIFAZ_TRUSTED_PROXIES` (tabla de arriba), en `config.py`, `.env.example` y la plantilla de `init` (un test impide que estas dos copias se separen). `check_safe_to_start` comprueba el token con las mismas reglas que la clave de la API, que sea distinto de ella y de las dos claves de proveedor (con `hmac.compare_digest`), y cada proxy con `ipaddress.ip_network(strict=True)`. Los mensajes nombran la variable, nunca el valor.
+- **Invariante 13**: `configured_keys` incluye el token, así que `KeyWatch`, `client_values_hold_a_key` y el 502 por clave repetida del proveedor lo vigilan igual que a las otras claves (`tests/redteam/test_admin_token_watched.py`).
+- **`antifaz init`** genera siempre el token, igual que la clave (`secrets.token_hex(32)`, y otra vez si saliera igual que la clave). Lo enseña con la misma regla que la clave: solo en un terminal o con `--show-key`. Dice la URL del panel (`http://localhost:8000/panel`) y cómo apagarlo: borrar la línea `ANTIFAZ_ADMIN_TOKEN` de `.env` y reiniciar.
+- **`antifaz doctor`** añade "panel: on/off" y "trusted proxies: N" (solo el número, nunca las IP).
+- **`antifaz.web`**, solo biblioteca estándar:
+  - `forwarded.py`: `client_ip` recorre `X-Forwarded-For` de derecha a izquierda y devuelve la primera IP que no es de un proxy de confianza. Si la conexión no llega de un proxy de confianza, la cabecera se ignora. Si todas son de confianza, la cabecera está vacía o una entrada recorrida no es una IP (puerto, `unknown`, `%zona`, corchetes, basura), se usa la IP de la conexión. Lo que hay a la izquierda del cliente ni se lee: así un cliente no puede añadir basura para que todos cuenten como la IP del proxy (y bloquear el login de todos). Varias cabeceras se unen en orden; las IPv6 con IPv4 dentro (`::ffff:a.b.c.d`) se leen como IPv4. `effective_scheme` solo acepta `X-Forwarded-Proto` de un proxy de confianza, una sola cabecera y exactamente `https` o `http`; si no, "no es HTTPS". `is_local_host` solo es cierto para `localhost`, `127.0.0.1` y `[::1]` (con o sin puerto): `localhost.evil.com` o `127.0.0.2`, no.
+  - `sessions.py`: `SessionStore` (interfaz) y `MemorySessionStore`. El identificador sale de `secrets.token_urlsafe(32)` y solo se guarda su huella SHA-256, con la hora de creación, el último uso y el token CSRF. 8 horas como máximo y 30 minutos sin uso, comprobado al consultar (sin temporizadores). `on_close` avisa con el motivo (`logout`, `expired`, `evicted`) para cortar las conexiones de «En directo». Con 32 sesiones, al crear otra se expulsa la más antigua: **el login nunca se rechaza porque esté lleno**.
+  - `login_limit.py`: como mucho 5 fallos en cualquier ventana de 60 s por IP, `Retry-After` redondeado hacia arriba, sin límite global. La tabla guarda 10 000 IP como mucho; al llenarse se van primero las caducadas y luego la del fallo más antiguo: una IP nueva siempre puede intentarlo.
+- **Tests**: unitarios de cada pieza, propiedades con Hypothesis (la IP elegida nunca está a la izquierda del primer no confiable desde la derecha; el esquema de un par no confiable es siempre el de la conexión; validez de la sesión con relojes aleatorios; nunca más de 5 fallos en 60 s) y un test de AST que comprueba que `antifaz/web` nunca llama a `get_secret_value` ni lee `admin_token` (en 11b-2 el panel solo recibirá la huella). `scripts/check_coverage.py` exige un 90 % en `web/`.
 
 ## Decisiones técnicas del issue 1
 
