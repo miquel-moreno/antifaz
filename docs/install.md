@@ -251,7 +251,10 @@ Antifaz speaks plain HTTP and listens only on `127.0.0.1`. To use it from other 
 1. Put a reverse proxy with HTTPS in front (Caddy, nginx, Traefik). Do not publish the port on `0.0.0.0`.
 2. Add the name that clients use to `ANTIFAZ_ALLOWED_HOSTS` in `.env` (for example `antifaz.example.internal`), then run `docker compose up -d --force-recreate`.
 3. The proxy must not save request bodies in its logs: they hold the personal data before it is masked.
-4. Only for the panel (v0.2): put the IP address or CIDR range of the proxy, as Antifaz sees it, in `ANTIFAZ_TRUSTED_PROXIES` (for example the Docker network of the proxy, `172.18.0.0/16`). Only then does the panel believe the proxy's `X-Forwarded-For` and `X-Forwarded-Proto`. Never `0.0.0.0/0`. Without a proxy, leave it empty.
+4. Only for the panel (v0.2): put the **exact IP address of the proxy**, as Antifaz sees it, in `ANTIFAZ_TRUSTED_PROXIES` (one address, for example `172.20.0.10`). In Compose, give the proxy container a fixed address (`ipv4_address` under its network) so it does not change. Only then does the panel believe the proxy's `X-Forwarded-For` and `X-Forwarded-Proto`.
+   - **Never** put the Docker gateway (`172.x.0.1`) or the whole Docker network: requests that come in through the published port arrive from the gateway, so any client could then fake those headers. Never `0.0.0.0/0`. `antifaz doctor` warns about ranges wider than /24.
+   - The proxy must add `X-Forwarded-For`. If it does not, every client looks like the proxy and they all share one login limit (5 failures a minute).
+   - Without a proxy, leave it empty.
 
 More details in [TECNICO.md](TECNICO.md#proxy-inverso-https) (in Spanish).
 
