@@ -6,7 +6,6 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 """
 
 import hmac
-import ipaddress
 import json
 import re
 from functools import lru_cache
@@ -15,6 +14,8 @@ from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from antifaz.trusted_networks import proxy_network_problem
 
 # Shortest gateway key accepted at startup (32 characters, about 190 bits if random).
 MIN_KEY_LENGTH = 32
@@ -162,19 +163,6 @@ def _admin_token_problem(token: str) -> str | None:
     return _gateway_key_problem(token)
 
 
-def _proxy_problem(entry: str) -> bool:
-    """True unless `entry` is one IP or a CIDR range without host bits, narrower than /0.
-
-    A zone id ("fe80::1%eth0") is refused: a peer address never carries one."""
-    if "%" in entry:
-        return True
-    try:
-        network = ipaddress.ip_network(entry, strict=True)
-    except ValueError:
-        return True
-    return network.prefixlen == 0  # 0.0.0.0/0 or ::/0 would trust every client
-
-
 def _same_secret(first: str, second: str) -> bool:
     return hmac.compare_digest(first.encode(), second.encode())
 
@@ -223,11 +211,10 @@ def check_safe_to_start(settings: Settings) -> None:
             "(http or https, no path and no trailing slash); '*' and 'null' are not accepted"
         )
     _check_admin_token(settings, gateway_key)
-    if any(_proxy_problem(entry) for entry in settings.trusted_proxies):
-        raise UnsafeConfigError(
-            "ANTIFAZ_TRUSTED_PROXIES only accepts IP addresses or CIDR ranges without host bits "
-            "(10.0.0.0/8, not 10.0.0.1/8); 0.0.0.0/0 and ::/0 are not accepted"
-        )
+    for entry in settings.trusted_proxies:
+        problem = proxy_network_problem(entry)  # a fixed message: never the entry itself
+        if problem:
+            raise UnsafeConfigError(f"ANTIFAZ_TRUSTED_PROXIES {problem}")
 
 
 @lru_cache

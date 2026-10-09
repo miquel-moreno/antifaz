@@ -9,21 +9,31 @@
 """
 
 import ipaddress
+import math
 from typing import Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from antifaz.web.forwarded import IPNetwork, client_ip, effective_scheme, parse_networks
+from antifaz.web.forwarded import (
+    MAX_HOPS,
+    IPNetwork,
+    _entry_address,
+    client_ip,
+    effective_scheme,
+    parse_networks,
+)
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.sessions import IDLE_SECONDS, MAX_AGE_SECONDS, MemorySessionStore
 
 TRUSTED_CHOICES = ["10.0.0.0/24", "192.168.7.0/24", "fd00::/64", "203.0.113.5"]
 TRUSTED_IPS = ["10.0.0.1", "10.0.0.200", "192.168.7.9", "fd00::9", "203.0.113.5", "::ffff:10.0.0.3"]
 UNTRUSTED_IPS = ["198.51.100.7", "1.1.1.1", "2001:db8::1", "10.0.1.1", "203.0.113.6"]
-GARBAGE = ["", " ", "unknown", "1.2.3.4:80", "[::1]", "fe80::1%eth0", "x", "1.2.3", "_h"]
+# Entries a proxy may write with a port, and real garbage.
+WITH_PORTS = ["10.0.0.1:80", "[fd00::9]:1", "198.51.100.7:443", "[2001:db8::2]:8443", "[::1]"]
+GARBAGE = ["", " ", "unknown", "1.2.3.4:0", "[::1", "fe80::1%eth0", "x", "1.2.3", "_h"]
 
-entries = st.lists(st.sampled_from(TRUSTED_IPS + UNTRUSTED_IPS + GARBAGE), max_size=8)
+entries = st.lists(st.sampled_from(TRUSTED_IPS + UNTRUSTED_IPS + WITH_PORTS + GARBAGE), max_size=20)
 trusted_sets = st.lists(st.sampled_from(TRUSTED_CHOICES), unique=True).map(parse_networks)
 peers = st.sampled_from([*TRUSTED_IPS, *UNTRUSTED_IPS, "testclient"])
 
@@ -49,6 +59,11 @@ def _trusted(text: str, trusted: tuple[IPNetwork, ...]) -> bool:
     return address is not None and any(address in network for network in trusted)
 
 
+def _entry_trusted(entry: str, trusted: tuple[IPNetwork, ...]) -> bool:
+    address = _entry_address(entry)
+    return address is not None and any(address in network for network in trusted)
+
+
 @settings(max_examples=2000, deadline=None)
 @given(peer=peers, headers=st.lists(entries, max_size=3), trusted=trusted_sets)
 def test_client_ip_is_the_peer_or_the_first_untrusted_entry_from_the_right(
@@ -62,16 +77,16 @@ def test_client_ip_is_the_peer_or_the_first_untrusted_entry_from_the_right(
     if not _trusted(peer, trusted):
         assert result == peer_text  # X-Forwarded-For from anyone else is ignored
         return
-    chain = ",".join(", ".join(values) for values in headers).split(",") if headers else []
-    first_untrusted = next(
-        (i for i in range(len(chain) - 1, -1, -1) if not _trusted(chain[i], trusted)), None
-    )
+    joined = ",".join(", ".join(values) for values in headers).split(",") if headers else []
+    # What the walk may look at: non-empty entries, at most MAX_HOPS from the right.
+    walked = [entry.strip(" \t") for entry in reversed(joined) if entry.strip(" \t")][:MAX_HOPS]
+    first_untrusted = next((e for e in walked if not _entry_trusted(e, trusted)), None)
     if result == peer_text:
         # Every entry walked was trusted, or the first one that was not is not an address.
-        assert first_untrusted is None or _address(chain[first_untrusted]) is None
+        assert first_untrusted is None or _entry_address(first_untrusted) is None
         return
     assert first_untrusted is not None
-    assert result == str(_address(chain[first_untrusted]))  # never further left
+    assert result == str(_entry_address(first_untrusted))  # never further left
     assert not _trusted(result, trusted)
 
 
@@ -119,7 +134,7 @@ def test_a_session_is_valid_exactly_while_young_and_recently_used(
         )
         if use:
             found = store.get(session_id)
-            assert (found is session) == expected
+            assert (found is not None and found.fingerprint == session.fingerprint) == expected
             if expected:
                 last_used = clock.now
         else:
@@ -158,3 +173,35 @@ def test_the_limiter_never_accepts_more_than_five_failures_a_minute(
     for times in recorded.values():
         for i in range(len(times) - 5):
             assert times[i + 5] - times[i] >= 60
+
+
+@settings(max_examples=500, deadline=None)
+@given(
+    attempts=st.lists(
+        st.tuples(
+            st.sampled_from(["192.0.2.1", "192.0.2.2", "2001:db8::1", "2001:db8::2"]),
+            st.floats(min_value=0, max_value=30, allow_nan=False),
+        ),
+        max_size=120,
+    )
+)
+def test_the_limiter_stays_right_when_failures_are_recorded_while_blocked(
+    attempts: list[tuple[str, float]],
+) -> None:
+    """A caller that records every failure, blocked or not: still blocked exactly while the
+    last 5 failures of the bucket are in the window, and never more than 5 times kept."""
+    clock = Clock()
+    limiter = FailureLimiter(clock=clock)
+    recorded: dict[str, list[float]] = {}
+    for ip, advance in attempts:
+        clock.now += advance
+        key = "2001:db8::/64" if ":" in ip else ip  # both IPv6 addresses share one /64
+        times = recorded.setdefault(key, [])
+        in_window = [t for t in times if clock.now - t < 60]
+        allowed, retry_after = limiter.allowed(ip)
+        assert allowed == (len(in_window) < 5)
+        if not allowed:
+            assert retry_after == max(1, math.ceil(in_window[-5] + 60 - clock.now))
+        limiter.record_failure(ip)
+        times.append(clock.now)
+    assert all(len(kept) <= 5 for kept in limiter._failures.values())

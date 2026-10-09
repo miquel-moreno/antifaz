@@ -442,3 +442,15 @@ def test_trusted_proxies_are_read_as_json_or_commas(
 
     assert settings.trusted_proxies == expected
     check_safe_to_start(_safe(trusted_proxies=settings.trusted_proxies))
+
+
+@pytest.mark.parametrize("entry", ["::ffff:10.0.0.5", "::ffff:10.0.0.0/104", "::ffff:0:0/96"])
+def test_ipv4_mapped_trusted_proxies_refuse_to_start(entry: str) -> None:
+    # Peers are read as IPv4, so a mapped range would never match: refused, not ignored.
+    with pytest.raises(UnsafeConfigError) as info:
+        check_safe_to_start(_safe(trusted_proxies=[entry]))
+
+    message = str(info.value)
+    assert message.startswith("ANTIFAZ_TRUSTED_PROXIES ")
+    assert "IPv4-mapped" in message
+    assert entry not in message

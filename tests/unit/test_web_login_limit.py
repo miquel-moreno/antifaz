@@ -3,9 +3,11 @@
 A fake clock drives the window: no test sleeps. The addresses are documentation ranges.
 """
 
+import time
+
 import pytest
 
-from antifaz.web.login_limit import FailureLimiter
+from antifaz.web.login_limit import FailureLimiter, bucket
 
 IP = "198.51.100.7"
 OTHER = "203.0.113.9"
@@ -164,3 +166,49 @@ def test_a_table_of_ten_thousand_never_blocks_a_new_address(clock: Clock) -> Non
 def test_bad_limits_are_refused(options: dict[str, float]) -> None:
     with pytest.raises(ValueError):
         FailureLimiter(**options)  # type: ignore[arg-type]
+
+
+def test_each_address_keeps_at_most_max_failures_times(limiter: FailureLimiter) -> None:
+    fail(limiter, IP, 50)  # even if the caller keeps recording while blocked
+
+    assert len(limiter._failures[IP]) == 5
+    assert limiter.allowed(IP) == (False, 60)
+
+
+def test_a_full_table_costs_little_per_new_address(clock: Clock) -> None:
+    # Generous bound: the old linear scan took seconds here; this takes milliseconds.
+    limiter = FailureLimiter(clock=clock)
+    for n in range(10_000):
+        limiter.record_failure(f"10.0.{n // 256}.{n % 256}")
+    started = time.perf_counter()
+    for n in range(10_000):
+        limiter.record_failure(f"10.1.{n // 256}.{n % 256}")
+    elapsed = time.perf_counter() - started
+
+    assert len(limiter) == 10_000
+    assert elapsed < 2.0
+
+
+def test_ipv6_clients_count_per_64_and_ipv4_per_address(limiter: FailureLimiter) -> None:
+    for host in range(1, 6):
+        limiter.record_failure(f"2001:db8:1:2::{host:x}")  # five addresses, one /64
+
+    assert not limiter.allowed("2001:db8:1:2:ffff::1")[0]
+    assert limiter.allowed("2001:db8:1:3::1") == (True, 0)  # the next /64
+    fail(limiter, "198.51.100.1", 5)
+    assert limiter.allowed("198.51.100.2") == (True, 0)
+    assert not limiter.allowed("::ffff:198.51.100.1")[0]  # mapped: the same IPv4 address
+
+
+@pytest.mark.parametrize(
+    ("ip", "expected"),
+    [
+        ("198.51.100.7", "198.51.100.7"),
+        ("2001:db8:1:2:3:4:5:6", "2001:db8:1:2::/64"),
+        ("::ffff:198.51.100.7", "198.51.100.7"),
+        ("testclient", "testclient"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_bucket(ip: str, expected: str) -> None:
+    assert bucket(ip) == expected

@@ -10,7 +10,10 @@ from typing import Any
 
 import pytest
 
+from antifaz import trusted_networks
 from antifaz.web.forwarded import (
+    MAX_FORWARDED_BYTES,
+    MAX_HOPS,
     client_ip,
     effective_scheme,
     is_local_host,
@@ -56,14 +59,42 @@ def test_parse_networks_reads_ips_and_ranges() -> None:
 
 
 @pytest.mark.parametrize(
-    "entry", ["10.0.0.1/8", "0.0.0.0/0", "::/0", "proxy", "", "1.2.3.4:80", "fe80::1%eth0"]
+    "entry",
+    [
+        "172.16.5.4/12",
+        "0.0.0.0/0",
+        "::/0",
+        "proxy",
+        "",
+        "1.2.3.4:80",
+        "fe80::1%eth0",
+        "::ffff:10.0.0.5",
+        "::ffff:10.0.0.0/104",
+    ],
 )
 def test_parse_networks_refuses_bad_entries_without_naming_them(entry: str) -> None:
     with pytest.raises(ValueError) as info:
         parse_networks([entry])
 
-    if entry:
-        assert entry not in str(info.value)
+    message = str(info.value)
+    assert message in (
+        trusted_networks.GARBAGE,
+        trusted_networks.EVERYTHING,
+        trusted_networks.MAPPED,
+    )
+    if entry not in ("", "0.0.0.0/0", "::/0"):  # the /0 rule names those two itself
+        assert entry not in message
+
+
+def test_parse_networks_and_the_settings_check_share_one_rule() -> None:
+    for entry in ["10.0.0.0/8", "10.0.0.1/8", "::ffff:10.0.0.5", "fd00::/64", "x", "::/0"]:
+        problem = trusted_networks.proxy_network_problem(entry)
+        try:
+            parse_networks([entry])
+        except ValueError as error:
+            assert str(error) == problem
+        else:
+            assert problem is None
 
 
 # --- peer_ip -------------------------------------------------------------------------------------
@@ -125,21 +156,47 @@ def test_all_trusted_gives_the_peer() -> None:
         "",
         " ",
         ",",
-        "198.51.100.7:4711",
-        "[2001:db8::1]",
-        "[2001:db8::1]:443",
+        "198.51.100.7:0",
+        "198.51.100.7:65536",
+        "198.51.100.7:",
+        "[2001:db8::1",
+        "[2001:db8::1]x",
+        "[198.51.100.7]",
+        "2001:db8::1:443:x",
         "unknown",
         "_hidden",
         "fe80::1%eth0",
         "198.51.100.7 extra",
         "198.51.100.07",
         "not-an-ip",
-        "198.51.100.7,",
-        "198.51.100.7, 10.0.0.9,",
     ],
 )
 def test_a_malformed_entry_where_proxies_write_gives_the_peer(header: str) -> None:
     assert client_ip(xff(header), TRUSTED) == PROXY
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("198.51.100.7:4711", "198.51.100.7"),
+        ("[2001:db8::1]", "2001:db8::1"),
+        ("[2001:db8::1]:443", "2001:db8::1"),
+        ("[::ffff:198.51.100.7]:443", "198.51.100.7"),
+        ("198.51.100.7,", "198.51.100.7"),
+        ("198.51.100.7, 10.0.0.9,", "198.51.100.7"),
+        ("198.51.100.7,, ,10.0.0.9", "198.51.100.7"),
+        ("1.1.1.1, 198.51.100.7:1, 10.0.0.9:65535", "198.51.100.7"),
+    ],
+)
+def test_ports_brackets_and_empty_elements_are_understood(header: str, expected: str) -> None:
+    assert client_ip(xff(header), TRUSTED) == expected
+
+
+def test_two_clients_behind_one_proxy_with_ports_are_different_buckets() -> None:
+    first = client_ip(xff("198.51.100.7:50000"), TRUSTED)
+    second = client_ip(xff("198.51.100.8:50000"), TRUSTED)
+    assert first == "198.51.100.7" and second == "198.51.100.8"
+    assert client_ip(xff("198.51.100.7:1"), TRUSTED) == client_ip(xff("198.51.100.7:2"), TRUSTED)
 
 
 def test_garbage_left_of_the_client_is_never_parsed() -> None:
@@ -149,6 +206,14 @@ def test_garbage_left_of_the_client_is_never_parsed() -> None:
 
 def test_spaces_and_tabs_around_entries_are_allowed() -> None:
     assert client_ip(xff("1.1.1.1 ,\t198.51.100.7 \t"), TRUSTED) == "198.51.100.7"
+
+
+def test_a_proxy_that_prepends_its_line_leaves_the_client_line_on_the_right() -> None:
+    # Documented behaviour: lines are read in order (RFC 9110), so if a proxy PREPENDS its own
+    # X-Forwarded-For line, the rightmost entry is the client's own line and is believed.
+    # Only proxies that append (nginx, Caddy, Traefik, HAProxy do) may be trusted.
+    prepended = xff("198.51.100.7", "6.6.6.6")
+    assert client_ip(prepended, TRUSTED) == "6.6.6.6"
 
 
 def test_repeated_headers_are_joined_in_order() -> None:
@@ -245,6 +310,7 @@ def test_request_host_is_the_single_host_header_lower_cased() -> None:
         "[::1]:8000",
         "localhost:1",
         "localhost:65535",
+        "[::1]:65535",
     ],
 )
 def test_local_hosts(host: str) -> None:
@@ -271,6 +337,10 @@ def test_local_hosts(host: str) -> None:
         "localhost:80:80",
         "localhost:8o",
         "localhost:123456",
+        "localhost:0",
+        "localhost:65536",
+        "localhost:99999",
+        "[::1]:0",
         "localhost:\u0661\u0662",  # Arabic-Indic digits are digits, but not a port
         "0.0.0.0",  # noqa: S104 - a Host value to judge, not a bind address
         "antifaz",
@@ -279,3 +349,67 @@ def test_local_hosts(host: str) -> None:
 )
 def test_not_local_hosts(host: str | None) -> None:
     assert not is_local_host(host)
+
+
+# --- Bounds: a huge or endlessly repeated header costs little (non-flaky: counts, not time) ----
+
+
+class CountingHeaders(list[tuple[bytes, bytes]]):
+    """A header list that counts how many items are read from it, from either end."""
+
+    def __init__(self, items: list[tuple[bytes, bytes]]) -> None:
+        super().__init__(items)
+        self.read = 0
+
+    def __reversed__(self):  # type: ignore[no-untyped-def]
+        for item in super().__reversed__():
+            self.read += 1
+            yield item
+
+
+def test_at_most_max_hops_entries_are_walked() -> None:
+    trusted_chain = ", ".join(["10.0.0.9"] * (MAX_HOPS - 1))
+    assert client_ip(xff(f"198.51.100.7, {trusted_chain}"), TRUSTED) == "198.51.100.7"
+    too_long = ", ".join(["10.0.0.9"] * MAX_HOPS)
+    # The client is past the walk: every entry looked at is trusted, so the peer is used.
+    assert client_ip(xff(f"198.51.100.7, {too_long}"), TRUSTED) == PROXY
+
+
+def test_a_2_mb_header_is_cut_to_its_rightmost_part_without_falling_back() -> None:
+    huge = "x" * (2 * 1024 * 1024) + ", 198.51.100.7, 10.0.0.9"
+    assert client_ip(xff(huge), TRUSTED) == "198.51.100.7"
+    # Cut in the middle of an entry: the half entry is not read, the rest still counts.
+    filler = ", ".join(["10.0.0.9"] * 3)
+    cut = "1" * (MAX_FORWARDED_BYTES - len(filler) - 4) + "9.1.1.1, " + filler
+    assert client_ip(xff(cut), TRUSTED) == PROXY  # all read entries trusted, half one dropped
+
+
+def test_text_beyond_the_byte_budget_is_never_read() -> None:
+    # Empty elements are skipped, so only the byte budget stops this walk before "6.6.6.6".
+    padded = "6.6.6.6" + "," * MAX_FORWARDED_BYTES + "10.0.0.9"
+    assert client_ip(xff(padded), TRUSTED) == PROXY
+    near = "6.6.6.6" + "," * (MAX_FORWARDED_BYTES - 100) + "10.0.0.9"
+    assert client_ip(xff(near), TRUSTED) == "6.6.6.6"
+
+
+def test_100000_repeated_headers_are_read_from_the_right_and_stop_early() -> None:
+    items = [(b"x-forwarded-for", b"6.6.6.6")] * 100_000 + [(b"x-forwarded-for", b"198.51.100.7")]
+    headers = CountingHeaders(items)
+    request = {"type": "http", "client": (PROXY, 1), "headers": headers}
+
+    assert client_ip(request, TRUSTED) == "198.51.100.7"
+    assert headers.read == 1
+
+    trusted_lines = CountingHeaders([(b"x-forwarded-for", b"10.0.0.9")] * 100_000)
+    request = {"type": "http", "client": (PROXY, 1), "headers": trusted_lines}
+    assert client_ip(request, TRUSTED) == PROXY
+    assert trusted_lines.read == MAX_HOPS
+
+
+def test_headers_given_as_any_iterable_are_read_too() -> None:
+    request = {
+        "type": "http",
+        "client": (PROXY, 1),
+        "headers": iter([(b"x-forwarded-for", b"1.1.1.1, 198.51.100.7")]),
+    }
+    assert client_ip(request, TRUSTED) == "198.51.100.7"

@@ -7,20 +7,29 @@ and 30 minutes without use. Expiry is checked when a session is looked up (no ti
 
 Whoever holds a live view of a session (the SSE stream of "En directo", in 11b-2) subscribes
 with on_close() and is told, with the fingerprint and the reason, when that session is closed:
-logout, expired or evicted.
+logout, expired or evicted. A subscriber that fails is logged (a fixed message and the error's
+type only) and the others are still told: closing a session never fails because of one.
 
-The store is bounded: when it is full, the OLDEST session is evicted (and its subscribers told)
-and the new one is ALWAYS created. A full store never refuses a login.
+The store is bounded: when it is full, the OLDEST session (by creation) is evicted, its
+subscribers told, and the new one is ALWAYS created. A full store never refuses a login.
+
+Concurrency: no lock. It is correct only while every call runs on the same event loop thread
+and nothing awaits in the middle of a call, so the 11b-2 routes that use it must be `async def`
+(a plain `def` route would run in a thread pool). on_close callbacks are synchronous and must not
+block: the SSE side only signals (asyncio.Event.set or loop.call_soon) and returns.
 
 Forbidden: keeping the raw session id in any attribute. Logging an id, a fingerprint or a CSRF
-token.
+token. Calling is_active() with a value the client sent (it takes a fingerprint, which only the
+server computes: a client value would skip the id-to-fingerprint step).
 """
 
+import dataclasses
 import hashlib
+import logging
 import secrets
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 type CloseReason = Literal["logout", "expired", "evicted"]
@@ -31,20 +40,23 @@ IDLE_SECONDS = 30 * 60
 MAX_SESSIONS = 32
 _ID_BYTES = 32
 
+logger = logging.getLogger("antifaz.panel")
+
 
 def fingerprint(session_id: str) -> str:
     """The SHA-256 of a session id, in hex: what the server stores instead of the id."""
     return hashlib.sha256(session_id.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Session:
-    """What the server keeps of a session. There is no field for the id itself."""
+    """What the server keeps of a session. There is no field for the id itself, and its repr
+    shows neither the fingerprint nor the CSRF token (a log line or a traceback must not)."""
 
-    fingerprint: str
+    fingerprint: str = field(repr=False)
     created: float
     last_used: float
-    csrf_token: str
+    csrf_token: str = field(repr=False)
 
     def valid_at(self, now: float) -> bool:
         """Younger than 8 hours and used in the last 30 minutes."""
@@ -66,8 +78,9 @@ class SessionStore(Protocol):
         """Close the session now and tell the subscribers. True if it existed."""
         ...
 
-    def is_active(self, fingerprint: str) -> bool:
-        """Whether the session is still live, without counting it as a use."""
+    def is_active(self, key: str) -> bool:
+        """Whether the session with this fingerprint is still live, without counting a use.
+        Forbidden: calling it with a client-supplied value."""
         ...
 
     def on_close(self, callback: CloseCallback) -> Callable[[], None]:
@@ -85,7 +98,7 @@ class MemorySessionStore:
             raise ValueError("max_sessions must be at least 1")
         self._clock = clock
         self._max_sessions = max_sessions
-        self._sessions: dict[str, Session] = {}  # fingerprint -> session, oldest first
+        self._sessions: dict[str, Session] = {}  # fingerprint -> session
         self._callbacks: list[CloseCallback] = []
 
     def __len__(self) -> int:
@@ -108,9 +121,13 @@ class MemorySessionStore:
         return session_id, session
 
     def get(self, session_id: str) -> Session | None:
-        session = self._live(fingerprint(session_id))
-        if session is not None:
-            session.last_used = self._clock()
+        now = self._clock()  # once: the check and the new last use see the same instant
+        key = fingerprint(session_id)
+        session = self._live(key, now)
+        if session is None:
+            return None
+        session = dataclasses.replace(session, last_used=now)
+        self._sessions[key] = session
         return session
 
     def delete(self, session_id: str, reason: CloseReason = "logout") -> bool:
@@ -120,8 +137,8 @@ class MemorySessionStore:
         self._close(key, reason)
         return True
 
-    def is_active(self, fingerprint: str) -> bool:
-        return self._live(fingerprint) is not None
+    def is_active(self, key: str) -> bool:
+        return self._live(key, self._clock()) is not None
 
     def on_close(self, callback: CloseCallback) -> Callable[[], None]:
         self._callbacks.append(callback)
@@ -132,11 +149,11 @@ class MemorySessionStore:
 
         return unsubscribe
 
-    def _live(self, key: str) -> Session | None:
+    def _live(self, key: str, now: float) -> Session | None:
         session = self._sessions.get(key)
         if session is None:
             return None
-        if not session.valid_at(self._clock()):
+        if not session.valid_at(now):
             self._close(key, "expired")
             return None
         return session
@@ -146,13 +163,11 @@ class MemorySessionStore:
             self._close(key, "expired")
 
     def _close(self, key: str, reason: CloseReason) -> None:
-        """Forget the session, then tell every subscriber, even if one of them fails."""
+        """Forget the session, then tell every subscriber. Never raises."""
         del self._sessions[key]
-        failure: Exception | None = None
         for callback in list(self._callbacks):
             try:
                 callback(key, reason)
-            except Exception as error:  # the others must still cut their streams
-                failure = failure or error
-        if failure is not None:
-            raise failure
+            except Exception as error:
+                # Only the type: an exception's text could carry the fingerprint.
+                logger.error("session close subscriber failed: %s", type(error).__name__)
