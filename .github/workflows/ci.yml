@@ -16,7 +16,7 @@ concurrency:
 # Actions are pinned by full commit SHA (a tag can be moved; a SHA cannot).
 # Dependabot keeps them up to date.
 env:
-  UV_VERSION: "0.12.20"
+  UV_VERSION: "0.12.23"
   PYTHON_VERSION: "3.12"
   ZIZMOR_VERSION: "1.30.1"
 

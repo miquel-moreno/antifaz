@@ -230,3 +230,15 @@ def test_dependabot_updates_the_base_image_digests_with_a_cooldown() -> None:
     assert docker["directory"] == "/"
     assert docker["schedule"]["interval"] == "weekly"
     assert docker["cooldown"]["default-days"] == 7
+
+
+def test_the_same_uv_version_everywhere() -> None:
+    """The image, CI and `make audit` use one uv version: a bump changes all three at once."""
+    image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)
+    ci = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    audit = re.findall(r"uvx --from uv==(\d+\.\d+\.\d+) uv audit", makefile)
+
+    assert len(image) == 1
+    assert len(audit) == 1
+    assert image[0] == ci["env"]["UV_VERSION"] == audit[0]
