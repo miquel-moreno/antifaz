@@ -925,3 +925,83 @@ def test_the_timeout_is_a_total_deadline_for_providers(
 )
 def test_userinfo_detection(url: str, expected: bool) -> None:
     assert doctor.has_userinfo(url) is expected
+
+
+# --- The panel (issue 53, ADR-0018) ------------------------------------------------------------
+
+
+def test_the_panel_is_off_without_a_token_and_no_proxy_is_trusted(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    write_env(tmp_path, canaries)
+    gateway(healthy())
+    result = run()
+    assert result.code == 0
+    assert "panel: off" in result.out
+    assert "trusted proxies: 0" in result.out
+
+
+def test_the_panel_on_and_the_proxies_are_counted_never_shown(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    token = secrets.token_hex(32)
+    proxies = ["172.31.250.0/24", "198.51.100.77"]
+    write_env(
+        tmp_path,
+        canaries,
+        ANTIFAZ_ADMIN_TOKEN=token,
+        ANTIFAZ_TRUSTED_PROXIES=",".join(proxies),
+    )
+    gateway(healthy())
+    result = run()
+    assert result.code == 0
+    assert "panel: on" in result.out
+    assert "trusted proxies: 2" in result.out
+    assert not result.holds_any([token, *proxies, "172.31.250", "198.51.100"])
+    assert not result.holds_any(canaries.all())
+
+
+def test_a_panel_token_equal_to_the_key_fails_without_showing_it(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    write_env(tmp_path, canaries, ANTIFAZ_ADMIN_TOKEN=canaries.gateway)
+    gateway(healthy())
+    result = run()
+    assert result.code == 1
+    assert "ANTIFAZ_ADMIN_TOKEN must differ from ANTIFAZ_API_KEY" in result.out
+    assert not result.holds_any(canaries.all())
+
+
+def test_a_bad_trusted_proxy_fails_without_showing_it(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any
+) -> None:
+    write_env(tmp_path, canaries, ANTIFAZ_TRUSTED_PROXIES="203.0.113.9/24")
+    gateway(healthy())
+    result = run()
+    assert result.code == 1
+    assert "ANTIFAZ_TRUSTED_PROXIES" in result.out
+    assert not result.holds_any(["203.0.113.9"])
+
+
+@pytest.mark.parametrize(
+    ("proxies", "wide"),
+    [
+        ("172.31.250.7", 0),
+        ("172.31.250.0/24,2001:db8:5:6::/64", 0),
+        ("172.31.0.0/16", 1),
+        ("172.31.0.0/16,2001:db8:5::/48,198.51.100.77", 2),
+    ],
+)
+def test_wide_trusted_ranges_are_warned_about_by_count_only(
+    tmp_path: Path, canaries: Keys, gateway: Any, run: Any, proxies: str, wide: int
+) -> None:
+    write_env(tmp_path, canaries, ANTIFAZ_TRUSTED_PROXIES=proxies)
+    gateway(healthy())
+    result = run()
+    assert result.code == 0
+    if wide:
+        assert f"warning: {wide} trusted proxy range(s) wider than /24" in result.out
+        assert "exact IP of the proxy" in result.out
+    else:
+        assert "wider than" not in result.out
+    assert not result.holds_any(["172.31", "2001:db8", "198.51.100", "/16", "/48"])

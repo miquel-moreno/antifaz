@@ -5,6 +5,7 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 (ADR-0015). Its messages name the variable and the reason, never the value.
 """
 
+import hmac
 import json
 import re
 from functools import lru_cache
@@ -13,6 +14,8 @@ from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from antifaz.trusted_networks import proxy_network_problem
 
 # Shortest gateway key accepted at startup (32 characters, about 190 bits if random).
 MIN_KEY_LENGTH = 32
@@ -69,6 +72,13 @@ class Settings(BaseSettings):
     # Browser origins allowed on the proxy routes. Empty: every request with Origin is refused.
     allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # Token that opens the panel at /panel (ADR-0018). Unset: the panel does not exist. Same
+    # rules as the gateway key, and it must differ from it and from the provider keys.
+    admin_token: SecretStr | None = None
+    # IPs or CIDR ranges of the reverse proxy in front of the panel (ADR-0018): only a request
+    # from one of them may set X-Forwarded-For / X-Forwarded-Proto for the panel. Empty: none.
+    trusted_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
     # Names and addresses with a NER model in separate processes (ADR-0016). Off by default;
     # when on, the model in ner_model_dir must match detect/ner/manifest.json or the gateway
     # refuses to start (antifaz.detect.ner.setup).
@@ -82,7 +92,7 @@ class Settings(BaseSettings):
     # workers, workers x threads should not pass the number of cores.
     ner_torch_threads: int = Field(default=0, ge=0, le=256)
 
-    @field_validator("allowed_hosts", "allowed_origins", mode="before")
+    @field_validator("allowed_hosts", "allowed_origins", "trusted_proxies", mode="before")
     @classmethod
     def _split_list(cls, value: object) -> object:
         """A JSON list ('[ "a", "b" ]') or a comma-separated one ("a, b", "[::1],localhost")."""
@@ -144,6 +154,39 @@ def _host_problem(host: str) -> bool:
     return "*" in host and not _SUBDOMAIN_WILDCARD.fullmatch(host)
 
 
+def _admin_token_problem(token: str) -> str | None:
+    """Why `token` cannot be the admin token, or None if it can (same rules as the gateway key).
+
+    An empty value is a mistake, not "no panel": to turn the panel off, the variable goes."""
+    if not token:
+        return "is empty: set a value or remove the variable"
+    return _gateway_key_problem(token)
+
+
+def _same_secret(first: str, second: str) -> bool:
+    return hmac.compare_digest(first.encode(), second.encode())
+
+
+def _check_admin_token(settings: Settings, gateway_key: str) -> None:
+    if settings.admin_token is None:
+        return
+    token = settings.admin_token.get_secret_value()
+    problem = _admin_token_problem(token)
+    if problem:
+        raise UnsafeConfigError(f"ANTIFAZ_ADMIN_TOKEN {problem}")
+    if _same_secret(token, gateway_key):
+        raise UnsafeConfigError(
+            "ANTIFAZ_ADMIN_TOKEN must differ from ANTIFAZ_API_KEY: the API key must not "
+            "open the panel"
+        )
+    for variable, secret in (
+        ("ANTIFAZ_OPENAI_API_KEY", settings.openai_api_key),
+        ("ANTIFAZ_ANTHROPIC_API_KEY", settings.anthropic_api_key),
+    ):
+        if secret is not None and _same_secret(token, secret.get_secret_value()):
+            raise UnsafeConfigError(f"ANTIFAZ_ADMIN_TOKEN must differ from {variable}")
+
+
 def check_safe_to_start(settings: Settings) -> None:
     """Raise UnsafeConfigError if the gateway would start open. Messages never carry values."""
     gateway_key = settings.antifaz_api_key.get_secret_value() if settings.antifaz_api_key else ""
@@ -167,6 +210,11 @@ def check_safe_to_start(settings: Settings) -> None:
             "ANTIFAZ_ALLOWED_ORIGINS only accepts exact origins written as scheme://host[:port] "
             "(http or https, no path and no trailing slash); '*' and 'null' are not accepted"
         )
+    _check_admin_token(settings, gateway_key)
+    for entry in settings.trusted_proxies:
+        problem = proxy_network_problem(entry)  # a fixed message: never the entry itself
+        if problem:
+            raise UnsafeConfigError(f"ANTIFAZ_TRUSTED_PROXIES {problem}")
 
 
 @lru_cache

@@ -100,6 +100,7 @@ Para qué sirve cada opción:
 - Para saltarte un proveedor, pulsa Enter cuando `init` pida su clave. Sus rutas responderán 503.
 - Si ya existe un `.env`, `init` te pide que escribas `yes` y guarda una copia llamada `.env.bak-AAAAMMDD-HHMMSS`.
 - Para scripts y CI está `--non-interactive` con `--openai-key-env VAR` o `--anthropic-key-env VAR` (el **nombre** de una variable de entorno, nunca la clave). Mira `antifaz init --help`.
+- `init` también escribe siempre `ANTIFAZ_ADMIN_TOKEN`, un segundo valor aleatorio para el panel del navegador en `http://localhost:8000/panel` (llega en la v0.2). Se enseña una vez, como la clave, y **no** es la clave que usan tus clientes. **Para apagar el panel**, borra la línea `ANTIFAZ_ADMIN_TOKEN` de `.env` y reinicia (`docker compose up -d --force-recreate`).
 
 > En Git Bash de Windows, usa PowerShell para esta orden: Git Bash cambia rutas como `/work` y la orden falla.
 
@@ -119,6 +120,8 @@ Después abre `.env` con un editor de texto y cambia:
   - bash: `openssl rand -hex 32`
   - PowerShell: `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`
 - `ANTIFAZ_OPENAI_API_KEY` y/o `ANTIFAZ_ANTHROPIC_API_KEY`: las claves de tus proveedores. Borra la línea del proveedor que no uses (sus rutas responden 503).
+- `ANTIFAZ_ADMIN_TOKEN`: el token del panel del navegador (llega en la v0.2). Otro valor aleatorio, hecho igual y distinto de `ANTIFAZ_API_KEY`. Si no quieres el panel, borra la línea.
+- `ANTIFAZ_TRUSTED_PROXIES`: déjala vacía salvo que Antifaz esté detrás de un proxy inverso (mira [Usarlo desde otras máquinas](#usarlo-desde-otras-máquinas)).
 
 Reglas para los valores: sin espacios, sin comillas y sin `$` (Compose intentaría sustituirlo). En Windows, guarda el archivo en **UTF-8** (mira [Problemas frecuentes](#7-problemas-frecuentes)).
 
@@ -248,6 +251,10 @@ Antifaz habla HTTP sin cifrar y solo escucha en `127.0.0.1`. Para usarlo desde o
 1. Pon delante un proxy inverso con HTTPS (Caddy, nginx, Traefik). No publiques el puerto en `0.0.0.0`.
 2. Añade a `ANTIFAZ_ALLOWED_HOSTS` en `.env` el nombre que usan los clientes (por ejemplo `antifaz.ejemplo.internal`) y ejecuta `docker compose up -d --force-recreate`.
 3. El proxy no debe guardar los cuerpos de las peticiones en sus logs: llevan los datos personales antes de enmascararse.
+4. Solo para el panel (v0.2): pon en `ANTIFAZ_TRUSTED_PROXIES` la **IP exacta del proxy**, tal como la ve Antifaz (una sola dirección, por ejemplo `172.20.0.10`). En Compose, dale al contenedor del proxy una dirección fija (`ipv4_address` en su red) para que no cambie. Solo así el panel se fía de las cabeceras `X-Forwarded-For` y `X-Forwarded-Proto` del proxy.
+   - **Nunca** pongas la puerta de enlace de Docker (`172.x.0.1`) ni la red de Docker entera: las peticiones que entran por el puerto publicado llegan desde esa puerta de enlace, así que cualquier cliente podría falsear esas cabeceras. Nunca `0.0.0.0/0`. `antifaz doctor` avisa de los rangos más anchos que /24.
+   - El proxy tiene que añadir `X-Forwarded-For`. Si no lo añade, todos los clientes parecen el proxy y comparten un único límite de intentos de login (5 fallos por minuto).
+   - Sin proxy, déjala vacía.
 
 Más detalles en [TECNICO.md](TECNICO.md#proxy-inverso-https).
 

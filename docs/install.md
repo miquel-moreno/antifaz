@@ -100,6 +100,7 @@ Why each option:
 - To skip a provider, press Enter when `init` asks for its key. Its routes then answer 503.
 - If a `.env` already exists, `init` asks you to type `yes`, and keeps a copy called `.env.bak-YYYYMMDD-HHMMSS`.
 - For scripts and CI there is `--non-interactive` with `--openai-key-env VAR` or `--anthropic-key-env VAR` (the **name** of an environment variable, never the key). See `antifaz init --help`.
+- `init` also always writes `ANTIFAZ_ADMIN_TOKEN`, a second random value for the browser panel at `http://localhost:8000/panel` (arriving in v0.2). It is shown once, like the key, and it is **not** the key your clients use. **To turn the panel off**, delete the `ANTIFAZ_ADMIN_TOKEN` line from `.env` and restart (`docker compose up -d --force-recreate`).
 
 > In Git Bash on Windows, use PowerShell for this command: Git Bash changes paths like `/work` and the command fails.
 
@@ -119,6 +120,8 @@ Then open `.env` in a text editor and change:
   - bash: `openssl rand -hex 32`
   - PowerShell: `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`
 - `ANTIFAZ_OPENAI_API_KEY` and/or `ANTIFAZ_ANTHROPIC_API_KEY`: your provider keys. Delete the line of a provider you do not use (its routes answer 503).
+- `ANTIFAZ_ADMIN_TOKEN`: the token of the browser panel (arriving in v0.2). Another random value, made the same way and different from `ANTIFAZ_API_KEY`. If you do not want the panel, delete the line.
+- `ANTIFAZ_TRUSTED_PROXIES`: leave it empty unless Antifaz is behind a reverse proxy (see [Use it from other machines](#use-it-from-other-machines)).
 
 Rules for the values: no spaces, no quotes and no `$` (Compose would try to replace it). On Windows, save the file as **UTF-8** (see [Troubleshooting](#7-troubleshooting)).
 
@@ -248,6 +251,10 @@ Antifaz speaks plain HTTP and listens only on `127.0.0.1`. To use it from other 
 1. Put a reverse proxy with HTTPS in front (Caddy, nginx, Traefik). Do not publish the port on `0.0.0.0`.
 2. Add the name that clients use to `ANTIFAZ_ALLOWED_HOSTS` in `.env` (for example `antifaz.example.internal`), then run `docker compose up -d --force-recreate`.
 3. The proxy must not save request bodies in its logs: they hold the personal data before it is masked.
+4. Only for the panel (v0.2): put the **exact IP address of the proxy**, as Antifaz sees it, in `ANTIFAZ_TRUSTED_PROXIES` (one address, for example `172.20.0.10`). In Compose, give the proxy container a fixed address (`ipv4_address` under its network) so it does not change. Only then does the panel believe the proxy's `X-Forwarded-For` and `X-Forwarded-Proto`.
+   - **Never** put the Docker gateway (`172.x.0.1`) or the whole Docker network: requests that come in through the published port arrive from the gateway, so any client could then fake those headers. Never `0.0.0.0/0`. `antifaz doctor` warns about ranges wider than /24.
+   - The proxy must add `X-Forwarded-For`. If it does not, every client looks like the proxy and they all share one login limit (5 failures a minute).
+   - Without a proxy, leave it empty.
 
 More details in [TECNICO.md](TECNICO.md#proxy-inverso-https) (in Spanish).
 
