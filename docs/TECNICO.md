@@ -49,7 +49,7 @@ El flujo a mano con `docker compose up -d --build` se comprobó el 2026-10-01 de
 | Decisión | Por qué |
 |---|---|
 | Dos etapas: uv construye un virtualenv con `uv sync --frozen --no-dev --no-editable` y la imagen final solo copia ese virtualenv | En la imagen no hay uv, ni código fuente, ni herramientas de desarrollo, ni compiladores. Las versiones son exactamente las de `uv.lock` |
-| Imágenes base fijadas por digest: `python:3.12-slim` (3.12.15-slim-trixie, `sha256:a6e34c59…edc11b1`, resuelto el 2026-10-09) y `ghcr.io/astral-sh/uv:0.12.20` (`sha256:100047e7…cd2d8`, resuelto el 2026-10-01), con `docker buildx imagetools inspect` | Una etiqueta se puede mover a otra imagen; un digest no. Dependabot (ecosistema `docker`, con `cooldown` de 7 días) propone las actualizaciones. Las líneas `FROM` van escritas enteras (sin `ARG`) para que Dependabot las entienda; las dos de Python tienen que ser iguales (lo comprueba un test) |
+| Imágenes base fijadas por digest: `python:3.12-slim` (3.12.15-slim-trixie, `sha256:a6e34c59…edc11b1`, resuelto el 2026-10-09) y `ghcr.io/astral-sh/uv:0.12.23` (`sha256:61d393e4…a55b21`, resuelto el 2026-10-12), con `docker buildx imagetools inspect` | Una etiqueta se puede mover a otra imagen; un digest no. Dependabot (ecosistema `docker`, con `cooldown` de 7 días) propone las actualizaciones. Las líneas `FROM` van escritas enteras (sin `ARG`) para que Dependabot las entienda; las dos de Python tienen que ser iguales (lo comprueba un test) |
 | Sin el extra `ner` | torch y el modelo añaden más de 1 GB. Habrá una etiqueta aparte `-ner` (con `--extra ner` y el modelo montado de solo lectura) más adelante |
 | Usuario fijo sin privilegios `10001:10001`, sin home ni shell de login | Si alguien consigue ejecutar código dentro, no es root. El UID fijo permite usarlo en `securityContext` de Kubernetes |
 | El virtualenv es de root y no se puede escribir; bytecode compilado al construir y `PYTHONDONTWRITEBYTECODE=1` | Nada se escribe en tiempo de ejecución: la imagen funciona con el sistema de archivos de solo lectura |
@@ -729,7 +729,7 @@ Primer PR de la puerta del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)).
 |---|---|
 | Acciones de GitHub fijadas por SHA completo y permisos mínimos | Una etiqueta (`v4`) se puede mover a otro código; un SHA no. Incidentes reales: tj-actions (2025) y Trivy (2026) |
 | `persist-credentials: false` en cada checkout | El token de GitHub no queda guardado en el disco del runner para pasos posteriores |
-| `uv audit` fijado a uv 0.12.20 | Comprueba vulnerabilidades conocidas (OSV) del `uv.lock`. Es un comando experimental de uv: si cambia, se ajusta aquí |
+| `uv audit` fijado a uv 0.12.23 | Comprueba vulnerabilidades conocidas (OSV) del `uv.lock`. Es un comando experimental de uv: si cambia, se ajusta aquí |
 | Comprobación de licencias propia (`scripts/check_licenses.py`) | Regla sencilla y auditable: nada GPL/AGPL/no comercial en lo que se distribuye; copyleft débil solo si está anotado en `docs/licencias.md` |
 | Cobertura ≥ 90 % en `detect`, `vault`, `mask`, `guard`, `restore`, `providers` y `api` (`scripts/check_coverage.py`) | Son las piezas de privacidad: un fallo ahí significa datos personales enviados |
 | CodeQL solo cuando el repo sea público | En repos privados necesita GitHub Advanced Security (de pago); mientras tanto el job se salta en lugar de fallar |
@@ -748,7 +748,7 @@ Primer PR de la puerta del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)).
 | `concurrency` por rama; en un PR, un push nuevo cancela la ejecución anterior (en `main` nunca) | No se acumulan ejecuciones viejas y en `main` siempre termina la de cada commit |
 | Dependabot con `cooldown` de 7 días en `uv`, `github-actions` y `docker` | Una versión secuestrada suele detectarse y retirarse en pocos días; las actualizaciones de seguridad no esperan |
 | `CODEOWNERS` con líneas propias para `pyproject.toml`, `uv.lock`, `.github/` y `Dockerfile` | Son los archivos que cambian qué código se ejecuta en la CI o se distribuye |
-| Herramientas de la CI con versión exacta (uv 0.12.20, zizmor 1.30.1, acciones por SHA) | La misma entrada da siempre la misma herramienta; se actualizan a propósito |
+| Herramientas de la CI con versión exacta (uv 0.12.23, zizmor 1.30.1, acciones por SHA) | La misma entrada da siempre la misma herramienta; se actualizan a propósito |
 | Sin topes superiores (`<3`) en las dependencias de `pyproject.toml`; versiones exactas solo en `uv.lock` | Antifaz también es una librería: un tope impide a quien la instala recibir arreglos de seguridad y crea conflictos con otros paquetes. Lo reproducible es el `uv.lock`. Quitar `python-stdnum<3` no cambió ninguna versión bloqueada. `requires-python` mantiene `<3.13` porque la CI solo prueba 3.12 |
 
 ## Telemetría
