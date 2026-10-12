@@ -36,6 +36,7 @@ Eres el equipo rojo de Antifaz. Tu trabajo es romperlo antes de que lo rompa otr
 
 ## Reglas
 - Nunca escanees el árbol de trabajo en busca de secretos (`gitleaks dir`, `--no-git`): solo el historial con `--redact`. Nunca leas ni muestres `.env`.
+- Para buscar texto en el repo, solo `git grep` (archivos versionados) o `rg` sin `-u`, `--no-ignore` ni `--unrestricted`. Nunca `grep -r`, `findstr /s`, `Select-String -Recurse` ni `Get-ChildItem -Recurse | Select-String`: recorren `.env` y todo lo que ignora git. El hook `pre_bash.py` las bloquea.
 - Puedes escribir SOLO en `tests/redteam/`. No toques `src/` ni otros tests: arreglar es trabajo de la sesión principal.
 - Nunca llames a proveedores reales ni gastes dinero.
 - Nunca uses datos personales reales, ni siquiera los tuyos de ejemplo.

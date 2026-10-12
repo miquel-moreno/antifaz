@@ -73,6 +73,53 @@ BLOCKED = [
 ]
 
 
+# Recursive text searches read every file under the folder, .env and other ignored files
+# included, and print the matching lines. Searches go through git grep (tracked files only)
+# or rg, which skips what .gitignore lists unless told otherwise (-u, --no-ignore...).
+SEARCH_ADVICE = (
+    "Recursive searches over the folder read .env and other ignored files. Use git grep "
+    "(tracked files only) or rg without -u/--no-ignore/--unrestricted."
+)
+# grep, egrep, fgrep, zgrep with -r/-R (also inside a group like -rn) or --recursive.
+# git grep is not matched: its parts are skipped in recursive_search().
+SEARCH_TOOL = r"(^|[\s;&|(/\\'\"])"  # start of a command word, also after a path
+ARGS = r"(\s[^|;&\n]*)?\s"  # any arguments before the flag we look for
+RECURSIVE_GREP = (
+    rf"{SEARCH_TOOL}[efz]?grep(\.exe)?['\"]?{ARGS}"
+    r"(-[a-z]*r[a-z]*(?![\w-])|--(dereference-)?recursive\b)"
+)
+# rg without the .gitignore filter. Case-sensitive: rg -U is multiline, not unrestricted.
+RG_UNFILTERED = (
+    rf"{SEARCH_TOOL}rg(\.exe)?['\"]?{ARGS}"
+    r"(-[a-zA-Z]*u[a-zA-Z]*(?![\w-])|--(no-ignore[\w-]*|unrestricted)\b)"
+)
+# Windows: findstr /s, Select-String -Recurse, and Get-ChildItem -Recurse piped into
+# Select-String (aliases gci, ls, dir, sls). The pipe is part of the pattern on purpose.
+RECURSE = r"-r(e(c(u(r(s(e)?)?)?)?)?)?\b"  # -r, -rec, -Recurse...
+PS_RECURSIVE_SEARCH = [
+    r"\bfindstr(\.exe)?\b[^|;&\n]*\s/s\b",
+    r"\b(select-string|sls)\b[^|;\n]*\s-recurse\b",
+    rf"\b(get-childitem|gci|ls|dir)\b[^;\n]*\s{RECURSE}[^;\n]*\|\s*(select-string|sls)\b",
+]
+# find piped into grep, or find -exec grep.
+FIND_GREP = r"\bfind\b[^;\n]*(-exec(dir)?\s+[efz]?grep\b|\|\s*xargs\b[^;\n]*\b[efz]?grep\b)"
+
+
+def recursive_search(command: str) -> bool:
+    """True if the line runs a recursive text search that ignores .gitignore."""
+    for pattern in [*PS_RECURSIVE_SEARCH, FIND_GREP]:
+        if re.search(pattern, command, flags=re.IGNORECASE):
+            return True
+    for part in re.split(r"[;&|\n]", command):
+        if re.search(rf"{GIT}grep\b", part, flags=re.IGNORECASE):
+            continue
+        if re.search(RECURSIVE_GREP, part, flags=re.IGNORECASE):
+            return True
+        if re.search(RG_UNFILTERED, part):
+            return True
+    return False
+
+
 def strip_messages(command: str) -> str:
     """Remove commit/PR message arguments so text inside them is not matched."""
     return re.sub(
@@ -106,6 +153,9 @@ def main() -> int:
         if re.search(pattern, checked, flags=re.IGNORECASE):
             print(f"Blocked by .claude/hooks/pre_bash.py: {reason}", file=sys.stderr)
             return 2
+    if recursive_search(checked):
+        print(f"Blocked by .claude/hooks/pre_bash.py: {SEARCH_ADVICE}", file=sys.stderr)
+        return 2
     if unredacted_gitleaks(checked):
         print(
             "Blocked by .claude/hooks/pre_bash.py: gitleaks without --redact prints the secrets "
