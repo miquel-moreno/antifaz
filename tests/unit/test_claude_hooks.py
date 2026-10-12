@@ -134,3 +134,67 @@ def test_the_shell_hook_also_watches_powershell() -> None:
     matchers = [entry["matcher"] for entry in settings["hooks"]["PreToolUse"]]
 
     assert any({"Bash", "PowerShell"} <= set(m.split("|")) for m in matchers)
+
+
+# Recursive text searches read .env and other ignored files (found on 2026-10-12: a
+# `grep -rn` over the working tree went through .env; nothing matched, so nothing printed).
+@pytest.mark.parametrize(
+    "command",
+    [
+        'grep -rn "82049" .',
+        "grep -r KEY .",
+        "grep -R KEY src",
+        "grep -nri key .",
+        "grep --recursive key .",
+        "grep --dereference-recursive key .",
+        "egrep -r key .",
+        "fgrep -r key .",
+        "zgrep -r key .",
+        "/usr/bin/grep -r key .",
+        "cd src && grep -rl key",
+        "rg --no-ignore key",
+        "rg --no-ignore-vcs key",
+        "rg -u key",
+        "rg -uu key",
+        "rg -nu key",
+        "rg --unrestricted key",
+        "findstr /s /i key *",
+        "Select-String -Pattern key -Path * -Recurse",
+        "Get-ChildItem -Recurse | Select-String key",
+        "gci -r -File | sls key",
+        "ls -Recurse | Select-String -Pattern key",
+        "dir -rec | sls key",
+        "Get-ChildItem . -Recurse -Include *.py | Select-String key",
+        "find . -type f -exec grep -l key {} +",
+        "find . -name '*.py' | xargs grep key",
+    ],
+)
+def test_recursive_searches_are_blocked(command: str) -> None:
+    result = run_hook(json.dumps({"tool_input": {"command": command}}))
+
+    assert result.returncode == 2
+    assert "git grep" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git grep -n "82049"',
+        "git grep -niE 'name' -- docs",
+        "git -C ../antifaz grep -n key",
+        "git grep --recurse-submodules key",
+        "rg key",
+        "rg -n key src",
+        "rg --hidden key",
+        "rg -U 'a\nb' src",
+        "grep key file.txt",
+        "grep -n -E 'a|b' file.txt",
+        "uv run pytest -q | grep passed",
+        "gh pr checks 58 | grep -i fail",
+        "Select-String -Path README.md -Pattern key",
+        "Get-ChildItem -Recurse -Filter *.py",
+        "find . -name '*.py'",
+    ],
+)
+def test_safe_searches_pass(command: str) -> None:
+    assert verdict(command) == 0

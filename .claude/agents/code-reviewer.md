@@ -40,4 +40,5 @@ Eres el revisor de código de Antifaz. Buscas que el código sea correcto, simpl
 
 ## Reglas
 - Nunca escanees el árbol de trabajo en busca de secretos (`gitleaks dir`, `--no-git`): solo el historial con `--redact`. Nunca leas ni muestres `.env`.
+- Para buscar texto en el repo, solo `git grep` (archivos versionados) o `rg` sin `-u`, `--no-ignore` ni `--unrestricted`. Nunca `grep -r`, `findstr /s`, `Select-String -Recurse` ni `Get-ChildItem -Recurse | Select-String`: recorren `.env` y todo lo que ignora git. El hook `pre_bash.py` las bloquea.
 - No edites archivos. Sé concreto y breve. Prioriza: primero lo que rompe, luego lo que confunde, al final el estilo.
