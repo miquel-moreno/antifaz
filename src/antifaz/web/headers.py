@@ -15,15 +15,21 @@ CONTENT_SECURITY_POLICY = (
 _FEATURES_OFF = (
     "accelerometer",
     "autoplay",
+    "bluetooth",
     "camera",
     "display-capture",
     "geolocation",
     "gyroscope",
+    "hid",
     "magnetometer",
     "microphone",
     "midi",
     "payment",
+    "publickey-credentials-get",
+    "screen-wake-lock",
+    "serial",
     "usb",
+    "xr-spatial-tracking",
 )
 PERMISSIONS_POLICY = ", ".join(f"{feature}=()" for feature in _FEATURES_OFF)
 

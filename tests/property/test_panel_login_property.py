@@ -10,13 +10,12 @@
 """
 
 import json
-from collections.abc import Iterator
 
-import pytest
 from fastapi.testclient import TestClient
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
+from antifaz.api.app import create_app
 from antifaz.api.gate import is_panel_path
 from antifaz.web.cookies import cookie_name, read_session_cookie
 from antifaz.web.csrf import is_same_origin
@@ -27,8 +26,7 @@ from tests.integration.panel_client import (
     LOCAL_COOKIE,
     LOCAL_URL,
     SECURE_COOKIE,
-    log_in,
-    panel_client,
+    panel_settings,
 )
 
 # --- is_panel_path --------------------------------------------------------------------------
@@ -85,25 +83,27 @@ def test_the_origin_check_accepts_exactly_scheme_and_host(
 # --- The whole door -------------------------------------------------------------------------
 
 SESSION_ROUTES = {("/panel", "GET")}
+SUCCESSFUL_LOGIN = ("/panel/login", "POST", "right", True)
 
 
-@pytest.fixture(scope="module")
-def door() -> Iterator[tuple[TestClient, dict[str, str]]]:
-    with panel_client(HTTPS_URL) as client:
-        yield client, {"https": log_in(client), "http": _local_id(client)}
+def _fresh_door() -> TestClient:
+    """A client on a new app: new sessions and a new limiter, so earlier examples (failed
+    logins, sessions closed by a later login) never change what this one sees."""
+    return TestClient(create_app(panel_settings()), base_url=HTTPS_URL, follow_redirects=False)
 
 
-def _local_id(client: TestClient) -> str:
+def _session_id(client: TestClient, base: str) -> str:
     response = client.post(
-        f"{LOCAL_URL}/panel/login",
+        f"{base}/panel/login",
         content=json.dumps({"token": ADMIN_TOKEN}),
         headers={
             "Sec-Fetch-Site": "same-origin",
-            "Origin": LOCAL_URL,
+            "Origin": base,
             "Content-Type": "application/json",
         },
     )
     client.cookies.clear()
+    assert response.status_code == 200
     return response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
 
 
@@ -125,12 +125,16 @@ requests = st.tuples(
 
 
 @settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@example(("https", "/panel/login", "POST", [], "right", True))
+@example(("http", "/panel/login", "POST", [(LOCAL_COOKIE, "valid-http")], "right", True))
+@example(("https", "/panel", "GET", [(SECURE_COOKIE, "valid-https")], "wrong", False))
+@example(("http", "/panel", "GET", [(LOCAL_COOKIE, "valid-http")], "wrong", False))
 @given(requests)
 def test_the_door_never_lets_in_without_a_session_and_always_sends_the_headers(
-    door: tuple[TestClient, dict[str, str]],
     sent: tuple[str, str, str, list[tuple[str, str]], str, bool],
 ) -> None:
-    client, valid = door
+    client = _fresh_door()
+    valid = {"https": _session_id(client, HTTPS_URL), "http": _session_id(client, LOCAL_URL)}
     scheme, path, method, cookies, token, same_origin = sent
     base = HTTPS_URL if scheme == "https" else LOCAL_URL
     values = {"valid-https": valid["https"], "valid-http": valid["http"], "junk": "junk", "": ""}
@@ -145,13 +149,18 @@ def test_the_door_never_lets_in_without_a_session_and_always_sends_the_headers(
     response = client.request(
         method, f"{base}{path}", content=body.get(token, "{"), headers=headers
     )
-    client.cookies.clear()
 
     for name, value in SECURITY_HEADERS:
         assert response.headers.get_list(name) == [value], name
-    if "set-cookie" in response.headers:
-        assert (path, method, token, same_origin) == ("/panel/login", "POST", "right", True)
+    # A cookie is set exactly by a successful login (the limiter is fresh: it always succeeds).
+    successful = (path, method, token, same_origin) == SUCCESSFUL_LOGIN
+    assert ("set-cookie" in response.headers) == successful
+    if successful:
         assert response.status_code == 200
-    if (path, method) in SESSION_ROUTES and response.is_success:
-        mine = [value for name, value in cookies if name == cookie_name(scheme)]
-        assert mine == [f"valid-{scheme}"]
+    mine = [value for name, value in cookies if name == cookie_name(scheme)]
+    if (path, method) in SESSION_ROUTES:
+        # 2xx exactly with one cookie of the request's scheme NAME holding a live session id.
+        # The id itself is not tied to a scheme (one store): what the scheme decides is which
+        # cookie name is read, so a live id under the other scheme's name never counts.
+        live = len(mine) == 1 and mine[0] in ("valid-https", "valid-http")
+        assert response.is_success == live

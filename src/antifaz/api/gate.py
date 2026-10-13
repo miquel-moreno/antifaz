@@ -3,11 +3,14 @@
 Every path needs the Antifaz key except the exact paths in PUBLIC_PATHS. Then, on the same
 requests: a browser `Origin` is refused unless configured (403) and a request that may carry a
 body must be `application/json` in UTF-8 (415). There are no WebSocket routes: any WebSocket is
-closed. The decision uses `scope["path"]`, the same decoded path the router uses.
+closed. The key rules decide on `scope["path"]`, decoded; under a non-empty root_path
+PUBLIC_PATHS no longer matches and the key is asked for (fails closed).
 
-The panel (ADR-0018) is decided here too, by path and before anything else: every path that
-is_panel_path() accepts goes to the panel's own door and never to the key rules below, and no
-other path ever reaches that door. Without ANTIFAZ_ADMIN_TOKEN there is no door and every panel
+The panel (ADR-0018) is decided here too, before anything else, on route_path(): the decoded
+path without the ASGI root_path, the exact path Starlette's router matches. Every path that
+is_panel_path() accepts there goes to the panel's own door and never to the key rules below, so
+a root_path cannot make a panel route reachable without the door; no other path ever reaches
+that door. Without ANTIFAZ_ADMIN_TOKEN there is no door and every panel
 path gets a fixed 404 without asking for the key. This module never imports antifaz.web: the app
 hands the door in as a callable.
 
@@ -38,6 +41,22 @@ BODILESS_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _JSON = "application/json"
 _UTF8 = frozenset({"charset=utf-8", 'charset="utf-8"'})
 _POLICY_VIOLATION = 1008  # WebSocket close code
+
+
+def route_path(scope: Scope) -> str:
+    """`scope["path"]` without the ASGI root_path, as Starlette's router matches it.
+
+    Same rule as starlette's get_route_path(): only a root_path followed by "/" (or the end)
+    is removed; anything else leaves the path as it is."""
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path", "")
+    if not root_path or not path.startswith(root_path):
+        return path
+    if path == root_path:
+        return ""
+    if path[len(root_path)] == "/":
+        return path[len(root_path) :]
+    return path
 
 
 def is_panel_path(path: str) -> bool:
@@ -111,7 +130,7 @@ class GateMiddleware:
             # No WebSocket routes: close before anything reaches the app, key or not.
             await send({"type": "websocket.close", "code": _POLICY_VIOLATION})
             return
-        if is_panel_path(scope["path"]):
+        if is_panel_path(route_path(scope)):
             # Never the API key rules: the key does not open the panel (ADR-0018).
             if self._panel is None:
                 await error_response(PanelNotFoundError())(scope, receive, send)

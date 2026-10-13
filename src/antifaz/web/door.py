@@ -1,9 +1,12 @@
 """The panel's door (ADR-0018): every /panel* request goes through here, and only those.
 
-api/gate.py hands over every path that is_panel_path() accepts and never asks for the API key
-on them: the key does not open the panel. In this order:
+api/gate.py hands over every path that is_panel_path() accepts (on the path without the ASGI
+root_path, which is also what this door compares) and never asks for the API key on them: the
+key does not open the panel. In this order:
 
-1. Every answer of /panel*, errors included, gets the security headers (headers.py).
+1. Every answer of /panel*, errors included, gets the security headers (headers.py). An
+   unexpected error inside gets a fixed 500 JSON with them, if nothing was sent yet, and is
+   raised again so the server still logs it once.
 2. HTTPS or localhost: the scheme is scope["scheme"], or X-Forwarded-Proto from a trusted
    proxy (forwarded.effective_scheme); "localhost" is decided by the Host header. Plain HTTP
    from any other host gets a fixed 403 page and goes no further (no login, no cookie).
@@ -28,7 +31,8 @@ from dataclasses import dataclass, field
 from fastapi.responses import HTMLResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from antifaz.api.errors import PanelUnauthorizedError, error_response
+from antifaz.api.errors import PanelInternalError, PanelUnauthorizedError, error_response
+from antifaz.api.gate import route_path
 from antifaz.web.cookies import read_session_cookie
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
 from antifaz.web.headers import with_security_headers
@@ -63,20 +67,26 @@ class PanelContext:
 
 
 def panel_context(scope: Scope) -> PanelContext:
-    context = scope["state"][CONTEXT_KEY]
-    if not isinstance(context, PanelContext):  # pragma: no cover - only the door sets it
-        raise TypeError("the panel door did not run")
+    """What the door decided. Without it (a route reached some other way), 401: fail closed."""
+    context = scope.get("state", {}).get(CONTEXT_KEY)
+    if not isinstance(context, PanelContext):
+        raise PanelUnauthorizedError()
     return context
 
 
-def _secured(send: Send) -> Send:
-    async def secured_send(message: Message) -> None:
+class _SecuredSend:
+    """`send` with the security headers on the response start; remembers if it started."""
+
+    def __init__(self, send: Send) -> None:
+        self._send = send
+        self.started = False
+
+    async def __call__(self, message: Message) -> None:
         if message["type"] == "http.response.start":
+            self.started = True
             headers = with_security_headers(message.get("headers", []))
             message = {**message, "headers": headers}
-        await send(message)
-
-    return secured_send
+        await self._send(message)
 
 
 class PanelDoor:
@@ -85,25 +95,34 @@ class PanelDoor:
         self._state = state
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        send = _secured(send)
+        secured = _SecuredSend(send)
+        try:
+            await self._handle(scope, receive, secured)
+        except Exception:
+            if not secured.started:
+                await error_response(PanelInternalError())(scope, receive, secured)
+            raise  # the server logs it once; nothing more is sent (the response started)
+
+    async def _handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = route_path(scope)
         scheme = effective_scheme(scope, self._state.trusted_proxies)
         host = request_host(scope)
         if scheme != "https" and not is_local_host(host):
             await HTMLResponse(HTTPS_ONLY_PAGE, status_code=403)(scope, receive, send)
             return
         context = PanelContext(scheme, host, read_session_cookie(scope["headers"], scheme))
-        if (scope["path"], scope["method"]) not in PUBLIC_ROUTES:
+        if (path, scope["method"]) not in PUBLIC_ROUTES:
             session = self._state.sessions.get(context.session_id) if context.session_id else None
             if session is None:
-                await self._no_session(scope)(scope, receive, send)
+                await self._no_session(path, scope["method"])(scope, receive, send)
                 return
             context = PanelContext(scheme, host, context.session_id, session)
         scope.setdefault("state", {})[CONTEXT_KEY] = context
         await self.app(scope, receive, send)
 
     @staticmethod
-    def _no_session(scope: Scope) -> Response:
-        if scope["path"] == "/panel" and scope["method"] == "GET":
+    def _no_session(path: str, method: str) -> Response:
+        if path == "/panel" and method == "GET":
             # A fixed relative URL: never built from the Host header or the request.
             return Response(status_code=303, headers={"Location": LOGIN_PATH})
         return error_response(PanelUnauthorizedError())

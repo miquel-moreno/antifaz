@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from antifaz.api.errors import (
     AppError,
     CsrfRejectedError,
+    PanelInternalError,
     PanelLoginFailedError,
     PanelNotFoundError,
     PanelUnauthorizedError,
@@ -141,6 +142,22 @@ def test_a_value_that_is_not_a_session_id_is_no_session(value: str) -> None:
     assert read_session_cookie(_cookie_headers(line), "http") is None
 
 
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (f'antifaz_session="{SESSION_ID}"', None),  # quoted: not an id
+        (f"antifaz_session={SESSION_ID},x", None),  # a comma is not part of an id
+        (f"antifaz_session = {SESSION_ID}", None),  # spaces around "=": another name
+        (f"antifaz_session= {SESSION_ID}", None),  # a space before the value
+        (f"antifaz_session={SESSION_ID}\t", SESSION_ID),  # trailing whitespace is dropped
+        (f" \tantifaz_session={SESSION_ID} ", SESSION_ID),  # and leading too
+        (f"antifaz_session={SESSION_ID}=", None),  # "=" is not part of an id
+    ],
+)
+def test_cookie_value_variants_are_pinned(line: str, expected: str | None) -> None:
+    assert read_session_cookie(_cookie_headers(line), "http") == expected
+
+
 def test_no_cookie_header_is_no_session() -> None:
     assert read_session_cookie(_cookie_headers(), "https") is None
     assert read_session_cookie(_cookie_headers("antifaz_session"), "http") is None
@@ -170,7 +187,19 @@ def test_every_adr_header_is_there_with_its_value() -> None:
     assert headers["Cross-Origin-Resource-Policy"] == "same-origin"
     assert headers["Cache-Control"] == "no-store"
     policy = headers["Permissions-Policy"]
-    for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
+    for feature in (
+        "camera",
+        "microphone",
+        "geolocation",
+        "payment",
+        "usb",
+        "bluetooth",
+        "hid",
+        "serial",
+        "screen-wake-lock",
+        "publickey-credentials-get",
+        "xr-spatial-tracking",
+    ):
         assert f"{feature}=()" in policy
     assert re.fullmatch(r"[a-z-]+=\(\)(, [a-z-]+=\(\))*", policy)
 
@@ -325,19 +354,37 @@ def test_too_many_attempts_carries_retry_after() -> None:
 
 
 @pytest.mark.parametrize(
-    ("error", "status"),
+    ("error", "status", "body"),
     [
-        (PanelNotFoundError(), 404),
-        (PanelUnauthorizedError(), 401),
-        (PanelLoginFailedError(), 401),
-        (CsrfRejectedError(), 403),
+        (PanelNotFoundError(), 404, b'{"error":{"code":"not_found","message":"no such route"}}'),
+        (
+            PanelUnauthorizedError(),
+            401,
+            b'{"error":{"code":"panel_unauthorized","message":"log in to the panel first"}}',
+        ),
+        (
+            PanelLoginFailedError(),
+            401,
+            b'{"error":{"code":"login_failed","message":"login failed"}}',
+        ),
+        (
+            CsrfRejectedError(),
+            403,
+            b'{"error":{"code":"csrf_rejected","message":"request refused: it must come from '
+            b"the panel's own page, as JSON\"}}",
+        ),
+        (
+            PanelInternalError(),
+            500,
+            b'{"error":{"code":"internal_error","message":"internal error"}}',
+        ),
     ],
 )
-def test_panel_errors_have_fixed_status_and_body(error: AppError, status: int) -> None:
+def test_panel_errors_have_fixed_status_and_body(error: AppError, status: int, body: bytes) -> None:
     response = error_response(error)
 
     assert response.status_code == status
-    assert response.body == error_response(type(error)()).body  # type: ignore[call-arg]
+    assert response.body == body
 
 
 def test_the_handler_sends_the_error_headers() -> None:

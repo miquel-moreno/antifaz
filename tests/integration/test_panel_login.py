@@ -196,6 +196,18 @@ def test_without_the_token_every_panel_path_is_404_with_or_without_the_key(
                 }
 
 
+def test_without_the_token_the_panel_404_is_byte_identical_to_an_unknown_route() -> None:
+    auth = {"Authorization": f"Bearer {GATEWAY_KEY}"}
+    for client in gateway_client(FakeUpstream(both_echo)):
+        unknown = client.get("/v1/unknown", headers=auth)
+        for headers in ({}, auth):
+            panel = client.get("/panel", headers=headers)
+
+            assert panel.status_code == unknown.status_code == 404
+            assert panel.content == unknown.content
+            assert panel.headers["content-type"] == unknown.headers["content-type"]
+
+
 def test_without_the_token_the_routes_are_the_old_ones() -> None:
     for client in gateway_client(FakeUpstream(both_echo)):
         assert registered_paths(client.app) == {  # type: ignore[arg-type]
@@ -235,3 +247,36 @@ def test_without_the_token_antifaz_web_is_never_imported() -> None:
 
 def test_gateway_settings_have_no_panel() -> None:
     assert gateway_settings().admin_token is None
+
+
+def test_panel_routes_reached_without_the_door_fail_closed() -> None:
+    """Defence in depth: if a panel route were ever reached around the door, it answers 401
+    instead of running (or of a 500)."""
+    import hashlib
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from antifaz.api.errors import register_error_handlers
+    from antifaz.web.door import PanelState
+    from antifaz.web.login_limit import FailureLimiter
+    from antifaz.web.routes import build_router
+    from antifaz.web.sessions import MemorySessionStore
+
+    state = PanelState(
+        token_fingerprint=hashlib.sha256(b"x").digest(),
+        trusted_proxies=(),
+        sessions=MemorySessionStore(),
+        limiter=FailureLimiter(),
+    )
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(build_router(state))
+    client = TestClient(app, base_url=LOCAL_URL)
+
+    for method, path in (("GET", "/panel"), ("POST", "/panel/login")):
+        response = client.request(method, path, json={"token": "x"})
+
+        assert response.status_code == 401, path
+        assert response.json()["error"]["code"] == "panel_unauthorized"
+    assert len(state.sessions) == 0  # type: ignore[arg-type]

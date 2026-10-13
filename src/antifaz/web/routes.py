@@ -3,7 +3,10 @@
 - GET /panel/login: the login page (public).
 - POST /panel/login: the admin token as JSON (public, CSRF layer 3). In this order:
   1. Same origin and JSON (csrf.py), else 403; it does not count as a failure.
-  2. The body, read as a stream and never past 1 KiB, with or without Content-Length.
+  2. The body, read as a stream and never past 1 KiB, with or without Content-Length, within
+     LOGIN_BODY_SECONDS (5 s). A client that disconnects or is too slow gets the same fixed
+     401 and it does NOT count: nobody's token was tried, and a slow line must not lock the
+     administrator out.
   3. The attempt limit for the client's address (forwarded.client_ip), BEFORE comparing:
      blocked is 429 with Retry-After, even with the right token, and nothing is compared.
   4. Exactly {"token": "<at most 256 characters>"} (no repeated keys), and its SHA-256
@@ -15,8 +18,9 @@
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
-nothing awaits between reading the limiter and writing the store (step 3 to 5 is plain code).
-tests/unit/test_web_concurrency.py keeps it that way.
+in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code).
+tests/unit/test_web_concurrency.py checks both: every route is a coroutine function, and no
+await, async for or async with comes after `limiter.allowed(` in `login`.
 
 Forbidden: logging or echoing the token, the body, the session id or the CSRF token. Comparing
 before checking the limit. Answering a failed login with anything that depends on why.
@@ -26,8 +30,10 @@ import hashlib
 import hmac
 import json
 
+import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from starlette.requests import ClientDisconnect
 
 from antifaz.api.errors import (
     CsrfRejectedError,
@@ -42,6 +48,7 @@ from antifaz.web.forwarded import client_ip
 from antifaz.web.pages import LOGIN_PAGE, panel_page
 
 MAX_LOGIN_BODY = 1024
+LOGIN_BODY_SECONDS = 5
 MAX_TOKEN_CHARACTERS = 256
 
 
@@ -96,8 +103,12 @@ def build_router(state: PanelState) -> APIRouter:
         headers = request.scope["headers"]
         if not (is_json(headers) and is_same_origin(headers, context.scheme, context.host)):
             raise CsrfRejectedError()
-        body = await _read_capped(request)
-        # From here on, no await: the limiter and the store are read and written in one go.
+        try:
+            with anyio.fail_after(LOGIN_BODY_SECONDS):
+                body = await _read_capped(request)
+        except (ClientDisconnect, TimeoutError):
+            raise PanelLoginFailedError() from None  # not counted: no token was tried
+        # From here to the response, no await: the limiter and the store change in one go.
         address = client_ip(request.scope, state.trusted_proxies)
         allowed, wait = state.limiter.allowed(address)
         if not allowed:

@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -26,6 +27,8 @@ from pydantic import SecretStr
 from starlette.types import Message
 
 from antifaz.api.app import create_app
+from antifaz.web import routes
+from antifaz.web.headers import SECURITY_HEADERS
 from antifaz.web.pages import HTTPS_ONLY_PAGE, LOGIN_PAGE
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream
 from tests.integration.panel_client import (
@@ -46,6 +49,17 @@ from tests.integration.panel_client import (
 from tests.redteam.conftest import both_echo
 
 LOGIN_FAILED = b'{"error":{"code":"login_failed","message":"login failed"}}'
+
+
+def _assert_security_headers(headers: Any) -> None:
+    """Every ADR-0018 header, once, with its value (httpx headers or raw ASGI pairs)."""
+    if isinstance(headers, list):
+        pairs = [(k.decode("latin-1").lower(), v.decode("latin-1")) for k, v in headers]
+        for name, value in SECURITY_HEADERS:
+            assert [v for k, v in pairs if k == name.lower()] == [value], name
+        return
+    for name, value in SECURITY_HEADERS:
+        assert headers.get_list(name) == [value], name
 
 
 def _login_at(client: TestClient, base: str, token: str = ADMIN_TOKEN, **headers: str) -> Any:
@@ -326,6 +340,7 @@ def test_the_sixth_failure_is_429_and_compare_digest_is_not_called_while_blocked
         assert response.json()["error"]["code"] == "too_many_attempts"
         assert 1 <= int(response.headers["retry-after"]) <= 60
         assert "set-cookie" not in response.headers
+        _assert_security_headers(response.headers)
     assert len(calls) == 5  # never compared while blocked
 
 
@@ -583,3 +598,189 @@ def test_secrets_never_reach_a_log_and_only_travel_where_they_must(
         assert csrf not in str(response.headers.raw)
     assert page.text.count(csrf) == 1
     assert csrf not in str(page.headers.raw)
+
+
+# --- Review fixes: disconnects, slow bodies, root_path, 500s, shared counters ---------------
+
+
+def _run_raw(
+    app: FastAPI,
+    method: str,
+    path: str,
+    headers: list[tuple[bytes, bytes]],
+    receive: Any,
+    root_path: str = "",
+) -> list[Message]:
+    """One request through the whole app with a hand-made scope; the messages it sent."""
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": root_path,
+        "headers": [(b"host", b"localhost"), *headers],
+        "client": ("127.0.0.1", 50000),
+        "server": ("localhost", 80),
+    }
+    sent: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def run() -> None:
+        # An error is what the server would log; the test checks what was sent.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(app(scope, receive, send), timeout=10)
+
+    asyncio.run(run())
+    return sent
+
+
+def _status(sent: list[Message]) -> int | None:
+    starts = [m["status"] for m in sent if m["type"] == "http.response.start"]
+    return starts[0] if starts else None
+
+
+LOCAL_LOGIN_HEADERS = [
+    (b"origin", b"http://localhost"),
+    (b"sec-fetch-site", b"same-origin"),
+    (b"content-type", b"application/json"),
+]
+
+
+def _right_login(app: FastAPI) -> int | None:
+    body = json.dumps({"token": ADMIN_TOKEN}).encode()
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return _status(_run_raw(app, "POST", "/panel/login", LOCAL_LOGIN_HEADERS, receive))
+
+
+def _queue_receive(messages: list[Message], then_wait: bool) -> Any:
+    async def receive() -> Message:
+        if messages:
+            return messages.pop(0)
+        if then_wait:
+            await asyncio.sleep(3600)  # a slow client: the next piece never comes
+        return {"type": "http.disconnect"}
+
+    return receive
+
+
+def test_a_client_that_disconnects_mid_body_gets_no_500_and_does_not_count(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(panel_settings())
+    for _ in range(6):  # more than the limit: if counted, the right login below would be 429
+        messages: list[Message] = [
+            {"type": "http.request", "body": b'{"tok', "more_body": True},
+            {"type": "http.disconnect"},
+        ]
+        receive = _queue_receive(messages, then_wait=False)
+
+        sent = _run_raw(app, "POST", "/panel/login", LOCAL_LOGIN_HEADERS, receive)
+
+        assert _status(sent) != 500
+
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert _right_login(app) == 200
+
+
+def test_a_body_that_never_ends_is_cut_by_the_deadline_without_counting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(routes, "LOGIN_BODY_SECONDS", 0.05)
+    app = create_app(panel_settings())
+    for _ in range(6):
+        messages: list[Message] = [
+            {"type": "http.request", "body": b'{"token": "', "more_body": True}
+        ]
+        receive = _queue_receive(messages, then_wait=True)
+
+        sent = _run_raw(app, "POST", "/panel/login", LOCAL_LOGIN_HEADERS, receive)
+
+        assert _status(sent) == 401
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        assert body == LOGIN_FAILED
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        _assert_security_headers(start["headers"])
+
+    assert _right_login(app) == 200  # six slow bodies did not count
+
+
+def test_the_body_deadline_is_five_seconds() -> None:
+    assert routes.LOGIN_BODY_SECONDS == 5
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected"),
+    [
+        ("GET", "/x/panel", 303),
+        ("GET", "/x/panel/login", 200),
+        ("POST", "/x/panel/login", 403),  # CSRF: the API key is no login
+        ("GET", "/x/panel/other", 401),
+    ],
+)
+def test_under_a_root_path_the_panel_still_goes_through_its_door(
+    method: str, path: str, expected: int
+) -> None:
+    app = create_app(panel_settings())
+    auth = [(b"authorization", f"Bearer {GATEWAY_KEY}".encode())]
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    sent = _run_raw(app, method, path, auth, receive, root_path="/x")
+
+    assert _status(sent) == expected
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    _assert_security_headers(start["headers"])  # the door answered, not the router alone
+
+
+def _boom(*args: Any, **kwargs: Any) -> Any:
+    raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize("target", ["panel_page", "_token"])
+def test_a_500_inside_the_panel_carries_the_panel_headers(
+    monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    for client in clients(HTTPS_URL):
+        cookie = {"Cookie": f"{SECURE_COOKIE}={log_in(client)}"}
+        monkeypatch.setattr(routes, target, _boom)
+
+        if target == "panel_page":
+            response = client.get("/panel", headers=cookie)
+        else:
+            response = post_login(client)
+
+        assert response.status_code == 500
+        assert response.json() == {"error": {"code": "internal_error", "message": "internal error"}}
+        _assert_security_headers(response.headers)
+        assert "boom" not in response.text
+
+
+def test_put_on_the_panel_with_a_session_is_405_with_the_headers(client: TestClient) -> None:
+    cookie = {"Cookie": f"{SECURE_COOKIE}={log_in(client)}"}
+
+    response = client.put("/panel", headers=cookie)
+
+    assert response.status_code == 405
+    _assert_security_headers(response.headers)
+
+
+def test_behind_a_trusted_proxy_without_forwarded_for_every_client_shares_one_counter() -> None:
+    """Documented limit: a trusted proxy that does not add X-Forwarded-For makes every client
+    look like the proxy, so five failures from anyone lock everyone out for a minute."""
+    settings = panel_settings(trusted_proxies=["10.0.0.2"])
+    for client in clients(LAN_URL, settings=settings, peer=("10.0.0.2", 4000)):
+        proto = {"X-Forwarded-Proto": "https", "Origin": "https://antifaz.example"}
+        for _ in range(5):
+            headers = login_headers(client, **proto)
+            assert post_login(client, token="wrong", headers=headers).status_code == 401
+        assert post_login(client, headers=login_headers(client, **proto)).status_code == 429

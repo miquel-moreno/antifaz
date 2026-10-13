@@ -158,7 +158,12 @@ class UpstreamEchoedKeyError(BadUpstreamResponseError):
 
 
 class PanelNotFoundError(AppError):
-    """Any /panel* path while ANTIFAZ_ADMIN_TOKEN is unset: the same answer as an unknown route."""
+    """Any /panel* path while ANTIFAZ_ADMIN_TOKEN is unset.
+
+    Byte-identical in status and body to the router's 404 for an unknown route. That does not
+    hide whether the panel is on: with the token set, the public GET /panel/login answers 200
+    to anyone, so an anonymous client can always tell. It only keeps the "off" answer plain.
+    """
 
     status_code = 404
     code = "not_found"
@@ -194,6 +199,16 @@ class TooManyAttemptsError(AppError):
             "too many failed logins: wait and try again",
             headers={"Retry-After": str(retry_after)},
         )
+
+
+class PanelInternalError(AppError):
+    """An unexpected error inside /panel*: a fixed body, never the error's text."""
+
+    status_code = 500
+    code = "internal_error"
+
+    def __init__(self) -> None:
+        super().__init__("internal error")
 
 
 class CsrfRejectedError(AppError):
