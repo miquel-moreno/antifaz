@@ -12,7 +12,7 @@
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
   <a href="https://github.com/miquel-moreno/antifaz/pkgs/container/antifaz"><img src="https://img.shields.io/badge/ghcr.io-antifaz-2496ED?logo=docker&amp;logoColor=white" alt="Docker image on ghcr.io"></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/OpenAI%20%7C%20Anthropic-compatible-412991" alt="OpenAI and Anthropic compatible"></a>
-  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0"><img src="https://img.shields.io/badge/status-beta-orange" alt="Status: beta"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/status-beta-orange" alt="Status: beta"></a>
   <a href="https://github.com/miquel-moreno/antifaz/stargazers"><img src="https://img.shields.io/github/stars/miquel-moreno/antifaz?style=flat&amp;logo=github" alt="GitHub stars"></a>
 </p>
 
@@ -40,7 +40,7 @@ Designed and built end to end. AI-assisted development under my specification an
 ---
 
 > [!WARNING]
-> **Beta: [v0.1.0 is released](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0).** Antifaz **does not guarantee finding all personal data**: it only protects what it detects, and the [benchmark](docs/benchmark.md) shows how much slips through. Test it with your own kind of texts before using it with real data.
+> **Beta: [v0.1.1 is released](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1).** Antifaz **does not guarantee finding all personal data**: it only protects what it detects, and the [benchmark](docs/benchmark.md) shows how much slips through. Test it with your own kind of texts before using it with real data.
 
 ## Quick start
 
@@ -56,7 +56,7 @@ docker compose up -d
 docker compose exec antifaz antifaz doctor   # checks .env and the gateway
 ```
 
-`init` asks for your provider keys without showing them, writes `.env` and makes a new random `ANTIFAZ_API_KEY`, which it shows once: your clients use it. No key goes on the command line. `--rm` deletes the container and its log (which holds that key); `--user` makes `.env` yours. The downloaded `docker-compose.yml` pins the image by digest. Running `init` in the container needs v0.2.0 or later: the 0.1.0 image can only serve.
+`init` asks for your provider keys without showing them, writes `.env` and makes a new random `ANTIFAZ_API_KEY`, which it shows once: your clients use it. No key goes on the command line. `--rm` deletes the container and its log (which holds that key); `--user` makes `.env` yours. The downloaded `docker-compose.yml` pins the image by digest. Running `init` in the container needs v0.2.0 or later: the 0.1.x images can only serve.
 
 `doctor` says what is wrong, if anything: the setting to fix (never its value), whether the gateway answers, and the next steps. Add `--providers` to also test your provider keys: it only lists their models, which is free.
 
@@ -69,7 +69,7 @@ docker compose up -d
 docker compose exec antifaz antifaz doctor
 ```
 
-**With v0.1.0 (today), by hand:**
+**With v0.1.1 (today), by hand:**
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -78,20 +78,20 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: a random value, for example the output of `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY and/or ANTIFAZ_ANTHROPIC_API_KEY: your provider keys
 #   (delete the line of a provider you do not use: its route answers 503)
-docker compose up -d                 # pulls ghcr.io/miquel-moreno/antifaz:0.1.0
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
+docker compose up -d                 # pulls ghcr.io/miquel-moreno/antifaz:0.1.1
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 Antifaz refuses to start while a key still has its example value (`change-me...`); `docker compose logs antifaz` says which variable to fix, never its value. It listens on `127.0.0.1` only: to reach it from other machines, put a reverse proxy with HTTPS in front ([details](docs/TECNICO.md)).
 
-**Without Compose**, the same hardening in one `docker run` (works with 0.1.0 too):
+**Without Compose**, the same hardening in one `docker run` (works with 0.1.1 too):
 
 ```bash
 docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
-  ghcr.io/miquel-moreno/antifaz:0.1.0
+  ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
 
 Then point your client at Antifaz instead of the provider, with your `ANTIFAZ_API_KEY` as the key (the provider keys stay in `.env`):

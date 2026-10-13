@@ -17,7 +17,7 @@ services:
     # In the repository: the last release, or ANTIFAZ_VERSION=X.Y.Z. The copy attached to each
     # GitHub release is pinned by digest instead (image: ...:X.Y.Z@sha256:...).
     # No `command:`: the image runs `antifaz serve` by default.
-    image: ghcr.io/miquel-moreno/antifaz:${ANTIFAZ_VERSION:-0.1.0}
+    image: ghcr.io/miquel-moreno/antifaz:${ANTIFAZ_VERSION:-0.1.1}
     env_file:
       # ANTIFAZ_ENV_FILE lets the end-to-end tests use a throwaway file instead of your .env.
       - path: ${ANTIFAZ_ENV_FILE:-.env}

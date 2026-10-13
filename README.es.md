@@ -12,7 +12,7 @@
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
   <a href="https://github.com/miquel-moreno/antifaz/pkgs/container/antifaz"><img src="https://img.shields.io/badge/ghcr.io-antifaz-2496ED?logo=docker&amp;logoColor=white" alt="Imagen Docker en ghcr.io"></a>
   <a href="#puesta-en-marcha"><img src="https://img.shields.io/badge/compatible%20con-OpenAI%20%7C%20Anthropic-412991" alt="Compatible con OpenAI y Anthropic"></a>
-  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0"><img src="https://img.shields.io/badge/estado-beta-orange" alt="Estado: beta"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/estado-beta-orange" alt="Estado: beta"></a>
   <a href="https://github.com/miquel-moreno/antifaz/stargazers"><img src="https://img.shields.io/github/stars/miquel-moreno/antifaz?style=flat&amp;logo=github&amp;label=estrellas" alt="Estrellas en GitHub"></a>
 </p>
 
@@ -42,7 +42,7 @@ Lo he diseñado y desarrollado de principio a fin. Desarrollo asistido por IA ba
 ---
 
 > [!WARNING]
-> **Beta: [ya está publicada la v0.1.0](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0).** Antifaz **no garantiza encontrar todos los datos personales**: solo protege lo que detecta, y el [benchmark](docs/benchmark.md) dice cuánto se escapa. Pruébalo con tu tipo de textos antes de usarlo con datos reales.
+> **Beta: [ya está publicada la v0.1.1](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1).** Antifaz **no garantiza encontrar todos los datos personales**: solo protege lo que detecta, y el [benchmark](docs/benchmark.md) dice cuánto se escapa. Pruébalo con tu tipo de textos antes de usarlo con datos reales.
 
 ## Puesta en marcha
 
@@ -58,7 +58,7 @@ docker compose up -d
 docker compose exec antifaz antifaz doctor   # revisa .env y la pasarela
 ```
 
-`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: la imagen 0.1.0 solo sirve.
+`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: las imágenes 0.1.x solo sirven.
 
 `doctor` dice qué falla, si falla algo: la variable que hay que arreglar (nunca su valor), si la pasarela responde y los pasos siguientes. Con `--providers` también prueba las claves de los proveedores: solo pide su lista de modelos, que es gratis.
 
@@ -71,7 +71,7 @@ docker compose up -d
 docker compose exec antifaz antifaz doctor
 ```
 
-**Con la v0.1.0 (hoy), a mano:**
+**Con la v0.1.1 (hoy), a mano:**
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -80,20 +80,20 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: un valor aleatorio, por ejemplo la salida de `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY y/o ANTIFAZ_ANTHROPIC_API_KEY: las claves de tus proveedores
 #   (borra la línea del proveedor que no uses: su ruta responde 503)
-docker compose up -d                 # descarga ghcr.io/miquel-moreno/antifaz:0.1.0
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
+docker compose up -d                 # descarga ghcr.io/miquel-moreno/antifaz:0.1.1
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 Antifaz se niega a arrancar mientras una clave tenga su valor de ejemplo (`change-me...`); `docker compose logs antifaz` dice qué variable hay que arreglar, nunca su valor. Solo escucha en `127.0.0.1`: para llegar desde otras máquinas, pon delante un proxy inverso con HTTPS ([detalles](docs/TECNICO.md)).
 
-**Sin Compose**, el mismo endurecimiento en un solo `docker run` (también vale con la 0.1.0):
+**Sin Compose**, el mismo endurecimiento en un solo `docker run` (también vale con la 0.1.1):
 
 ```bash
 docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
-  ghcr.io/miquel-moreno/antifaz:0.1.0
+  ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
 
 Después, apunta tu cliente a Antifaz en vez de al proveedor, con tu `ANTIFAZ_API_KEY` como clave (las claves de los proveedores se quedan en `.env`):

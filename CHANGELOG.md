@@ -29,6 +29,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 - The panel's admin token is watched like every other key (invariant 13): `configured_keys` includes it, so a client value carrying it is refused, a provider answer repeating it (also JSON-escaped) is dropped with 502 and a stream that completes it ends. The gateway refuses to start if the token is empty, short, the example value, not printable ASCII, or equal to `ANTIFAZ_API_KEY` or a provider key (compared with `hmac.compare_digest`), and if `ANTIFAZ_TRUSTED_PROXIES` holds garbage, host bits, a zone id, `0.0.0.0/0` or `::/0`; messages name the variable, never the value. A test checks that `antifaz.web` never calls `get_secret_value` nor reads `admin_token`, and `scripts/check_coverage.py` now requires 90 % in `web/`.
 - Review fixes for the panel door pieces (issue 53, PR 11b-1): one shared rule for `ANTIFAZ_TRUSTED_PROXIES` (`antifaz/trusted_networks.py`, used by the settings check and the door), which also refuses IPv4-mapped IPv6 ranges; `doctor` warns (by count) about trusted ranges wider than /24 or /64; the install guides no longer suggest trusting a whole Docker network (the Docker gateway would let any client fake `X-Forwarded-*`) and recommend the exact proxy IP. `X-Forwarded-For` is walked lazily from the right with at most 16 entries and 8 KiB of text, skips empty elements and accepts entries with a port; `Host` ports must be 1-65535. Sessions are frozen, their repr hides the fingerprint and CSRF token, and a failing close subscriber is logged (type only) without breaking a login, lookup or logout. The login limit keeps at most 5 times per address, frees room in O(1) amortised time and counts IPv6 clients per /64. `init` reminds that a `.env` backup holds the old keys and token; `verify` watches a canary panel token. Stronger AST guard: `antifaz.web` imports neither the settings nor pydantic and never uses `vars`, `__dict__`, `model_dump` or a dynamic `getattr`.
 
+## [0.1.1] - 2026-10-13
+
+Security update of the image only: same code and same image entrypoint as 0.1.0.
+
+### Security
+- Base image moves to Python 3.12.15 (`python:3.12-slim`, still Debian 13 "trixie"; index digest `sha256:a6e34c59…edc11b1`). It fixes CVE-2026-19445 (critical) and CVE-2026-19553 (high) in CPython 3.12.14, among others. The Grype gate exception for CVE-2026-82049 is removed: Grype no longer reports it for Python 3.12.15.
+
+### Changed
+- uv 0.12.23 (was 0.12.20) in the image build stage, CI and `make audit`; image index digest `sha256:61d393e4…a55b21`.
+
 ## [0.1.0] - 2026-10-06
 
 ### Security
@@ -92,5 +102,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 - CI: ruff, mypy --strict, tests with coverage (90 % required in the privacy pieces), gitleaks, `uv audit`, license check and CodeQL, with actions pinned by commit SHA. Dependabot for dependencies and actions.
 - Claude Code kit in `.claude/` (agents, hooks and permissions), with tests for the hooks. The shell hook also watches PowerShell and blocks any mention of `.env` files, `.env` wildcards, `core.hooksPath`, `SKIP=` and force pushes with `git -C`.
 
-[Unreleased]: https://github.com/miquel-moreno/antifaz/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/miquel-moreno/antifaz/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1
 [0.1.0]: https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0
