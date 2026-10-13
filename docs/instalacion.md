@@ -255,6 +255,10 @@ Antifaz habla HTTP sin cifrar y solo escucha en `127.0.0.1`. Para usarlo desde o
    - **Nunca** pongas la puerta de enlace de Docker (`172.x.0.1`) ni la red de Docker entera: las peticiones que entran por el puerto publicado llegan desde esa puerta de enlace, así que cualquier cliente podría falsear esas cabeceras. Nunca `0.0.0.0/0`. `antifaz doctor` avisa de los rangos más anchos que /24.
    - El proxy tiene que añadir `X-Forwarded-For`. Si no lo añade, todos los clientes parecen el proxy y comparten un único límite de intentos de login (5 fallos por minuto).
    - Sin proxy, déjala vacía.
+5. **[v0.2.0] El panel** funciona en `http://localhost:8000/panel` (también `127.0.0.1` o `[::1]`) o detrás de HTTPS; por HTTP sin cifrar desde cualquier otra dirección enseña una página que pide HTTPS y no deja entrar.
+   - El proxy tiene que **mantener el `Host` original** (nginx: `proxy_set_header Host $host;`; Caddy lo hace por defecto). Si lo reescribe, el login del panel responde 403.
+   - En Docker **sin** proxy, todas las peticiones llegan desde la misma dirección, así que el límite de intentos de login (5 fallos por minuto) es compartido por todos.
+   - Dos Antifaz en puertos distintos de `localhost` (por ejemplo 8000 y 8001) se pisan la sesión del panel: los navegadores no separan las cookies por puerto. Vuelve a entrar, o usa uno cada vez.
 
 Más detalles en [TECNICO.md](TECNICO.md#proxy-inverso-https).
 

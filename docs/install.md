@@ -255,6 +255,10 @@ Antifaz speaks plain HTTP and listens only on `127.0.0.1`. To use it from other 
    - **Never** put the Docker gateway (`172.x.0.1`) or the whole Docker network: requests that come in through the published port arrive from the gateway, so any client could then fake those headers. Never `0.0.0.0/0`. `antifaz doctor` warns about ranges wider than /24.
    - The proxy must add `X-Forwarded-For`. If it does not, every client looks like the proxy and they all share one login limit (5 failures a minute).
    - Without a proxy, leave it empty.
+5. **[v0.2.0] The panel** works on `http://localhost:8000/panel` (also `127.0.0.1` or `[::1]`) or behind HTTPS; over plain HTTP from any other address it shows a page that asks for HTTPS and does not let you log in.
+   - The proxy must **keep the original `Host`** (nginx: `proxy_set_header Host $host;`; Caddy does it by default). If it rewrites it, the panel login answers 403.
+   - In Docker **without** a proxy, every request arrives from the same address, so the login limit (5 failures a minute) is shared by everyone.
+   - Two Antifaz on different `localhost` ports (for example 8000 and 8001) overwrite each other's panel session: browsers do not keep cookies apart by port. Log in again, or use one of them at a time.
 
 More details in [TECNICO.md](TECNICO.md#proxy-inverso-https) (in Spanish).
 
