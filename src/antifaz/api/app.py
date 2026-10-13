@@ -4,7 +4,9 @@ The server builds the app with `uvicorn --factory antifaz.api.app:create_app`: n
 built at import time, so a refused start (ADR-0015) is never an import side effect.
 """
 
-from collections.abc import AsyncIterator
+import functools
+import hashlib
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import anyio
@@ -12,6 +14,7 @@ import anyio.to_thread
 import httpx
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
+from starlette.types import ASGIApp
 
 from antifaz import __version__
 from antifaz.api import anthropic, health, models, openai, scan
@@ -37,6 +40,31 @@ MASK_THREADS = 8
 def registered_paths(app: FastAPI) -> frozenset[str]:
     """The paths of every route. `app.routes` holds included routers, not their routes."""
     return frozenset(context.path for context in iter_route_contexts(app.routes) if context.path)
+
+
+def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | None:
+    """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
+
+    antifaz.web is imported only here, so without the token nothing of the panel is loaded. The
+    panel gets a PanelState and nothing else: the token's SHA-256, never the token or settings.
+    """
+    if settings.admin_token is None:
+        return None
+    from antifaz.web.door import PanelDoor, PanelState
+    from antifaz.web.forwarded import parse_networks
+    from antifaz.web.login_limit import FailureLimiter
+    from antifaz.web.routes import build_router
+    from antifaz.web.sessions import MemorySessionStore
+
+    token = settings.admin_token.get_secret_value().encode()
+    state = PanelState(
+        token_fingerprint=hashlib.sha256(token).digest(),
+        trusted_proxies=parse_networks(settings.trusted_proxies),
+        sessions=MemorySessionStore(),
+        limiter=FailureLimiter(),
+    )
+    app.include_router(build_router(state))
+    return functools.partial(PanelDoor, state=state)
 
 
 def create_app(
@@ -100,9 +128,16 @@ def create_app(
     app.include_router(anthropic.router)
     app.include_router(models.router)
     app.include_router(scan.router)
+    panel_door = _panel(app, settings)
     app.state.route_paths = registered_paths(app)
-    # The last one added runs first: request id -> trusted host -> gate (key, Origin, JSON).
-    app.add_middleware(GateMiddleware, api_key=api_key, allowed_origins=settings.allowed_origins)
+    # The last one added runs first: request id -> trusted host -> gate (the panel's door for
+    # /panel*; the key, Origin and JSON for the rest).
+    app.add_middleware(
+        GateMiddleware,
+        api_key=api_key,
+        allowed_origins=settings.allowed_origins,
+        panel_door=panel_door,
+    )
     app.add_middleware(
         CaseInsensitiveTrustedHost, allowed_hosts=settings.allowed_hosts, www_redirect=False
     )

@@ -1,10 +1,10 @@
 """The panel code never holds the admin token itself (issue 53, ADR-0018, invariant 13).
 
-The gateway hands the panel only the token's fingerprint (11b-2). Nothing under antifaz/web
-may reach a secret: no get_secret_value(), no `admin_token`, `_secret_value`, `model_dump` or
-`__dict__`, no vars(), no getattr() with a name that is not a literal, and no import of
-antifaz.config or pydantic (where SecretStr lives). The door's pure pieces are standard
-library only (plus antifaz.trusted_networks, itself standard library only).
+The gateway hands the panel only the token's fingerprint (11b-2a: PanelState). Nothing under
+antifaz/web may reach a secret: no get_secret_value(), no `admin_token`, `_secret_value`,
+`model_dump` or `__dict__`, no vars(), no getattr() with a name that is not a literal, and no
+import of antifaz.config or pydantic (where SecretStr lives). The door's pure pieces are standard
+library only (plus antifaz.trusted_networks and each other, themselves standard library only).
 """
 
 import ast
@@ -16,10 +16,19 @@ import antifaz.web
 
 WEB = Path(antifaz.web.__file__).parent
 SOURCES = sorted(WEB.rglob("*.py"))
-# The door's pure pieces (11b-1): no framework, no third-party code.
-PURE = ("forwarded.py", "sessions.py", "login_limit.py")
+# The door's pure pieces (11b-1 and 11b-2a): no framework, no third-party code.
+PURE = (
+    "forwarded.py",
+    "sessions.py",
+    "login_limit.py",
+    "cookies.py",
+    "headers.py",
+    "pages.py",
+    "csrf.py",
+)
 SHARED_RULE = Path(antifaz.trusted_networks.__file__)
-ALLOWED_OWN_MODULES = {"antifaz.trusted_networks"}
+# A pure piece may use another pure piece (each is checked here itself).
+ALLOWED_OWN_MODULES = {"antifaz.trusted_networks", *(f"antifaz.web.{n[:-3]}" for n in PURE)}
 FORBIDDEN_NAMES = {"get_secret_value", "admin_token", "_secret_value", "model_dump", "__dict__"}
 FORBIDDEN_IMPORTS = ("antifaz.config", "pydantic", "pydantic_settings")
 
@@ -50,7 +59,7 @@ def _calls_to(tree: ast.Module, name: str) -> list[ast.Call]:
 
 def test_there_is_code_to_check() -> None:
     names = {path.name for path in SOURCES}
-    assert {"__init__.py", "forwarded.py", "sessions.py", "login_limit.py"} <= names
+    assert {"__init__.py", "door.py", "routes.py", *PURE} <= names
 
 
 def test_the_web_package_never_touches_a_secret_by_name() -> None:

@@ -1,0 +1,157 @@
+"""The panel door holds its rules whatever the request (issue 53, ADR-0018, PR 11b-2a).
+
+- is_panel_path() is true exactly for "/panel" and paths whose first segment is "panel".
+- The cookie parser never returns the value of another name or of the other scheme's cookie,
+  and returns nothing when the cookie of the scheme comes more than once.
+- The Origin check accepts exactly the origin "scheme://host".
+- Through the whole app: a session route never answers 2xx without exactly one valid cookie of
+  the request's scheme; a cookie is only ever set by a successful login; and every /panel*
+  answer carries the ADR's security headers.
+"""
+
+import json
+from collections.abc import Iterator
+
+import pytest
+from fastapi.testclient import TestClient
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
+from antifaz.api.gate import is_panel_path
+from antifaz.web.cookies import cookie_name, read_session_cookie
+from antifaz.web.csrf import is_same_origin
+from antifaz.web.headers import SECURITY_HEADERS
+from tests.integration.panel_client import (
+    ADMIN_TOKEN,
+    HTTPS_URL,
+    LOCAL_COOKIE,
+    LOCAL_URL,
+    SECURE_COOKIE,
+    log_in,
+    panel_client,
+)
+
+# --- is_panel_path --------------------------------------------------------------------------
+
+segments = st.sampled_from(["panel", "PANEL", "panelx", "", "login", "v1", "..", "x", "Panel"])
+paths = st.lists(segments, max_size=5).map(lambda parts: "/" + "/".join(parts)) | st.text(
+    max_size=20
+)
+
+
+@given(paths)
+def test_is_panel_path_iff_the_first_segment_is_panel(path: str) -> None:
+    assert is_panel_path(path) == (path.split("/", 2)[:2] == ["", "panel"])
+
+
+# --- Cookie parser --------------------------------------------------------------------------
+
+NAMES = [SECURE_COOKIE, LOCAL_COOKIE, "__host-antifaz_session", "Antifaz_session", "theme", "a"]
+ids = st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij0123456789-_", min_size=1, max_size=50)
+pairs = st.lists(st.tuples(st.sampled_from(NAMES), ids), max_size=6)
+
+
+@given(pairs, st.sampled_from(["https", "http"]), st.integers(min_value=1, max_value=3))
+def test_the_parser_returns_only_the_one_cookie_of_the_scheme(
+    cookies: list[tuple[str, str]], scheme: str, lines: int
+) -> None:
+    texts = [f"{name}={value}" for name, value in cookies]
+    split = [texts[i::lines] for i in range(lines)]
+    headers = [(b"cookie", "; ".join(part).encode()) for part in split if part]
+
+    result = read_session_cookie(headers, scheme)
+
+    mine = [value for name, value in cookies if name == cookie_name(scheme)]
+    assert result == (mine[0] if len(mine) == 1 else None)
+
+
+# --- Origin ---------------------------------------------------------------------------------
+
+hosts = st.sampled_from(["localhost", "localhost:8000", "127.0.0.1", "[::1]", "antifaz.example"])
+origins = st.builds(
+    lambda scheme, host: f"{scheme}://{host}", st.sampled_from(["http", "https", "HTTPS"]), hosts
+) | st.text(max_size=30)
+
+
+@given(origins, st.sampled_from(["http", "https"]), hosts)
+def test_the_origin_check_accepts_exactly_scheme_and_host(
+    origin: str, scheme: str, host: str
+) -> None:
+    headers = [(b"sec-fetch-site", b"same-origin"), (b"origin", origin.encode("utf-8"))]
+
+    assert is_same_origin(headers, scheme, host) == (origin == f"{scheme}://{host}")
+
+
+# --- The whole door -------------------------------------------------------------------------
+
+SESSION_ROUTES = {("/panel", "GET")}
+
+
+@pytest.fixture(scope="module")
+def door() -> Iterator[tuple[TestClient, dict[str, str]]]:
+    with panel_client(HTTPS_URL) as client:
+        yield client, {"https": log_in(client), "http": _local_id(client)}
+
+
+def _local_id(client: TestClient) -> str:
+    response = client.post(
+        f"{LOCAL_URL}/panel/login",
+        content=json.dumps({"token": ADMIN_TOKEN}),
+        headers={
+            "Sec-Fetch-Site": "same-origin",
+            "Origin": LOCAL_URL,
+            "Content-Type": "application/json",
+        },
+    )
+    client.cookies.clear()
+    return response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+
+
+cookie_parts = st.lists(
+    st.tuples(
+        st.sampled_from([SECURE_COOKIE, LOCAL_COOKIE, "__host-antifaz_session", "x"]),
+        st.sampled_from(["valid-https", "valid-http", "junk", ""]),
+    ),
+    max_size=3,
+)
+requests = st.tuples(
+    st.sampled_from(["https", "http"]),
+    st.sampled_from(["/panel", "/panel/", "/panel/login", "/panel/login/", "/panel/x"]),
+    st.sampled_from(["GET", "POST", "HEAD", "PUT"]),
+    cookie_parts,
+    st.sampled_from(["right", "wrong", "garbage"]),
+    st.booleans(),
+)
+
+
+@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(requests)
+def test_the_door_never_lets_in_without_a_session_and_always_sends_the_headers(
+    door: tuple[TestClient, dict[str, str]],
+    sent: tuple[str, str, str, list[tuple[str, str]], str, bool],
+) -> None:
+    client, valid = door
+    scheme, path, method, cookies, token, same_origin = sent
+    base = HTTPS_URL if scheme == "https" else LOCAL_URL
+    values = {"valid-https": valid["https"], "valid-http": valid["http"], "junk": "junk", "": ""}
+    cookie = "; ".join(f"{name}={values[value]}" for name, value in cookies)
+    body = {"right": json.dumps({"token": ADMIN_TOKEN}), "wrong": '{"token": "no"}'}
+    headers = {"Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"}
+    if same_origin:
+        headers["Origin"] = base
+    if cookie:
+        headers["Cookie"] = cookie
+
+    response = client.request(
+        method, f"{base}{path}", content=body.get(token, "{"), headers=headers
+    )
+    client.cookies.clear()
+
+    for name, value in SECURITY_HEADERS:
+        assert response.headers.get_list(name) == [value], name
+    if "set-cookie" in response.headers:
+        assert (path, method, token, same_origin) == ("/panel/login", "POST", "right", True)
+        assert response.status_code == 200
+    if (path, method) in SESSION_ROUTES and response.is_success:
+        mine = [value for name, value in cookies if name == cookie_name(scheme)]
+        assert mine == [f"valid-{scheme}"]

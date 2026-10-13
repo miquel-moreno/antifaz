@@ -1,5 +1,7 @@
 """Errors and their HTTP responses. No response ever includes what the client sent."""
 
+from collections.abc import Mapping
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -17,9 +19,11 @@ class AppError(Exception):
     status_code = 400
     code = "app_error"
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, headers: Mapping[str, str] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        # Fixed response headers (Retry-After on 429); never anything the client sent.
+        self.headers: dict[str, str] = dict(headers or {})
 
 
 class UnauthorizedError(AppError):
@@ -153,8 +157,62 @@ class UpstreamEchoedKeyError(BadUpstreamResponseError):
         AppError.__init__(self, "the provider's answer contained a key and was dropped")
 
 
+class PanelNotFoundError(AppError):
+    """Any /panel* path while ANTIFAZ_ADMIN_TOKEN is unset: the same answer as an unknown route."""
+
+    status_code = 404
+    code = "not_found"
+
+    def __init__(self) -> None:
+        super().__init__("no such route")
+
+
+class PanelUnauthorizedError(AppError):
+    status_code = 401
+    code = "panel_unauthorized"
+
+    def __init__(self) -> None:
+        super().__init__("log in to the panel first")
+
+
+class PanelLoginFailedError(AppError):
+    """Every failed login, whatever went wrong (body, size, token): byte-identical answers."""
+
+    status_code = 401
+    code = "login_failed"
+
+    def __init__(self) -> None:
+        super().__init__("login failed")
+
+
+class TooManyAttemptsError(AppError):
+    status_code = 429
+    code = "too_many_attempts"
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            "too many failed logins: wait and try again",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+class CsrfRejectedError(AppError):
+    status_code = 403
+    code = "csrf_rejected"
+
+    def __init__(self) -> None:
+        super().__init__("request refused: it must come from the panel's own page, as JSON")
+
+
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
+
+
+def error_response(exc: AppError) -> JSONResponse:
+    """The JSON answer of an AppError, with its fixed headers (handler, gate and panel door)."""
+    return JSONResponse(
+        status_code=exc.status_code, content=error_body(exc.code, exc.message), headers=exc.headers
+    )
 
 
 class ErrorDetail(BaseModel):
@@ -198,7 +256,7 @@ PROXY_ERRORS = error_responses(400, 401, 403, 413, 415, 502, 503, 504)
 async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):  # pragma: no cover - registered only for AppError
         raise exc
-    return JSONResponse(status_code=exc.status_code, content=error_body(exc.code, exc.message))
+    return error_response(exc)
 
 
 def _safe_location(loc: tuple[object, ...]) -> str:
