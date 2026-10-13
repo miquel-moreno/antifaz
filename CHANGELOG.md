@@ -5,6 +5,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-13
+
+Security update of the image only: same code and same image entrypoint as 0.1.0.
+
+### Security
+- Base image moves to Python 3.12.15 (`python:3.12-slim`, still Debian 13 "trixie"; index digest `sha256:a6e34c59…edc11b1`). It fixes CVE-2026-19445 (critical) and CVE-2026-19553 (high) in CPython 3.12.14, among others. The Grype gate exception for CVE-2026-82049 is removed: Grype no longer reports it for Python 3.12.15.
+
+### Changed
+- uv 0.12.23 (was 0.12.20) in the image build stage, CI and `make audit`; image index digest `sha256:61d393e4…a55b21`.
+
 ## [0.1.0] - 2026-10-06
 
 ### Security
@@ -68,5 +78,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 - CI: ruff, mypy --strict, tests with coverage (90 % required in the privacy pieces), gitleaks, `uv audit`, license check and CodeQL, with actions pinned by commit SHA. Dependabot for dependencies and actions.
 - Claude Code kit in `.claude/` (agents, hooks and permissions), with tests for the hooks. The shell hook also watches PowerShell and blocks any mention of `.env` files, `.env` wildcards, `core.hooksPath`, `SKIP=` and force pushes with `git -C`.
 
-[Unreleased]: https://github.com/miquel-moreno/antifaz/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/miquel-moreno/antifaz/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1
 [0.1.0]: https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.0

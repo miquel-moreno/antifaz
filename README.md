@@ -42,7 +42,7 @@ cp .env.example .env
 #   ANTIFAZ_OPENAI_API_KEY and/or ANTIFAZ_ANTHROPIC_API_KEY: your provider keys
 #   (delete the line of a provider you do not use: its route answers 503)
 docker compose up -d --build
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 Antifaz refuses to start while a key still has its example value (`change-me...`); `docker compose logs antifaz` says which variable to fix, never its value. It listens on `127.0.0.1` only: to reach it from other machines, put a reverse proxy with HTTPS in front ([details](docs/TECNICO.md)).

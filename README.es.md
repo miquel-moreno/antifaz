@@ -44,7 +44,7 @@ cp .env.example .env
 #   ANTIFAZ_OPENAI_API_KEY y/o ANTIFAZ_ANTHROPIC_API_KEY: las claves de tus proveedores
 #   (borra la línea del proveedor que no uses: su ruta responde 503)
 docker compose up -d --build
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 Antifaz se niega a arrancar mientras una clave tenga su valor de ejemplo (`change-me...`); `docker compose logs antifaz` dice qué variable hay que arreglar, nunca su valor. Solo escucha en `127.0.0.1`: para llegar desde otras máquinas, pon delante un proxy inverso con HTTPS ([detalles](docs/TECNICO.md)).

@@ -10,13 +10,13 @@
 
 # Base images pinned by digest (a tag can be moved; a digest cannot). The FROM lines are written
 # out in full (no ARG) so Dependabot can update them; the two python ones must stay equal.
-#   python:3.12-slim = 3.12.14-slim-trixie, index digest resolved on 2026-10-01 with
+#   python:3.12-slim = 3.12.15-slim-trixie, index digest resolved on 2026-10-09 with
 #   `docker buildx imagetools inspect python:3.12-slim`.
-#   ghcr.io/astral-sh/uv:0.12.20 (the uv version CI uses), index digest resolved on 2026-10-01.
-FROM ghcr.io/astral-sh/uv:0.12.20@sha256:100047e74f30778ab704942321a09750d6158739573ff58bf3924085cc6cd2d8 AS uv
+#   ghcr.io/astral-sh/uv:0.12.23 (the uv version CI uses), index digest resolved on 2026-10-12.
+FROM ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 AS uv
 
 # ---- Build stage: the virtualenv with the locked runtime dependencies (no dev, no extras) ----
-FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS build
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
 
 COPY --from=uv /uv /usr/local/bin/uv
 
@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 # ---- Final stage ----
-FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS runtime
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
 LABEL org.opencontainers.image.title="antifaz" \
       org.opencontainers.image.description="Privacy gateway for LLMs: pseudonymises Spanish and EU personal data before it reaches the provider." \

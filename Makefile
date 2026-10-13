@@ -1,6 +1,6 @@
 # Common tasks. Run `make help` to list them.
 PKG := antifaz
-UV_AUDIT := uvx --from uv==0.12.20 uv audit --frozen --preview-features audit-command
+UV_AUDIT := uvx --from uv==0.12.23 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
 .PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
