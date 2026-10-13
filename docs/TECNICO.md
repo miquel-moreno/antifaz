@@ -154,7 +154,7 @@ La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, 
 Cómo va una release:
 
 1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas. **En el mismo commit, justo antes del tag**, se sube también la versión por defecto de `docker-compose.yml` (`${ANTIFAZ_VERSION:-X.Y.Z}`, un test la ata a `pyproject.toml`) y la versión de la vía manual del README (EN y ES).
-2. El tag y la publicación necesitan el OK explícito de Miquel cada vez. Puede delegar en el agente el tag o la aprobación del environment release caso a caso, nunca como permiso permanente. (`git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`)
+2. El tag y la publicación necesitan el OK explícito de Miquel cada vez. Puede delegar en el agente el tag o la aprobación del environment release caso a caso, nunca como permiso permanente. (`git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`)
 3. El job `publish-image` espera en el environment protegido `release`: solo lo pueden usar tags `v*` y, cuando el repo sea público, pide la aprobación manual de Miquel antes de recibir ningún permiso.
 4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
 5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.

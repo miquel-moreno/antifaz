@@ -77,7 +77,7 @@ curl.exe http://127.0.0.1:8000/healthz
 
 Antifaz refuses to start while a key still has its example value (`change-me...`); `docker compose logs antifaz` says which variable to fix, never its value. It listens on `127.0.0.1` only: to reach it from other machines, put a reverse proxy with HTTPS in front ([details](docs/TECNICO.md)).
 
-**Without Compose**, the same hardening in one `docker run`:
+**Without Compose**, the same hardening in one `docker run` (bash; for PowerShell see [the install guide, 2.4](docs/install.md#24-without-compose-one-docker-run)):
 
 ```bash
 docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
@@ -145,7 +145,7 @@ docker compose up -d
 docker compose exec antifaz antifaz doctor
 ```
 
-**Claude Code**: on the machine where you run it, from a clone of `main` (with [uv](https://docs.astral.sh/uv/)). It only writes a Claude Code setting, so the gateway can be 0.1.1:
+**Claude Code**: on the machine where you run it, from a clone of `main` (with [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 uv run antifaz setup claude-code            # shows the change; writes nothing

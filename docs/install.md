@@ -135,7 +135,17 @@ docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
 
-In PowerShell, write it in one line, or end each line with a backtick `` ` `` instead of `\`. Use this **or** `docker compose up -d`, not both: they use the same port. The rest of this guide uses Compose.
+PowerShell (each line ends with a backtick `` ` ``):
+
+```powershell
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 `
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev `
+  --cap-drop ALL --security-opt no-new-privileges `
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped `
+  ghcr.io/miquel-moreno/antifaz:0.1.1
+```
+
+Use this **or** `docker compose up -d`, not both: they use the same port. The rest of this guide uses Compose.
 
 ### 2.5 Prove that no data leaves with `verify`
 
@@ -278,7 +288,7 @@ Exit code: 0 if every check passed, 1 if something failed.
 
 ### 3.4 Claude Code: `setup claude-code`
 
-On the computer where you use Claude Code, from a clone of `main` (with [uv](https://docs.astral.sh/uv/)) until v0.2.0 is out. This command runs on your computer, not in the container. It only writes a setting of Claude Code, so the gateway can be 0.1.1.
+On the computer where you use Claude Code, from a clone of `main` (with [uv](https://docs.astral.sh/uv/)) until v0.2.0 is out. This command runs on your computer, not in the container.
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz

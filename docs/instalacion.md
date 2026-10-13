@@ -135,7 +135,17 @@ docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
 
-En PowerShell, escríbela en una sola línea, o termina cada línea con una comilla invertida `` ` `` en lugar de `\`. Usa esto **o** `docker compose up -d`, no los dos: usan el mismo puerto. El resto de la guía usa Compose.
+PowerShell (cada línea termina con una comilla invertida `` ` ``):
+
+```powershell
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 `
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev `
+  --cap-drop ALL --security-opt no-new-privileges `
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped `
+  ghcr.io/miquel-moreno/antifaz:0.1.1
+```
+
+Usa esto **o** `docker compose up -d`, no los dos: usan el mismo puerto. El resto de la guía usa Compose.
 
 ### 2.5 Demostrar que no sale ningún dato con `verify`
 
@@ -278,7 +288,7 @@ Código de salida: 0 si todo está bien, 1 si algo falla.
 
 ### 3.4 Claude Code: `setup claude-code`
 
-En el ordenador donde usas Claude Code, desde un clon de `main` (con [uv](https://docs.astral.sh/uv/)) hasta que salga la v0.2.0. Esta orden se ejecuta en tu ordenador, no en el contenedor. Solo escribe un ajuste de Claude Code, así que la pasarela puede ser la 0.1.1.
+En el ordenador donde usas Claude Code, desde un clon de `main` (con [uv](https://docs.astral.sh/uv/)) hasta que salga la v0.2.0. Esta orden se ejecuta en tu ordenador, no en el contenedor.
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz
