@@ -1,7 +1,8 @@
 name: Release
 
-# Publishes the container image when Miquel pushes a version tag (vX.Y.Z). Nothing else
-# starts it: no branches, no pull requests, no manual runs.
+# Publishes the container image when Miquel pushes a version tag (vX.Y.Z), then attaches a
+# docker-compose.yml pinned to that image's digest to the GitHub release (issue 42). Nothing
+# else starts it: no branches, no pull requests, no manual runs.
 #
 # Kept apart from ci.yml on purpose (ANTIFAZ.md section 5.2): this workflow holds the
 # permission to publish, so it runs no scanners or other third-party tools, only first-party
@@ -37,6 +38,9 @@ jobs:
       packages: write # push the image to ghcr.io
       id-token: write # OIDC token to sign the provenance attestation (Sigstore), no stored keys
       attestations: write # store the provenance attestation in the repository
+    outputs:
+      # For release-asset: the digest of the image just pushed (sha256:...).
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -122,3 +126,56 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
+
+  # The docker-compose.yml that users download (`curl -LO .../releases/download/vX.Y.Z/
+  # docker-compose.yml`), with the image pinned by the digest pushed above. A job of its own
+  # because it needs `contents: write` (to create or change a release); the job that holds the
+  # registry and signing permissions keeps `contents: read`. It runs only actions/checkout and
+  # the gh CLI that comes with the runner.
+  release-asset:
+    name: Attach the digest-pinned docker-compose.yml to the release
+    needs: publish-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No environment of its own: it needs publish-image, which already waited for the approval
+    # in `release`, so a release is approved once. It holds no secret, only contents: write.
+    permissions:
+      contents: write # create the draft release if there is none and upload the asset
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Standard library only, and without the token: it copies docker-compose.yml and changes
+      # only the image line (it fails if the version or the digest look wrong).
+      - name: Write docker-compose.yml pinned by digest
+        env:
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python3 -m scripts.release_compose --version "${GITHUB_REF_NAME#v}" --digest "${DIGEST}" --output dist/docker-compose.yml
+
+      # Miquel writes the release page by hand. If he has not created it yet, a draft
+      # pre-release is created for the tag (--verify-tag: never a new tag) and he publishes it
+      # after writing the notes (it is marked pre-release while Antifaz is a beta: untick it when
+      # publishing a non-beta version). Only gh's exact "release not found" creates it; any
+      # other error fails. --clobber: a re-run replaces the asset with the new digest.
+      - name: Upload it to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          errors="${RUNNER_TEMP}/release-view.err"
+          if gh release view "${GITHUB_REF_NAME}" --json tagName > /dev/null 2> "${errors}"; then
+            echo "The release exists: uploading the asset."
+          elif grep -qxF "release not found" "${errors}"; then
+            gh release create "${GITHUB_REF_NAME}" --draft --prerelease --verify-tag --title "${GITHUB_REF_NAME}" --notes "Draft created by release.yml with the digest-pinned docker-compose.yml. Notes: the CHANGELOG section of this version."
+          else
+            # Network, token or rate limit: never guess that the release is missing.
+            echo "::error::Could not read the release:"
+            cat "${errors}" >&2
+            exit 1
+          fi
+          gh release upload "${GITHUB_REF_NAME}" dist/docker-compose.yml --clobber

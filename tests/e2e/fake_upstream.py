@@ -6,6 +6,8 @@ It answers OpenAI Chat (`POST /v1/chat/completions`) and Anthropic Messages
 is exactly what reached the "provider", so the test can check that the client gets the real
 values back while the provider only saw placeholders.
 
+`GET /v1/models` (both providers use that path) records the request like a POST and answers
+a one-model list, for `antifaz doctor --providers`.
 `GET /_e2e/received` returns what it got (path, body, auth headers) for the test to inspect;
 `GET /_e2e/health` is its healthcheck. It never logs a body. Synthetic data only.
 """
@@ -145,8 +147,24 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         self.close_connection = True
 
+    def _record(self, raw: bytes) -> None:
+        with _lock:
+            _received.append(
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "body": raw.decode("utf-8", errors="replace"),
+                    "authorization": self.headers.get("Authorization"),
+                    "x-api-key": self.headers.get("x-api-key"),
+                    "anthropic-version": self.headers.get("anthropic-version"),
+                }
+            )
+
     def do_GET(self) -> None:
-        if self.path == "/_e2e/health":
+        if self.path == "/v1/models":
+            self._record(b"")
+            self._json(200, {"object": "list", "data": [{"id": "fake-model"}]})
+        elif self.path == "/_e2e/health":
             self._json(200, {"status": "ok"})
         elif self.path == "/_e2e/received":
             with _lock:
@@ -157,15 +175,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(min(length, MAX_BODY))
-        with _lock:
-            _received.append(
-                {
-                    "path": self.path,
-                    "body": raw.decode("utf-8", errors="replace"),
-                    "authorization": self.headers.get("Authorization"),
-                    "x-api-key": self.headers.get("x-api-key"),
-                }
-            )
+        self._record(raw)
         try:
             body = json.loads(raw)
         except ValueError:

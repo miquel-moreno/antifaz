@@ -6,7 +6,7 @@ Antifaz se distribuye con licencia **Apache-2.0** (`LICENSE` y `NOTICE`).
 
 En lo que se distribuye (la librería y la imagen) **no entra nada no comercial (NC) ni copyleft fuerte** (GPL, AGPL, SSPL…). Se permiten dependencias de **copyleft débil sin modificar** (LGPL, MPL, EPL), y cada una se anota aquí con su motivo.
 
-`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor) no se distribuyen y no cuentan. El grupo `bench` (Presidio y spaCy, solo para el benchmark) tampoco se distribuye, pero el script lo comprueba con la misma regla (ver más abajo).
+`scripts/check_licenses.py` lo comprueba en cada PR sobre las dependencias de ejecución bloqueadas en `uv.lock`, **también las de los extras opcionales** (`antifaz[ner]`): falla con cualquier licencia prohibida o desconocida, o con un copyleft débil que no esté en esta página. Las herramientas de desarrollo (tests, lint, zizmor, la comprobación del prototipo del panel) no se distribuyen y no cuentan. El grupo `bench` (Presidio y spaCy, solo para el benchmark) tampoco se distribuye, pero el script lo comprueba con la misma regla (ver más abajo).
 
 La CI no instala el extra `ner` (PyTorch pesa cientos de MB). Para los paquetes que solo trae ese extra, el script usa la licencia que dicen sus metadatos, anotada a mano en `RECORDED_EXTRA` con las versiones de `uv.lock`; un test la compara con los metadatos instalados cuando el extra está (en local).
 
@@ -34,6 +34,23 @@ Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic cont
 | docstring-parser | 0.18.0 | MIT | anthropic |
 
 `httpx2-jsfetch` solo se instala en navegador (emscripten); aquí no se usa.
+
+## Solo para desarrollo: la comprobación del prototipo del panel
+
+`make design-check` (`scripts/check_design.py`, issue #30, paso 6) abre el prototipo del panel en un Chromium sin ventana y le pasa axe-core. Sus dependencias **no están en `pyproject.toml` ni en `uv.lock`**: van en los metadatos en línea del propio script (PEP 723), con versión fija, y `uv run` las instala en un entorno aparte solo para esa ejecución. Por eso `scripts/check_licenses.py` no las ve (solo mira `uv.lock`) y se anotan aquí a mano. **No se distribuyen** (ni en la librería ni en la imagen) y `make check` no las usa. Licencias leídas el 2026-10-07 de los metadatos de cada paquete, y del archivo de licencia cuando los metadatos no la dicen:
+
+| Paquete | Versión | Licencia | Llega por |
+|---|---|---|---|
+| playwright | 1.63.0 | Apache-2.0 | directa (metadatos del script) |
+| axe-playwright-python | 0.1.8 | MIT (sus metadatos no la declaran; leída en su archivo `LICENSE`) | directa (metadatos del script) |
+| axe-core | 4.12.1 | MPL-2.0 | va dentro de axe-playwright-python (`axe.min.js`, sin modificar); se inyecta en la página que se comprueba |
+| greenlet | 3.5.6 | MIT AND PSF-2.0 | playwright |
+| pyee | 13.0.1 | MIT | playwright |
+| typing-extensions | 4.16.0 | PSF-2.0 | playwright |
+
+axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, así que no obliga a nada.
+
+**El navegador.** Playwright necesita su propio Chromium («Chrome for Testing» 153.0.8010.12 y su «headless shell»), que se descarga una vez con `uv run --with playwright==1.63.0 playwright install chromium` a `%LOCALAPPDATA%\ms-playwright` (fuera del repo): unos 205 MB + 120 MB comprimidos y unos 700 MB en disco. Es Chromium (BSD-3-Clause y componentes de terceros); no se ha revisado componente por componente porque solo se usa en local y nunca se distribuye.
 
 ## El extra `ner` (opcional)
 
@@ -122,6 +139,17 @@ Antifaz no importa ninguno de esos dos módulos: comprobado el 2026-10-01 import
 **Código fuente**: el de cada paquete de Debian, en la versión exacta, está en [snapshot.debian.org](https://snapshot.debian.org/) (buscando por nombre y versión, o por la fecha de la imagen base); las versiones exactas salen del SBOM de la CI o de `dpkg -l` dentro de la imagen.
 
 **Pendiente de decidir por Miquel**: si esta excepción de la regla (que habla de "la librería y la imagen") basta así anotada, o si se prefiere una base sin paquetes GPL (por ejemplo una distroless, sin readline ni gdbm), con más trabajo de mantenimiento.
+
+## Tipos de letra del panel
+
+El panel (v0.2) lleva sus dos tipos de letra dentro, en `design/fonts/`, para no pedir nada a terceros (nada de Google Fonts). Son los archivos `woff2` variables oficiales, **sin modificar**, con su licencia al lado. La SIL Open Font License 1.1 permite incluirlos y redistribuirlos con software, también comercial, siempre que vayan con su licencia y no se vendan solos. No son paquetes de Python, así que `scripts/check_licenses.py` no los ve: se anotan aquí a mano. Descargados y comprobados el 2026-10-06:
+
+| Tipo de letra | Versión | Licencia | Archivo | Fuente | SHA-256 del woff2 |
+|---|---|---|---|---|---|
+| Inter | 4.1 | OFL-1.1 (`design/fonts/Inter-OFL.txt`) | `design/fonts/InterVariable.woff2` (352 240 B) | [rsms/inter, release v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | `693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3` |
+| Geist Mono | 1.7.2 | OFL-1.1 (`design/fonts/GeistMono-OFL.txt`) | `design/fonts/GeistMono-Variable.woff2` (71 368 B; en el zip, `GeistMono[wght].woff2`) | [vercel/geist-font, release v1.7.2](https://github.com/vercel/geist-font/releases/tag/v1.7.2) | `fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab` |
+
+Ninguna de las dos licencias declara un «Reserved Font Name». El resto de detalles (zips de origen y sus SHA-256) están en `design/README.md`.
 
 ## Modelos y datos
 

@@ -12,23 +12,37 @@ make audit     # vulnerabilidades conocidas en las dependencias (uv audit, exper
 make licenses  # licencias de lo que se distribuye
 make openapi   # regenera docs/openapi.json desde la app (un test comprueba que está al día)
 make dev       # API en http://localhost:8000 (uvicorn --factory; necesita .env, ver abajo)
-make e2e       # extremo a extremo con Docker: imagen real + Compose + proveedor falso
+make e2e       # extremo a extremo con Docker: imagen real + init + Compose + proveedor falso
+make up        # construye la imagen desde el clon y la arranca con Compose (necesita .env)
 ```
 
 ## Docker (issue 7, parte 7a)
 
+La guía para instalarlo en una empresa, paso a paso (bash y PowerShell, clientes, Claude Code, apagarlo, tráfico que no pasa por la pasarela, actualizar, rotar claves y problemas frecuentes), está en [instalacion.md](instalacion.md) ([in English](install.md)). Esta sección explica cómo está hecho.
+
 ### Ponerlo en marcha desde cero
+
+Desde la v0.2.0, sin clonar (issue 42, ver «Una sola orden en la imagen»):
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+```
+
+A mano, desde un clon (vale también con la 0.1.0):
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
 cp .env.example .env
 # En .env: ANTIFAZ_API_KEY con un valor aleatorio (openssl rand -hex 32) y la clave de cada
 # proveedor que uses; borra la línea del proveedor que no uses (sin clave, su ruta da 503).
-docker compose up -d --build
+docker compose up -d                 # la imagen publicada; `make up` la construye desde el clon
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
 ```
 
-Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
+El flujo a mano con `docker compose up -d --build` se comprobó el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5); desde el issue 42 la construcción local va en `compose.build.yml` (`make up`). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
 
 ### Cómo está hecha la imagen
 
@@ -42,13 +56,13 @@ Comprobado el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5). Con lo
 | `.dockerignore` como lista de permitidos (`pyproject.toml`, `uv.lock`, `README.md`, `LICENSE`, `NOTICE`, `src/`), más exclusiones explícitas (`.env*`, `models/`, `evals/`, `.git`, `.venv`, cachés) por si la lista crece por error | Un `.env`, un modelo, un dataset o un archivo nuevo no entran en la imagen por despiste. Ninguna clave va en la imagen: todas llegan como variables de entorno al arrancar |
 | Sin pip, setuptools, wheel ni `ensurepip`: se borran de la imagen base en la etapa final | La pasarela no instala nada al ejecutarse; un instalador es una herramienta más para un atacante y más paquetes que escanear. Se borran en una capa posterior: no aparecen en el sistema de archivos del contenedor (`make e2e` comprueba que `python -m pip` falla), pero sus bytes siguen en la capa de la imagen base, por eso el tamaño casi no cambia |
 | `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración. No usa nunca un proxy aunque haya `HTTP_PROXY`/`HTTPS_PROXY` en el entorno. Cada comprobación (cada 30 s) deja una línea `INFO` de la petición a `/healthz` en el log de Antifaz: es ruido esperado y no lleva datos |
-| `uvicorn --factory antifaz.api.app:create_app --no-access-log --no-proxy-headers --no-server-header` | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso" |
+| `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`; `antifaz serve` arranca uvicorn con `--factory antifaz.api.app:create_app`, `0.0.0.0:8000`, sin log de acceso, sin `X-Forwarded-*`, sin cabecera `Server` y 20 s de apagado limpio | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso". Hasta la 0.1.0 el `ENTRYPOINT` era el propio `uvicorn` con esos parámetros (ver «Una sola orden en la imagen») |
 
 Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB; la capa de `apt-get upgrade`, 14,4 MB, porque los archivos viejos siguen en la capa de la base) y **60,9 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
 
 ### Compose
 
-`docker-compose.yml` arranca un único servicio `antifaz`:
+`docker-compose.yml` arranca un único servicio `antifaz` con la **imagen publicada** `ghcr.io/miquel-moreno/antifaz:${ANTIFAZ_VERSION:-X.Y.Z}` (por defecto, la versión de `pyproject.toml`, que en `main` es la última publicada; un test lo comprueba). Para construirla desde el clon, `compose.build.yml` añade `build:` e `image: antifaz:local` encima (`make up`, `make e2e`). No hay `command:`: corre el `CMD` de la imagen.
 
 - **Claves**: se leen de `.env` (`env_file`) al arrancar el contenedor; nunca están en la imagen ni en el archivo de Compose. `ANTIFAZ_ENV_FILE` permite usar otro archivo (lo usan los tests de extremo a extremo para no leer nunca tu `.env`).
 - **Puerto**: solo en `127.0.0.1:${ANTIFAZ_PORT:-8000}`. Desde otra máquina no se llega; para eso, un proxy inverso con HTTPS (abajo).
@@ -59,30 +73,58 @@ Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect
 - **Hosts**: `.env.example` trae `ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],antifaz`. `antifaz` es el nombre del servicio, para que otros contenedores de la misma red de Compose lleguen en `http://antifaz:8000`.
 - Healthcheck, reinicio `unless-stopped` (con una configuración rechazada, se reinicia en bucle con espera creciente: ver el motivo con `docker compose logs antifaz`), 25 s para apagarse limpio y logs rotados (3 × 10 MB).
 
+### Una sola orden en la imagen (issue 42, ADR-0017)
+
+La imagen tiene `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`. Sin argumentos sirve; con argumentos, la misma imagen ejecuta otra orden de la CLI:
+
+```bash
+# Escribir .env en la carpeta actual (desde la v0.2.0). En Windows, sin --user;
+# en PowerShell, -v "${PWD}:/work".
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+
+# Servir sin Compose, con el mismo endurecimiento que docker-compose.yml (vale con la 0.1.0)
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
+  ghcr.io/miquel-moreno/antifaz:0.1.0
+```
+
+| Decisión | Por qué |
+|---|---|
+| `antifaz serve` (`src/antifaz/cli/serve.py`) llama a `uvicorn.run` con los parámetros fijos del `ENTRYPOINT` anterior, más `workers=1`, y no acepta opciones | Un test (`tests/unit/test_cli_serve.py`) fija los parámetros y otro compara, valor a valor, lo que habría ejecutado la línea de órdenes de uvicorn con los argumentos antiguos: solo cambian `app_dir` (uvicorn añadía la carpeta actual a `sys.path`; ahora solo se importa el paquete instalado) `headers` (`[]` frente a `None`: ninguna cabecera extra en los dos casos) y `workers` (antes `None`, un proceso salvo que hubiera `WEB_CONCURRENCY`; ahora siempre 1) |
+| `uvicorn.run` en vez de la línea de órdenes de uvicorn | La línea de órdenes leía variables `UVICORN_*` del entorno (por ejemplo `UVICORN_FORWARDED_ALLOW_IPS`), y el entorno sale de `.env`; `uvicorn.run` no las lee. La configuración de uvicorn todavía lee dos variables sin prefijo: `WEB_CONCURRENCY` solo si no se da `workers` (se da: 1) y `FORWARDED_ALLOW_IPS`, que se lee pero no tiene efecto porque las cabeceras de proxy están desactivadas. Así nada de `.env` cambia cómo se sirve. Lo comprueban dos tests (con `WEB_CONCURRENCY=4` y `FORWARDED_ALLOW_IPS=*`) |
+| `docker-compose.yml` sin `command:` | Corre el `CMD` de la imagen, así el mismo archivo vale para la 0.1.0 (cuyo `ENTRYPOINT` era uvicorn y no entiende `serve`) y para las siguientes |
+| Versión por defecto en Compose = la de `pyproject.toml` | En `main` es la última publicada (la 0.2.0 todavía no existe en ghcr.io), y el commit de cada release sube las dos a la vez. Un test las ata. `ANTIFAZ_VERSION=X.Y.Z` elige otra |
+| `init` en el contenedor con `--rm`, `--network none` y `--user` | `--rm`: la clave que imprime `init` queda en el log del contenedor, que desaparece con él. `--network none`: `init` no usa la red. `--user`: en Linux, el `.env` lo crea tu usuario y no el `10001` de la imagen (con `0600`, si no, no podrías leerlo). En Docker Desktop para Windows no hace falta |
+| Las claves por **nombre** de variable (`-e NOMBRE` en docker, sin valor) | Con `docker run -e NOMBRE`, docker toma el valor de su propio entorno: la clave no aparece en los argumentos ni en `ps`. Así lo hace `make e2e` |
+
 ### Proxy inverso (HTTPS)
 
 Antifaz habla HTTP sin cifrar: para usarlo desde otras máquinas, ponlo detrás de un proxy inverso con HTTPS (Caddy, nginx, Traefik) en la misma máquina o red privada, y no publiques el puerto en `0.0.0.0`.
 
 - Añade a `ANTIFAZ_ALLOWED_HOSTS` el nombre que usan los clientes (por ejemplo `antifaz.empresa.internal`).
-- uvicorn arranca con `--no-proxy-headers`: Antifaz no se fía de `X-Forwarded-For` ni `X-Forwarded-Proto`. Hoy no los necesita (no usa la IP del cliente ni construye URLs). Si algún día hicieran falta, se activarían solo para la IP del proxy (`--forwarded-allow-ips`), nunca para todas.
+- uvicorn arranca con `--no-proxy-headers`: la pasarela no se fía de `X-Forwarded-For` ni `X-Forwarded-Proto` y no los usa (no construye URLs). La única excepción es el panel (ADR-0018, a partir del PR 11b-2): usa la IP del cliente **solo** para el límite de intentos de login, y el esquema para exigir HTTPS fuera de `localhost`. Esas dos cabeceras solo cuentan si la conexión llega de una IP de `ANTIFAZ_TRUSTED_PROXIES` (vacía por defecto); de cualquier otra, se ignoran. uvicorn sigue igual. Ver [Puerta del panel](#puerta-del-panel-issue-53-configuración-11b-1).
 - El proxy no debe guardar los cuerpos de las peticiones en sus logs: llevan los datos personales antes de enmascararse.
 
 ### Extremo a extremo: `make e2e`
 
 No forma parte de `make check` (necesita Docker y tarda alrededor de un minuto). Hace esto:
 
-1. Construye la imagen con `docker compose build`.
-2. Arranca Compose con `tests/e2e/docker-compose.e2e.yml` encima del archivo principal: añade un **proveedor falso** (`tests/e2e/fake_upstream.py`, solo biblioteca estándar) que corre en la propia imagen de Antifaz (no se descarga ninguna otra), guarda los bytes que recibe y devuelve el texto que le llega.
+1. Construye la imagen con `docker compose build` (`docker-compose.yml` + `compose.build.yml`, la imagen `antifaz:local`).
+2. Arranca Compose con `tests/e2e/docker-compose.e2e.yml` encima de esos dos: añade un **proveedor falso** (`tests/e2e/fake_upstream.py`, solo biblioteca estándar) que corre en la propia imagen de Antifaz (no se descarga ninguna otra), guarda los bytes que recibe y devuelve el texto que le llega.
 3. Las claves son aleatorias y nuevas en cada ejecución, en un archivo temporal que se borra al final; tu `.env` no se lee nunca. Las URL de los proveedores apuntan al falso con `http://` dentro de la red de Compose: las URL base son configuración del administrador y Antifaz no les exige HTTPS.
 4. Comprueba, con un DNI y un email sintéticos, que el proveedor solo ve marcadores y el cliente recibe sus valores (OpenAI Chat y Anthropic Messages, con y sin streaming, con los marcadores partidos entre eventos); que el proveedor recibe su clave y nunca la de Antifaz; que sin clave se responde 401; que el contenedor está `healthy`, corre como `10001`, no puede escribir fuera de `/tmp`, no tiene capacidades y solo publica en `127.0.0.1`; que la imagen no tiene `.env` (ni en `/app` ni en ningún sitio), ni pytest, ni curl, ni wget, ni pip; y que los logs no tienen el DNI, el email ni ninguna clave, tampoco cuando el DNI va en la query (`/v1/models?after_id=…`, 400) o en una ruta inventada (`/v1/<DNI>`, 404).
+5. La instalación en un minuto (issue 42, `tests/e2e/test_image_cli.py`): que la imagen tiene `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`, que `--help` funciona y que `serve` no acepta opciones; ejecuta `init --non-interactive` dentro de la imagen como dice el README (`-v carpeta:/work -w /work`, `--user` en Linux y macOS, `--network none`, `--read-only`, `--cap-drop ALL`), con claves falsas pasadas por nombre (`-e NOMBRE`), en una carpeta temporal que se borra al final; comprueba que ninguna clave sale por pantalla, que el `.env` tiene las claves (y en POSIX es del usuario y `0600`) y que una segunda ejecución sin `--force` no lo toca; y con ese `.env` arranca Compose (otro proyecto, sin proveedor falso) y el `docker run` endurecido de una línea, y los dos responden `/healthz`.
 
-Resultado el 2026-10-01: **15 de 15 tests en verde** (Windows 11, Docker Desktop 29.8).
+Resultado el 2026-10-06: **22 de 22 tests en verde** (Windows 11, Docker Desktop 29.8), también `init` dentro de la imagen escribiendo en una carpeta de Windows montada con `-v`. Imagen: 259,2 MB sin comprimir.
 
 Los mismos puntos de la imagen y de Compose (digest, usuario, healthcheck, `.dockerignore`, solo lectura, puerto…) también se comprueban sin Docker en `tests/unit/test_container_files.py`, dentro de `make check`.
 
 ### CI de la imagen
 
-Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load` (este job no publica nada: lo hace `release.yml`, ver «Publicación»), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen los pone el workflow de publicación (ver «Publicación»).
+Job `image` de `ci.yml` (solo `contents: read`): construye la imagen con `docker buildx build --load --tag antifaz:local .`, con el mismo contexto y etiqueta que `compose.build.yml` (un test lo comprueba), así `make e2e` la reutiliza (este job no publica nada: lo hace `release.yml`, ver «Publicación»), ejecuta `make e2e`, genera el SBOM en CycloneDX con Syft (`anchore/sbom-action`, se sube como artefacto y se guarda 30 días) y la escanea con Grype (`anchore/scan-action`, ver «Escaneo de la imagen»). Las acciones van fijadas por SHA y Syft (v1.51.1) y Grype (v0.118.0) por versión exacta. La procedencia y el SBOM adjuntos a la imagen los pone el workflow de publicación (ver «Publicación»).
 
 ### Escaneo de la imagen
 
@@ -92,11 +134,11 @@ Grype solo se ejecuta en la CI, no en `make e2e` ni en local. La política:
 |---|---|
 | La CI falla solo con vulnerabilidades **altas o críticas que tienen arreglo** (`only-fixed: true`) | Una vulnerabilidad que Debian no arregla («won't fix» o sin versión corregida) no se puede quitar desde el repo: con ella la CI estaría siempre en rojo y se dejaría de mirar. Las que tienen arreglo sí se pueden quitar, y esas paran el merge |
 | La etapa final hace `apt-get update && apt-get upgrade -y --no-install-recommends` y borra las listas de apt | Recoge los parches de seguridad de Debian publicados después de la imagen base (el 2026-10-01: openssl, libssl3t64 y openssl-provider-legacy 3.5.7-1~deb13u3, libpcre2-8-0 10.46-1~deb13u3). Solo actualiza lo que ya está; no instala nada nuevo. La base sigue fijada por digest |
-| Dependabot (ecosistema `docker`) propone cada digest nuevo de la imagen base | Las reconstrucciones de `python:3.12-slim` traen los parches de Debian ya incluidos. No hay entrada `docker-compose`: los archivos de Compose solo usan `antifaz:local`, que sale de este `Dockerfile` |
+| Dependabot (ecosistema `docker`) propone cada digest nuevo de la imagen base | Las reconstrucciones de `python:3.12-slim` traen los parches de Debian ya incluidos. No hay entrada `docker-compose`: el único servicio usa la imagen de Antifaz, cuya versión sube con cada release (un test la ata a `pyproject.toml`) |
 | El informe completo (todas las vulnerabilidades, con o sin arreglo, en formato tabla) se sube como artefacto `grype-report` en cada ejecución, también cuando la CI falla, y se guarda 30 días | El filtro de la CI no esconde nada: lo que no rompe la CI sigue a la vista |
 | Las excepciones van en `.github/grype-gate.yaml` (solo la usa el filtro, no el informe). **Hoy no hay ninguna**: la de CVE-2026-82049 (Python 3.12.14, arreglo solo en 3.14) estuvo del 2026-10-01 al 2026-10-12 y se quitó porque Grype ya no la da para Python 3.12.15 (informe completo del PR #58) | Cada excepción lleva motivo y fecha y se revisa al cambiar la imagen base |
 
-Estado real el 2026-10-01 (CI de la rama `feat/7a-docker`, Grype v0.118.0): después del `apt-get upgrade` el informe sigue listando **13 vulnerabilidades altas sin arreglo en paquetes de sistema de Debian** (unas 50 líneas, porque cada una afecta a varios paquetes: util-linux y su familia, libc, perl, ncurses, zlib, acl y las librerías de gcc) y **una en Python 3.12** que solo está arreglada en 3.14. Ninguna está en el código de Antifaz. La pasarela no ejecuta la mayoría de esas herramientas (mount, login, perl, ncurses…): están porque vienen con Debian. Antes del lanzamiento de la v0.2 está previsto pasar a una imagen distroless, que no lleva esos paquetes.
+Estado real el 2026-10-01 (CI de la rama `feat/7a-docker`, Grype v0.118.0): después del `apt-get upgrade` el informe sigue listando **13 vulnerabilidades altas sin arreglo en paquetes de sistema de Debian** (unas 50 líneas, porque cada una afecta a varios paquetes: util-linux y su familia, libc, perl, ncurses, zlib, acl y las librerías de gcc) y **una en Python 3.12** que solo está arreglada en 3.14 (ya no aparece con Python 3.12.15, el 2026-10-12). Ninguna está en el código de Antifaz. La pasarela no ejecuta la mayoría de esas herramientas (mount, login, perl, ncurses…): están porque vienen con Debian. Antes del lanzamiento de la v0.2 está previsto pasar a una imagen distroless, que no lleva esos paquetes.
 
 ### Publicación (issue 7, parte 7c)
 
@@ -109,17 +151,20 @@ La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, 
 
 Cómo va una release:
 
-1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas.
+1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas. **En el mismo commit, justo antes del tag**, se sube también la versión por defecto de `docker-compose.yml` (`${ANTIFAZ_VERSION:-X.Y.Z}`, un test la ata a `pyproject.toml`) y la versión de la vía manual del README (EN y ES).
 2. **Miquel** crea y sube el tag (`git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`). Nadie más (ni un agente) crea tags.
 3. El job `publish-image` espera en el environment protegido `release`: solo lo pueden usar tags `v*` y, cuando el repo sea público, pide la aprobación manual de Miquel antes de recibir ningún permiso.
 4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
 5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.
 6. Firma una atestación de procedencia SLSA con la identidad OIDC del job (Sigstore) y la sube junto a la imagen.
+7. Job `release-asset` (issue 42), después de `publish-image` (`needs`) y sin environment propio: solo arranca si `publish-image`, que ya esperó la aprobación en `release`, terminó bien, así que cada release se aprueba **una vez**. No tiene secretos, solo `contents: write`: genera el `docker-compose.yml` de la release con `python3 -m scripts.release_compose` (solo biblioteca estándar y sin token: copia el del repo y cambia solo la línea `image:` a `ghcr.io/miquel-moreno/antifaz:X.Y.Z@sha256:…`, con el digest que sale del paso de construcción; falla si la versión o el digest no tienen la forma esperada) y lo sube a la GitHub Release del tag con `gh release upload --clobber`. Si Miquel todavía no ha creado la release (`gh release view` responde exactamente `release not found`), crea un **borrador** (`--draft --prerelease --verify-tag`, nunca un tag nuevo): Miquel escribe las notas (la sección del CHANGELOG) y lo publica. Cualquier otro error al leer la release (red, token, límite de peticiones) hace fallar el job en vez de crear otra. El borrador sale marcado como *pre-release* (Antifaz es beta); cuando se publique una versión que no lo sea, hay que desmarcarlo al publicarlo.
 
 Comprobar que una imagen salió de este repo y de este workflow:
 
 ```bash
-gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \n  --repo miquel-moreno/antifaz \n  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
+gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \
+  --repo miquel-moreno/antifaz \
+  --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
 docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{{ json .SBOM }}"
 ```
 
@@ -129,8 +174,10 @@ docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{
 |---|---|
 | Workflow de publicación separado de la CI y sin escáneres ni herramientas de terceros (solo acciones de GitHub y Docker, fijadas por SHA) | Es el único sitio con permiso para publicar. Un escáner comprometido (como trivy-action en marzo de 2026) no puede tocar la imagen publicada. Los escaneos (Grype, gitleaks, zizmor, CodeQL) ya pasaron en `ci.yml` sobre el mismo commit |
 | Solo `GITHUB_TOKEN` y OIDC, sin tokens guardados | El token dura lo que la ejecución y solo vale para este repo. No hay contraseña del registro que pueda filtrarse |
-| Permisos del job: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
-| La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG) | Crearla desde el workflow pediría `contents: write`, que permite cambiar el repo. Se mantiene el mínimo |
+| Permisos de `publish-image`: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | Lo justo para leer el código, subir la imagen y firmar la procedencia. Nada de `contents: write` |
+| `contents: write` solo en el job pequeño `release-asset`, sin más acciones que `actions/checkout` (sin credenciales guardadas) y el `gh` que trae el runner; el digest le llega como salida del otro job y entra en los scripts por `env`, nunca con `${{ }}` dentro del script | Adjuntar el `docker-compose.yml` necesita escribir en la release. Separado, el job con permisos para el registro y la firma no puede tocar el repo, y el que puede tocarlo no ejecuta nada de terceros. El script del repo se ejecuta sin el token; solo el paso de `gh` lo recibe. zizmor sin hallazgos |
+| La página de la GitHub Release la escribe Miquel a mano (copiando la sección del CHANGELOG); el workflow solo crea un borrador si falta | El workflow no publica releases: un borrador no lo ve nadie hasta que Miquel lo publica |
+| El `docker-compose.yml` de la release fija la imagen por digest | Quien lo descarga ejecuta exactamente la imagen construida, probada y atestada, aunque alguien moviera la etiqueta `X.Y.Z` después |
 | Etiquetas `X.Y.Z` y `X.Y`, sin `latest` | Antifaz es beta (0.x): quien la usa elige versión a propósito y una versión nueva no le llega sin querer. Ojo: `0.1` se mueve con cada `0.1.x` (recibe los parches); `0.1.0` no cambia nunca |
 | Solo se publica un commit que ya está en `main` (`git merge-base --is-ancestor`) | Un tag puesto en una rama sin revisar no llega a la imagen |
 | Anotaciones OCI en el manifiesto y en el índice (`DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index`) | Con el SBOM y la procedencia, buildx crea un índice; así ghcr.io enlaza ambos con el repo |
@@ -276,6 +323,8 @@ antifaz scan fichero.txt   # una línea por detección: TIPO inicio fin (nunca e
 antifaz mask fichero.txt   # el texto con marcadores (nunca la tabla)
 antifaz mask -             # lee de stdin
 antifaz verify             # planta datos falsos con tu configuración (ver "antifaz verify")
+antifaz init               # escribe un .env con una clave nueva (ver "antifaz init")
+antifaz doctor             # revisa la configuración, la pasarela y, si se pide, las claves (ver "antifaz doctor")
 ```
 
 Si no puede leer el fichero como UTF-8 o el detector falla: mensaje genérico en stderr y código 2, sin repetir el contenido.
@@ -330,7 +379,7 @@ Configura `ANTIFAZ_API_KEY` y `ANTIFAZ_ANTHROPIC_API_KEY` en `.env` (y `ANTIFAZ_
 curl http://localhost:8000/v1/messages   -H "x-api-key: $ANTIFAZ_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json"   -d '{"model": "claude-sonnet-4-5", "max_tokens": 200, "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
 ```
 
-Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y `ANTHROPIC_API_KEY=<ANTIFAZ_API_KEY>` (o `ANTHROPIC_AUTH_TOKEN`, que llega como `Bearer`). Claude Code usa streaming, soportado desde la parte 5c (probado con el proveedor falso; la prueba documentada con Claude Code de verdad sigue pendiente). Antifaz no lee esas variables (solo las que empiezan por `ANTIFAZ_`), así que se puede arrancar en la misma terminal.
+Con el SDK de Anthropic: `base_url="http://localhost:8000"` y `api_key=<ANTIFAZ_API_KEY>`. **Claude Code**: `ANTHROPIC_BASE_URL=http://localhost:8000` y la clave de Antifaz en `ANTHROPIC_AUTH_TOKEN` (llega como `Bearer`, sin la pregunta de aprobación de `ANTHROPIC_API_KEY`); `antifaz setup claude-code` pone la URL (ver [su sección](#antifaz-setup-claude-code-issue-31)). Claude Code usa streaming, soportado desde la parte 5c (probado con el proveedor falso; la prueba documentada con Claude Code de verdad sigue pendiente). Antifaz no lee esas variables (solo las que empiezan por `ANTIFAZ_`), así que se puede arrancar en la misma terminal.
 
 Rutas: `POST /v1/messages` y `POST /v1/messages/count_tokens`. Los pasos son los mismos que en OpenAI (clave, tope de tamaño, un solo `mask()`, una sola serialización revisada por la guardia, errores); el código de esos pasos es compartido (`api/proxy.py` y `providers/json_walk.py`). Lo propio de Anthropic:
 
@@ -423,6 +472,89 @@ uv run antifaz verify
 - Tests: `tests/unit/test_verify.py`, también con la pasarela saboteada (enmascarador ciego → `LEAK` y código 1; enmascarador que deja un valor → `BLOCKED`; comprobación de claves desactivada → `KEY`; clave de Antifaz reenviada, en las dos rutas → `LEAK`; respuesta sin restaurar → `RESTORE`; `count_tokens` contestado sin proveedor → `NO UPSTREAM`). En estos tests y en los de contrato, cualquier búsqueda de nombre o conexión de socket que no sea a la propia máquina falla.
 
 Limitaciones de esta primera versión: los valores sembrados son fijos (los mismos que usan los tests), la política no se lee todavía de un fichero, y no revisa lo que se escribe en los logs (eso lo cubren los tests de las invariantes 8 y 13).
+
+## `antifaz init` (issue 41)
+
+Decisión en [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md) (aceptada). Escribe un `.env` listo para arrancar sin que ninguna clave pase por la línea de órdenes:
+
+```bash
+uv run antifaz init                       # pregunta las claves de los proveedores (ocultas)
+uv run antifaz init --path /srv/antifaz   # en otra carpeta (por defecto, la actual)
+
+# CI o scripts: nada de preguntas; las claves, por el NOMBRE de una variable o por stdin
+OPENAI_FOR_ANTIFAZ=... uv run antifaz init --non-interactive --openai-key-env OPENAI_FOR_ANTIFAZ
+uv run antifaz init --non-interactive --anthropic-key-stdin < clave.txt
+uv run antifaz init --non-interactive --force --allowed-hosts antifaz.internal,localhost
+```
+
+- **Clave de Antifaz**: `secrets.token_hex(32)`, hecha en la máquina (se saca otra si no pasara la comprobación de arranque). Se muestra **una vez**, solo si la salida es un terminal, o con `--show-key`. Si no, se dice que está en `.env`.
+- **Claves de proveedores**: con `getpass` (no se ven al escribir) o, con `--non-interactive`, de `--openai-key-env VAR` / `--anthropic-key-env VAR` o de `--openai-key-stdin` / `--anthropic-key-stdin` (como mucho una por stdin). Ninguna opción acepta una clave: `--*-key-env` solo acepta un nombre de variable válido, y si se le pasa algo que parece una clave lo rechaza sin repetirlo. Se quitan espacios, comillas, una marca BOM y un `Bearer ` delante. Por stdin, como mucho 4 KiB, y nunca desde un terminal (hay que usar una tubería, o el modo interactivo). Si `getpass` no puede ocultar lo que se escribe, `init` se para. Los mensajes no repiten el nombre de `--*-key-env` (hay claves con forma de nombre, como `gsk_…`) ni la ruta de `--path`. Error (nombrando la variable, nunca el valor) si la clave es la de ejemplo, no es ASCII imprimible o lleva `"`, `'`, `#`, `$`, `\` o espacios; solo un aviso si no empieza por `sk-` (OpenAI) o `sk-ant-` (Anthropic). Un proveedor sin clave no tiene línea (su ruta da 503). Las variables `ANTIFAZ_*_API_KEY` del entorno **no** se copian solas.
+- **`.env` existente**: en interactivo hay que escribir `yes`; con `--non-interactive` hace falta `--force`; si no, código 2 y no cambia nada. Antes se guarda `.env.bak-AAAAMMDD-HHMMSS` (con `-1`, `-2`… si ya existe: una copia nunca pisa otra), creada con `O_EXCL` y `0600`. Si `.env` es un enlace o una carpeta, no se toca.
+- **Escritura atómica**: temporal `0600` con `O_EXCL` en la misma carpeta → `fsync` → validación con `check_safe_to_start` leyendo **solo ese archivo** (las variables de entorno del proceso no cuentan) → copia de seguridad → `os.replace` (en Windows se reintenta si el archivo está bloqueado). Pase lo que pase (también Ctrl-C), se borra el temporal; el `.env` anterior queda igual, con un mensaje genérico (si la copia ya se había hecho, dice cómo se llama).
+- **Formato**: `VAR=valor` sin comillas, sin comentarios detrás del valor y sin `$`, saltos de línea LF y sin BOM. Lo leen igual pydantic-settings y `docker --env-file` (un test lo compara). La plantilla va en el paquete (`src/antifaz/cli/env_template.py`) porque en la imagen no hay `.env.example`; un test comprueba que tienen las mismas variables en el mismo orden.
+- **Sin terminal**: en modo interactivo, si stdin no es un terminal, código 2 y "usa `-it` o `--non-interactive`".
+- **Sin red**: no habla con nadie (un test lo comprueba quitando los sockets).
+- **Códigos de salida**: 0 escrito; 2 uso incorrecto, `.env` existente sin permiso o un valor malo (no se escribe nada); 1 no se pudo escribir o validar (el `.env` anterior sigue igual).
+- **Dentro de Docker** (issue 42): con `-it` la clave se imprime y Docker la guarda en `docker logs` mientras exista el contenedor, así que usa siempre `--rm`. En Linux, añade `--user "$(id -u):$(id -g)"` para que el `.env` sea tuyo y no del usuario del contenedor.
+- **Copias y rotación**: las copias `.env.bak-…` contienen las claves antiguas. Después de rotar una clave, borra las copias que la contienen.
+- **Permisos en Windows**: `0600` no existe; el archivo hereda los permisos de la carpeta (en el perfil del usuario, solo él). No ejecutes `init` en una carpeta compartida.
+- Tests: `tests/unit/test_cli_init.py` (claves canario que nunca salen por stdout, stderr ni logs, también en los errores; `getpass`; copias; fallo de `os.replace` y de validación; `0600` en POSIX; terminal y `--show-key`; Hypothesis para la clave generada). El job `cli-windows` de CI pasa los tests de la CLI en Windows.
+
+## `antifaz doctor` (issue 43)
+
+Parte de [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md): `init` no usa la red y comprobar que las claves funcionan es trabajo de `doctor`, solo si se pide.
+
+```bash
+docker compose exec antifaz antifaz doctor               # dentro del contenedor que ya corre
+docker compose exec antifaz antifaz doctor --providers   # y además prueba las claves (gratis)
+uv run antifaz doctor --path /srv/antifaz --url http://127.0.0.1:8000 --timeout 5
+```
+
+Tres comprobaciones, en orden:
+
+1. **Configuración**: lee lo mismo que la pasarela (el `.env` de `--path`, por defecto la carpeta actual, y encima las variables `ANTIFAZ_*` del entorno, que ganan, como en pydantic-settings) y pasa `check_safe_to_start`. Si un valor no se puede leer, solo nombra la variable (el error de Pydantic repite el valor, así que no se muestra). Dice qué proveedores tienen clave (solo los nombres) y si el NER está activado. Ojo: con Compose la pasarela solo lee `.env`; si tu terminal tiene variables `ANTIFAZ_*`, `doctor` desde fuera puede ver otra configuración. Dentro del contenedor (`docker compose exec`) ve exactamente la de la pasarela. Si el `.env` no es UTF-8 (por ejemplo, guardado en cp1252 con una `ñ`) o no se puede abrir: "cannot read .env as UTF-8 text", sin traza (el error lleva bytes del archivo). Si `ANTIFAZ_OPENAI_BASE_URL` o `ANTIFAZ_ANTHROPIC_BASE_URL` llevan usuario o contraseña (`https://usuario:clave@host`), avisa nombrando la variable y con `--providers` no llama a ese proveedor.
+2. **Pasarela**: `GET {url}/healthz`, que es pública: **no se envía ninguna clave**. Sin proxy (`trust_env=False`: se ignoran `HTTP(S)_PROXY` y `NO_PROXY`, la pasarela es local), sin seguir redirecciones, con tiempo máximo y leyendo como mucho 64 KiB. Pide `Accept-Encoding: identity` y rechaza cualquier otra `Content-Encoding` (fallo genérico): así el límite de 64 KiB es de bytes reales y no de bytes descomprimidos. Como `trust_env=False` también ignora `SSL_CERT_FILE` y `SSL_CERT_DIR`, con una `--url` `https://` firmada por una CA propia la comprobación falla aunque la pasarela esté bien; en ese caso, usa la URL local (`http://127.0.0.1:8000`) o `docker compose exec`. El `Host` es el de `--url` si está en `ANTIFAZ_ALLOWED_HOSTS`; si no, el primero de la lista que no es comodín (o el comodín con `healthcheck.` delante, como el healthcheck del contenedor). Si no hay configuración legible, el de `--url`. Muestra la versión solo si tiene forma de versión, y el estado del NER (`starting` es un aviso; `circuit_open`, `closed` o uno desconocido, fallo). Un 400 suele ser `ANTIFAZ_ALLOWED_HOSTS` distinto en la pasarela (no se ha reiniciado tras cambiar `.env`). Si no responde: "docker compose up -d".
+3. **Proveedores**, solo con `--providers`: para cada proveedor con clave, `GET` de su lista de modelos directamente al proveedor (OpenAI `{base}/models` con `Authorization: Bearer`; Anthropic `{base}/v1/models` con `x-api-key` y `anthropic-version: 2023-06-01`). Listar modelos no cuesta nada. Sin redirecciones (una clave nunca sigue a un `Location`: un 3xx es error), con tiempo máximo y **sin leer nunca el cuerpo** de la respuesta (un proveedor puede repetir la clave en el error): solo cuenta el código. 200 bien; 401/403 clave rechazada; 3xx redirección no seguida; tiempo agotado; no se puede conectar; otro código. Una clave con formato imposible no se envía. Estas peticiones **sí** respetan `HTTP(S)_PROXY`, igual que el cliente de la propia pasarela (`providers/http.py`, httpx por defecto): así se prueba el mismo camino que usará la pasarela detrás de un proxy corporativo.
+
+- **`--timeout` es un plazo total por petición** (conectar, cabeceras y cuerpo juntos), no por lectura como el de httpx: la petición va en un hilo aparte con plazo fijo (`time.monotonic()`), y el cuerpo de `/healthz` también mira el plazo mientras lee. Un servidor que manda un byte cada poco no retiene a `doctor`.
+- **Nunca imprime** valores, claves, cuerpos, excepciones ni URL base (una URL puede llevar `usuario:contraseña`); `--url` con usuario, consulta o fragmento se rechaza sin repetirlo. Mensajes fijos que nombran variables. Mientras corre, los loggers `httpx` y `httpcore` (`QUIET_LOGGERS` de `antifaz/logging.py`) se quedan en WARNING, así que no registran la línea de cada petición aunque `doctor` se use como librería con logs en DEBUG; al acabar se dejan como estaban.
+- **Salida**: texto plano con `✓`/`✗`; si la consola no puede escribirlos (cp1252 en Windows), `OK`/`FAIL`. Al final, los pasos siguientes: `antifaz verify`, `antifaz setup claude-code` (issue 31) y la documentación.
+- **Códigos de salida**: 0 todo bien; 1 algo falla; 2 uso incorrecto (`--path` que no existe, `--url` mala, `--timeout` fuera de 0–120 s).
+- Tests: `tests/unit/test_cli_doctor.py` (claves canario que nunca salen por stdout, stderr ni logs, también cuando el proveedor las repite en el cuerpo, en una cabecera o en la excepción; `MockTransport` para 200, 401, 403, 307, 500, tiempo agotado y error de conexión; `/healthz` caído, 503, 400, cuerpo raro o enorme; elección del `Host`; sin `--providers` no hay ninguna petición a proveedores; con servidores reales en 127.0.0.1, que `/healthz` no pasa por el proxy y los proveedores sí; plazo total con un servidor que gotea byte a byte en cabeceras y cuerpo; respuesta gzip rechazada; `.env` en cp1252; URL base con usuario; sin líneas de httpx en los logs; consola cp1252; códigos de salida). También en el job `cli-windows`. E2E en `tests/e2e/test_doctor.py`: desde el host contra el puerto publicado y con `docker compose exec ... doctor --providers` contra el proveedor falso, que comprueba que cada proveedor recibe su clave y nunca la de Antifaz.
+
+## `antifaz setup claude-code` (issue 31)
+
+Parte de [ADR-0017](adr/0017-instalacion-y-secretos-en-la-cli.md): escribe la URL, **nunca la clave**. Se ejecuta en la máquina donde corre Claude Code (no dentro del contenedor: escribe en tu carpeta de usuario).
+
+```bash
+uv run antifaz setup claude-code                        # ensayo: enseña el diff, no escribe nada
+uv run antifaz setup claude-code --apply                # escribe (pide "yes")
+uv run antifaz setup claude-code --apply --yes          # sin preguntar (scripts)
+uv run antifaz setup claude-code --project --apply      # .claude/settings.local.json de esta carpeta
+uv run antifaz setup claude-code --url https://antifaz.mi-empresa.example --apply
+uv run antifaz setup claude-code --key-helper "~/bin/antifaz-key.sh" --apply
+uv run antifaz setup claude-code --uninstall --apply    # deshace lo suyo, si nadie lo cambió
+```
+
+- **Qué escribe**: solo `env.ANTHROPIC_BASE_URL` y, si se pasa `--key-helper`, `apiKeyHelper`. Nada más. La clave va en la variable de entorno `ANTHROPIC_AUTH_TOKEN`, que Claude Code envía como `Authorization: Bearer` y que no pide aprobación (con `ANTHROPIC_API_KEY`, Claude Code pregunta una vez en modo interactivo) ([fuente](https://code.claude.com/docs/en/llm-gateway-connect)). Antifaz acepta las dos cabeceras.
+- **Dónde**: por defecto, la configuración de usuario: `$CLAUDE_CONFIG_DIR/settings.json` si esa variable está puesta, si no `~/.claude/settings.json` (en Windows, `%USERPROFILE%\.claude\settings.json`) ([fuente](https://code.claude.com/docs/en/settings)). Con `--project`, `.claude/settings.local.json` de la carpeta actual. **Se niega** a escribir la configuración de usuario si está dentro de un repositorio git (hay un `.git`, carpeta o archivo, en su carpeta o en cualquiera de arriba, después de resolver enlaces y con mayúsculas y puntos finales de Windows normalizados) o si `CLAUDE_CONFIG_DIR` es el `.claude` de la carpeta actual: ahí podría subirse a git, como el `.claude/settings.json` compartido de un repositorio (la documentación de Claude Code avisa de no poner credenciales ahí). Con `--project` sí se escribe dentro del repositorio, porque `settings.local.json` es el archivo personal (Claude Code lo añade a tu gitignore global cuando guarda algo ahí; si lo creas tú, añádelo tú, [fuente](https://code.claude.com/docs/en/llm-gateway-connect)). Si un dotfiles tuyo vive en un repositorio con `~/.git`, se negará: apunta `CLAUDE_CONFIG_DIR` a otra carpeta o edita el archivo a mano.
+- **Precedencia** ([fuente](https://code.claude.com/docs/en/settings)): gestionada (empresa) > `--settings` > `.claude/settings.local.json` > `.claude/settings.json` > `~/.claude/settings.json`. `env` se combina variable a variable entre archivos y gana el de más prioridad ([fuente](https://code.claude.com/docs/en/settings-reference)). Un `env` de un archivo gana a la misma variable exportada en la shell ([fuente](https://code.claude.com/docs/en/llm-gateway-connect)): por eso, si el archivo ya tiene `ANTHROPIC_API_KEY` o `ANTHROPIC_AUTH_TOKEN`, se avisa (sin enseñar el valor): si es una clave real de Anthropic, Antifaz la rechaza con 401. Y si en la carpeta actual `.claude/settings.local.json` o `.claude/settings.json` ya ponen otro `ANTHROPIC_BASE_URL`, se avisa (solo el nombre del archivo): ganan a la configuración de usuario y, en esa carpeta, Claude Code no pasaría por Antifaz. Con `--project` no hace falta: `settings.local.json` es el de más prioridad de los del proyecto. En cambio, con `--project` dentro de un repositorio se comprueba con `git check-ignore -q` que `.claude/settings.local.json` está ignorado, y si no lo está se avisa; si git no está instalado o falla, se dice que no se ha podido comprobar.
+- **Configuración gestionada**: si existe `managed-settings.json` en la carpeta del sistema (`/Library/Application Support/ClaudeCode/` en macOS, `/etc/claude-code/` en Linux y WSL, `C:\Program Files\ClaudeCode\` en Windows; [fuente](https://code.claude.com/docs/en/managed-settings)), se avisa de que sus valores ganan. Solo se mira si existe; no se lee.
+- **Ensayo por defecto**: imprime un diff unificado y el SHA-256 del archivo. En el diff **todos los valores están ocultos** (`<hidden>`) salvo los **valores nuevos** de las dos entradas de este comando. Los valores anteriores de esas dos entradas nunca se enseñan, ni aunque parezcan inofensivos: salen como `<previous value, sha256 1a2b3c4d>` (8 caracteres del SHA-256), lo justo para ver que cambian. Los **nombres** de las claves solo se ven en el primer nivel y dentro de `env` (nombres de variables); más abajo salen como `<hidden key 1>`, `<hidden key 2>`…, porque el nombre de un servidor MCP o de una regla también puede decir demasiado. Es una lista de lo que se enseña, no de lo que se oculta: un secreto de otra herramienta nunca sale por pantalla. Si el archivo se va a reformatear (sangría distinta), se dice.
+- **Con `--apply`**: pregunta (`yes`), o `--yes`; sin terminal y sin `--yes`, código 2. Después: vuelve a leer el archivo y compara el SHA-256 con el del diff (si cambió: "changed meanwhile; run again", código 1, no toca nada) → copia `settings.json.bak-AAAAMMDD-HHMMSS` (`O_EXCL` y `0600`; `-1`, `-2`… si ya existe: nunca pisa otra) → temporal `0600` en la misma carpeta → se vuelve a leer como JSON → `os.replace` (reintentos en Windows). Son las mismas piezas que `init` (`_open_new`, `_write_all`, `write_backup`, `_replace`). Si el archivo no existía, se crea (y la carpeta, `0700`) solo con nuestra entrada; si aparece mientras tanto, no se pisa. El archivo nuevo queda `0600` en Linux y macOS.
+- **Copias de seguridad**: son una copia **del archivo anterior entero**, con lo que tuviera de otras herramientas (por ejemplo, un token dentro de una regla de `permissions` o un valor de `env`). Por eso nunca van dentro de un repositorio: la de la configuración de usuario va junto a ella, y la de `--project` va fuera del proyecto, en `$CLAUDE_CONFIG_DIR/antifaz-backups/<hash>/` (por defecto `~/.claude/antifaz-backups/<hash>/`, con `<hash>` = 16 caracteres del SHA-256 de la ruta del proyecto). Si esa carpeta estuviera dentro de un repositorio, se para antes de escribir nada. Al terminar se imprime la ruta completa de la copia y el aviso de que lleva secretos. Se guarda una por cambio, así que se acumulan: bórralas cuando ya no las necesites. En Windows `0600` no tiene efecto: la copia hereda los permisos (ACL) de su carpeta, que en tu perfil son solo tuyos.
+- **Formato**: JSON con sangría de 2 espacios; el orden de las claves se mantiene y las nuevas van al final. Se conservan una marca BOM y los saltos CRLF. Los números se reescriben como los escribe Python (`1.50` pasaría a `1.5`).
+- **Se para sin tocar nada** si el archivo no se puede leer, no es UTF-8, no es JSON válido (Claude Code tampoco: un comentario `//` o una coma final son un error de sintaxis, [fuente](https://code.claude.com/docs/en/settings)), tiene una clave repetida en un objeto (`object_pairs_hook`), `NaN`/`Infinity` o un número que no cabe en un `float` (`1e999`), texto con sustitutos UTF-16 sueltos (`"\ud800"`, en claves o valores), más de 64 niveles de anidamiento, un nivel superior que no es un objeto, un `env` que no es un objeto, más de 1 MiB, o si es un enlace simbólico, un archivo con otros enlaces duros (`os.replace` los separaría) o una carpeta. Un error de permisos al mirar el archivo (o una carpeta de arriba) da un mensaje fijo y código 2, sin traza. Todo esto se comprueba al leer, así que falla ya en el ensayo, con un mensaje fijo. Si la **carpeta** `~/.claude` (o una de arriba) es un enlace o una unión (junction) de Windows, como hacen los gestores de dotfiles, se avisa con la ruta real y se escribe en la carpeta real (el enlace no se toca).
+- **`--url`**: `http(s)://host[:puerto][/ruta]` sin usuario, contraseña, consulta ni fragmento (no se repite en el error: podría llevar una contraseña); se quita la `/` final. Aviso si es `http` a otra máquina (la clave viajaría sin cifrar); "misma máquina" es `localhost` o una dirección IP de loopback (`ipaddress`), así que `127.algo.example` no cuenta. Se rechaza si la **ruta** contiene algo con forma de clave (el nombre de host no se mira: los hay largos o con hexadecimal) o el valor de `ANTIFAZ_API_KEY`, `ANTHROPIC_AUTH_TOKEN` o `ANTHROPIC_API_KEY` del entorno (se compara, nunca se muestra).
+- **`--key-helper`**: el comando tal cual lo da el usuario. Claude Code lo ejecuta con la shell del sistema cada vez que necesita la clave (con caché de 5 minutos por defecto) y envía lo que devuelve en `Authorization` y en `x-api-key` ([fuente](https://code.claude.com/docs/en/llm-gateway-connect); el formato exacto de la salida, en [la referencia](https://code.claude.com/docs/en/settings-reference#apikeyhelper)). Se avisa de que ejecuta un comando. Se rechaza si parece llevar una clave (una tira hexadecimal de 32 o más, `sk-…`, una tira de 24 o más caracteres con dígitos o mayúsculas y minúsculas mezcladas y entropía alta, o el valor de esas variables del entorno; un nombre legible como `get-antifaz-key-from-the-vault` pasa): el archivo de configuración nunca debe contener una clave.
+- **Propiedad sin comentarios ni archivo aparte**: JSON no tiene comentarios, y un archivo de marcas aparte podría quedar desincronizado o copiar un secreto. `--uninstall` quita `env.ANTHROPIC_BASE_URL` solo si sigue siendo igual a `--url`, y `apiKeyHelper` solo si se pasa `--key-helper` con el mismo comando (si no se pasa, se deja y se avisa); si alguien lo cambió, se para (código 2) con un mensaje que nombra la entrada, sin diff y sin tocar nada. Si `env` queda vacío, se quita. Límites aceptados: un `env: {}` que ya estaba vacío antes desaparece (para Claude Code es lo mismo), y si nuestro valor ya estaba antes de `setup`, `--uninstall` también lo quita. Un `ANTHROPIC_BASE_URL` anterior distinto no se restaura (podría llevar una contraseña y habría que guardarlo en otro sitio): está en la copia `.bak`.
+- **Si Antifaz está caído**: Claude Code da un error de conexión ("Connection refused…") y no manda la petición a ningún otro sitio: no vuelve solo a `api.anthropic.com`. Para apagarlo en un minuto: `antifaz setup claude-code --uninstall --apply` (o borrar `ANTHROPIC_BASE_URL` del `env` a mano), quitar `ANTHROPIC_AUTH_TOKEN` y reiniciar Claude Code. Ojo: aunque las peticiones al modelo pasen por Antifaz, Claude Code manda su telemetría y otras peticiones no esenciales directamente a Anthropic (sin la clave de Antifaz); se apagan con `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` ([fuente](https://code.claude.com/docs/en/llm-gateway-connect)).
+- **Superficies**: la CLI de Claude Code y sus agentes en segundo plano leen `settings.json`. La extensión de VS Code comprueba la credencial con su propio ajuste `claudeCode.environmentVariables`, y la app de escritorio no lee `ANTHROPIC_BASE_URL` ni `settings.json` ([fuente](https://code.claude.com/docs/en/llm-gateway-connect)); no se configuran aquí.
+- **La clave en la variable de entorno**: en bash/zsh, `export ANTHROPIC_AUTH_TOKEN=…` en `~/.bashrc` o `~/.zshrc`; en PowerShell, `[Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "…", "User")` (permanente para tu usuario; abre un terminal nuevo). Lo que se escribe en el prompt queda en el historial de la shell: mejor pegarlo en el archivo de perfil con un editor (o, en Windows, en "Editar las variables de entorno de esta cuenta"). Después, reinicia Claude Code; `/status` debe mostrar "Anthropic base URL". Y `antifaz doctor` para la pasarela.
+- **Límites conocidos**: no detecta repositorios con el `.git` en otra parte (`GIT_DIR` o `core.worktree`), solo un `.git` en la carpeta o encima. Si el proceso muere a la fuerza a mitad de la escritura (`kill -9`, corte de luz), puede quedar un `settings.json.tmp-…` (`0600`) en la carpeta, con el contenido nuevo entero (también lo de otras herramientas): el archivo de configuración sigue entero (el cambio es atómico) y ese temporal se debe borrar a mano; con Ctrl-C se borra solo.
+- **Códigos de salida**: 0 hecho, nada que hacer o ensayo; 2 uso incorrecto o rechazado (no se escribe nada); 1 el archivo cambió mientras tanto o no se pudo escribir (el anterior sigue igual; si ya había copia, dice su nombre).
+- **Pendiente**: una ejecución real de Claude Code a través de Antifaz (menos de 1 €, con el OK de Miquel) cuando haya crédito de Anthropic. Hasta entonces solo está probado con tests.
+- Tests: `tests/unit/test_cli_setup_claude_code.py`, siempre en `tmp_path` con `HOME`, `USERPROFILE` y `CLAUDE_CONFIG_DIR` falsos (nunca la configuración real de la máquina): archivo inexistente, JSON roto, claves repetidas, BOM y CRLF, entradas de otras herramientas (`hooks`, `permissions`), cambio entre el diff y la escritura, archivo que aparece mientras tanto, copias que no se pisan, fallo y reintentos de `os.replace`, desinstalar (igual y distinto), rechazo del `settings.json` compartido, rutas de Windows y `CLAUDE_CONFIG_DIR`, el ensayo no escribe nada, claves canario en el entorno que nunca llegan al archivo, a las copias, al diff ni a stdout/stderr, y Hypothesis: instalar y desinstalar devuelve el mismo objeto JSON (con BOM y CRLF). Tras la revisión, también: copias de `--project` fuera del repositorio y nunca dentro de uno, destino dentro de cualquier repositorio (subcarpetas, `.Claude`, punto final, `.git` como archivo), sustitutos sueltos, anidamiento profundo y `1e999` en el ensayo, valores anteriores nunca en claro, aviso de archivos del proyecto que ganan, enlace simbólico y unión de Windows en la carpeta, enlace duro, loopback con `ipaddress` y nombres de host largos. También en el job `cli-windows`.
 
 ## NER: la infraestructura (issue 6, PR 6a)
 
@@ -551,6 +683,8 @@ La app ya no se crea al importar el módulo: `uvicorn --factory antifaz.api.app:
 |---|---|---|
 | `ANTIFAZ_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Valores aceptados en la cabecera `Host` (sin el puerto y sin distinguir mayúsculas). Otro → 400. Admite `*.ejemplo.com`, no `*` ni `*.com` |
 | `ANTIFAZ_ALLOWED_ORIGINS` | vacía | Orígenes de navegador aceptados, exactos y sin barra final (`https://intranet.ejemplo.com`). Vacía: toda petición con `Origin` → 403 |
+| `ANTIFAZ_ADMIN_TOKEN` | sin definir | Token que abre el panel en `/panel` (ADR-0018, issue 53). Sin la variable, el panel no existe. Mismas reglas que `ANTIFAZ_API_KEY` y distinto de ella y de las claves de los proveedores. Vacía (`ANTIFAZ_ADMIN_TOKEN=`) es un error: "is empty: set a value or remove the variable" |
+| `ANTIFAZ_TRUSTED_PROXIES` | vacía | IP exacta del proxy inverso que tiene delante el panel (por ejemplo `172.20.0.10`, una /32; nunca la puerta de enlace de Docker ni la red entera). Solo una conexión desde ellos puede fijar `X-Forwarded-For` y `X-Forwarded-Proto` para el panel. Se rechazan `0.0.0.0/0`, `::/0`, rangos con bits de host (`10.0.0.1/8`) y cualquier otra cosa |
 
 **En cada petición**, en este orden:
 
@@ -572,6 +706,22 @@ Además: `X-Request-ID` siempre lo genera la pasarela (el del cliente se ignora)
 - `root_path` no está soportado: si la sirves bajo un prefijo (`--root-path`), `/healthz` puede pedir clave, porque la lista pública compara la ruta exacta y, si no coincide, falla cerrada.
 
 **Tests.** `tests/redteam/test_invariants_12_13.py` recorre las rutas que la app registra de verdad (con `iter_route_contexts`, porque en FastAPI `app.routes` guarda los routers incluidos y no sus rutas), cada una con GET, HEAD, POST, PUT, PATCH, DELETE y OPTIONS y con alias (barra final, doble barra, mayúsculas, último carácter codificado): sin clave, 401 salvo `/healthz`. Cada ruta del proxy pasa por la guardia de salida con los mismos bytes que recibe el proveedor, y si la guardia bloquea no sale nada (invariante 12). Otro test usa claves canario y recorre 401, 400, 403, 404, 413, 415, 502 y 504, errores del proveedor y un proveedor que devuelve las cabeceras que recibió, con los loggers en `DEBUG`: ninguna clave aparece en logs, cuerpos ni cabeceras (invariante 13). Los ataques están en `tests/redteam/test_gateway.py`.
+
+## Puerta del panel (issue 53): configuración (11b-1)
+
+Primer PR de la puerta del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)). **No añade ninguna ruta ni toca `api/gate.py`**: la pasarela se comporta igual que antes. Solo deja lista la configuración y las piezas puras que usará la puerta en el PR 11b-2.
+
+- **Variables**: `ANTIFAZ_ADMIN_TOKEN` y `ANTIFAZ_TRUSTED_PROXIES` (tabla de arriba), en `config.py`, `.env.example` y la plantilla de `init` (un test impide que estas dos copias se separen). `check_safe_to_start` comprueba el token con las mismas reglas que la clave de la API, que sea distinto de ella y de las dos claves de proveedor (con `hmac.compare_digest`). Cada proxy pasa por **una sola regla**, `antifaz/trusted_networks.py`, que usan a la vez `config.py` y la puerta del panel: `ipaddress.ip_network(strict=True)`, sin `/0`, sin zona `%` y sin rangos IPv6 con IPv4 dentro (`::ffff:…`), que nunca coincidirían porque la IP de la conexión se lee como IPv4. Los mensajes nombran la variable, nunca el valor.
+- **Invariante 13**: `configured_keys` incluye el token, así que `KeyWatch`, `client_values_hold_a_key` y el 502 por clave repetida del proveedor lo vigilan igual que a las otras claves (`tests/redteam/test_admin_token_watched.py`). `antifaz verify` también pone un token canario y comprueba que no sale.
+- **`antifaz init`** genera siempre el token, igual que la clave (`secrets.token_hex(32)`, y otra vez si saliera igual que la clave). Lo enseña con la misma regla que la clave: solo en un terminal o con `--show-key`. Dice la URL del panel (`http://localhost:8000/panel`) y cómo apagarlo: borrar la línea `ANTIFAZ_ADMIN_TOKEN` de `.env` y reiniciar. Si hace copia del `.env` anterior, recuerda que la copia guarda las claves y el token antiguos y que hay que borrarla después de rotarlos (ADR-0017).
+- **`antifaz doctor`** añade "panel: on/off" y "trusted proxies: N" (solo el número, nunca las IP), y avisa, también solo con el número, si algún rango es más ancho que /24 (IPv4) o /64 (IPv6).
+- **Qué poner en `ANTIFAZ_TRUSTED_PROXIES`**: la IP **exacta** del contenedor del proxy (una /32), fija en Compose con `ipv4_address`. **Nunca** la puerta de enlace de Docker (`172.x.0.1`) ni la red entera: con el puerto publicado, las peticiones que entran por él llegan desde esa puerta de enlace, así que cualquier cliente podría falsear `X-Forwarded-For` y `X-Forwarded-Proto`. El proxy tiene que añadir `X-Forwarded-For` (al final, no en una línea nueva delante); si no lo añade, todos los clientes cuentan como el proxy y comparten el límite de intentos.
+- **`antifaz.web`**, solo biblioteca estándar (más `antifaz.trusted_networks`, que también lo es):
+  - `forwarded.py`: `client_ip` recorre `X-Forwarded-For` de derecha a izquierda y devuelve la primera IP que no es de un proxy de confianza. Si la conexión no llega de un proxy de confianza, la cabecera se ignora. Se saltan los elementos vacíos (RFC 9110 §5.6.1) y se aceptan entradas con puerto (`a.b.c.d:puerto`, `[v6]` y `[v6]:puerto`), porque algunos proxies las escriben así. Si todas son de confianza, no hay ninguna o la primera que no es de confianza es basura (`unknown`, `%zona`, un puerto fuera de 1–65535, texto), se usa la IP de la conexión. Lo que hay a la izquierda del cliente ni se lee: así un cliente no puede añadir basura para que todos cuenten como la IP del proxy (y bloquear el login de todos). Tiene tope: como mucho 16 entradas y los últimos 8 KiB del texto, leyendo las líneas desde la última y solo hasta donde hace falta (una cabecera de 2 MB o 100 000 líneas repetidas no cuestan más); lo que queda cortado a la izquierda no se lee, y el corte por sí solo no hace volver a la IP de la conexión. Varias líneas se leen en orden (RFC 9110): un proxy que pone su línea **delante** deja a la derecha la línea que escribió el cliente, así que solo hay que fiarse de proxies que añaden al final. Las IPv6 con IPv4 dentro (`::ffff:a.b.c.d`) se leen como IPv4. `effective_scheme` solo acepta `X-Forwarded-Proto` de un proxy de confianza, una sola cabecera y exactamente `https` o `http`; si no, "no es HTTPS". `is_local_host` solo es cierto para `localhost`, `127.0.0.1` y `[::1]`, sin puerto o con uno de 1 a 65535: `localhost.evil.com` o `127.0.0.2`, no.
+  - `sessions.py`: `SessionStore` (interfaz) y `MemorySessionStore`. El identificador sale de `secrets.token_urlsafe(32)` y solo se guarda su huella SHA-256, con la hora de creación, el último uso y el token CSRF, en un `Session` inmutable cuyo `repr` no enseña ni la huella ni el token CSRF. 8 horas como máximo y 30 minutos sin uso, comprobado al consultar (sin temporizadores). `on_close` avisa con el motivo (`logout`, `expired`, `evicted`) para cortar las conexiones de «En directo»; si un suscriptor falla, se registra un mensaje fijo con el tipo del error y se sigue avisando a los demás: cerrar, consultar o crear una sesión nunca falla por eso. Con 32 sesiones, al crear otra se expulsa la más antigua: **el login nunca se rechaza porque esté lleno**.
+  - `login_limit.py`: como mucho 5 fallos en cualquier ventana de 60 s, `Retry-After` redondeado hacia arriba, sin límite global. Cuenta por IP en IPv4 y por /64 en IPv6 (una máquina suele tener una /64 entera). Cada IP guarda como mucho la hora de sus 5 últimos fallos y la tabla 10 000 IP, ordenadas por el último fallo; al llenarse se sacan por delante las caducadas y luego la del fallo más antiguo (coste constante amortizado): una IP nueva siempre puede intentarlo.
+  - Ninguna de las tres usa cerrojos: son correctas solo si todo corre en el mismo bucle de eventos y sin `await` a mitad de una llamada. Por eso las rutas de 11b-2 que las usen serán `async def`, y los avisos de `on_close` son síncronos y no bloquean (el SSE solo marcará un `asyncio.Event` o usará `call_soon`).
+- **Tests**: unitarios de cada pieza, propiedades con Hypothesis (la IP elegida nunca está a la izquierda del primer no confiable desde la derecha, con puertos y el tope de 16; el esquema de un par no confiable es siempre el de la conexión; validez de la sesión con relojes aleatorios; nunca más de 5 fallos en 60 s, también si se registran fallos estando bloqueado) y tests de AST: `antifaz/web` no llama a `get_secret_value`, no lee `admin_token`, `_secret_value`, `model_dump` ni `__dict__`, no llama a `vars` ni a `getattr` con un nombre que no sea literal y no importa `antifaz.config` ni `pydantic` (en 11b-2 el panel solo recibirá la huella). `scripts/check_coverage.py` exige un 90 % en `web/`.
 
 ## Decisiones técnicas del issue 1
 

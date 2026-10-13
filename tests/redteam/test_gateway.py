@@ -348,7 +348,7 @@ def test_los_valores_de_env_example_no_arrancan() -> None:
 def test_cada_clave_de_env_example_se_rechaza_sola() -> None:
     example = Settings(_env_file=REPO / ".env.example")  # type: ignore[call-arg]
     good = SecretStr(GATEWAY_KEY)
-    for field in ("antifaz_api_key", "openai_api_key", "anthropic_api_key"):
+    for field in ("antifaz_api_key", "openai_api_key", "anthropic_api_key", "admin_token"):
         value = getattr(example, field)
         assert value is not None, field
         overrides = {"openai_api_key": None, "anthropic_api_key": None, "antifaz_api_key": good}

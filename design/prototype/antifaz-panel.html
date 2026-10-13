@@ -1,0 +1,1678 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antifaz · Panel (prototipo)</title>
+<link rel="icon" href="../../docs/images/logo.svg" type="image/svg+xml">
+<!-- Fonts bundled with Antifaz (design/fonts, OFL-1.1): no external requests. -->
+<link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../tokens.css">
+<script>
+/* Entry: only the first time per session and never with reduced motion. Decided here, before the
+   first paint, so the panel never flashes behind the doors. If the browser does not let the page
+   use sessionStorage, there is no entry (better than repeating it on every load). */
+(function(){ try{ var r=document.documentElement;
+  if(!r.animate||matchMedia("(prefers-reduced-motion: reduce)").matches||sessionStorage.getItem("antifaz-intro")) return;
+  sessionStorage.setItem("antifaz-intro","1"); r.classList.add("intro-pending","intro"); }catch(e){} })();
+</script>
+<style>
+/* Layout: a macOS-style window (translucent sidebar + main view) floating on a soft ambient
+   glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
+   The window is a size container, so "Móvil" and a real phone use the same rules.
+   Colours come only from design/tokens.css.
+   Redesign, step 5: the shell (frosted window, sidebar, header, phone bar), the five views with
+   their five states, the mask animation and the entry all use the new language. Motion uses the
+   Web Animations API (no library) and moves only transform and opacity, plus the width of each
+   datum while it becomes its marker; hover may also fade colours and shadows.
+   Shell pieces use their own prefixed class names (app-*, ambient-*, proto-*) so nothing
+   collides with the views (in the reference, the intro doors were called .top like the header
+   and took its z-index). */
+
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--color-bg)}
+body{margin:0;background:transparent;color:var(--color-text);font-family:var(--font-sans);font-optical-sizing:auto;font-size:var(--text-md);line-height:var(--leading-body);letter-spacing:var(--tracking-tight);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:var(--font-features)}
+button,input,textarea,select{font:inherit;color:inherit;letter-spacing:inherit}
+h1,h2,h3,p,ol,ul,dl,dd,figure{margin:0}
+ol,ul{padding:0;list-style:none}
+h1,h2,h3{text-wrap:balance}
+:focus-visible{outline:none;box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.ic{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.mono{font-family:var(--font-mono);letter-spacing:0}
+.code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);color:var(--color-text);padding:1px 6px;border-radius:var(--radius-xs);letter-spacing:0}
+
+.skip{position:absolute;left:16px;top:12px;transform:translateY(-72px);z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:transform var(--duration-fast) var(--ease-out)}
+.skip:focus{transform:none}
+
+.page{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
+
+/* ---------- Prototype strip (not part of the product) ---------- */
+.proto-strip{display:flex;align-items:center;gap:10px 16px;padding:8px 10px 8px 12px;border:1px dashed var(--color-line-strong);border-radius:var(--radius-callout);font-size:var(--text-sm);color:var(--color-text-muted);min-width:0;flex-wrap:wrap}
+.proto-badge{font-family:var(--font-mono);font-size:var(--text-2xs);font-weight:var(--weight-semibold);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-surface-3);padding:3px 8px;border-radius:var(--radius-pill);white-space:nowrap}
+.proto-title b{color:var(--color-text);font-weight:var(--weight-semibold)}
+.proto-spacer{flex:1}
+.chips{display:flex;gap:2px;padding:3px;border-radius:var(--radius-pill);background:var(--color-surface-3);border:0;margin:0;min-width:0;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.chips input{position:absolute;opacity:0;width:1px;height:1px}
+.chips label{padding:4px 11px;border-radius:var(--radius-pill);cursor:pointer;font-weight:var(--weight-medium);color:var(--color-text-muted);white-space:nowrap}
+.chips label:has(input:checked){background:var(--color-surface);color:var(--color-text);font-weight:var(--weight-semibold);box-shadow:var(--shadow-pop)}
+.chips label:has(input:focus-visible){box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.tg{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:var(--weight-medium);white-space:nowrap}
+.tg input{position:absolute;opacity:0;width:1px;height:1px}
+.sw{width:30px;height:18px;border-radius:var(--radius-pill);background:var(--color-surface-3);box-shadow:inset 0 0 0 1px var(--color-control);position:relative;flex:none}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--color-knob);box-shadow:0 0 0 1px var(--color-control),var(--shadow-knob);transition:transform .35s var(--ease-spring)}
+.tg input:checked+.sw{background:var(--color-switch-on);box-shadow:none}
+.tg input:checked+.sw::after{transform:translateX(12px);box-shadow:var(--shadow-knob)}
+.tg input:focus-visible+.sw{box-shadow:0 0 0 2px var(--color-focus)}
+.tg input:disabled+.sw{opacity:.6}
+
+/* ---------- Ambient light behind the window (decoration; static) ----------
+   It does not move: with the frosted window on top, a moving background would make the browser
+   recompute the 40 px blur on every frame while the tab is visible, which goes against
+   "zero CPU when nobody is watching". */
+.ambient{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.ambient-blob{position:absolute;width:52vmax;height:52vmax;border-radius:50%;filter:blur(70px)}
+.ambient-blob.is-1{left:-14vmax;top:-26vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%)}
+.ambient-blob.is-2{right:-18vmax;top:-10vmax;background:radial-gradient(circle,var(--color-ambient-2),transparent 65%)}
+.ambient-blob.is-3{left:30vmax;bottom:-36vmax;background:radial-gradient(circle,var(--color-ambient-1),transparent 65%);opacity:.6}
+/* Fine grain over the page (an SVG noise, no colour of its own) */
+body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;opacity:var(--grain-opacity);mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* ---------- Window: frosted glass ---------- */
+.app-window{container:app/inline-size;border-radius:var(--radius-window);background:color-mix(in srgb,var(--color-window) var(--window-alpha),transparent);-webkit-backdrop-filter:blur(var(--window-blur)) saturate(var(--window-saturate));backdrop-filter:blur(var(--window-blur)) saturate(var(--window-saturate));box-shadow:var(--shadow-window),inset 0 1px 0 var(--color-window-highlight);overflow:clip}
+.app-shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:760px}
+.stage-wrap.is-mobile .app-window{max-width:390px;margin-inline:auto;border-radius:var(--radius-phone)}
+
+/* ---------- Sidebar (translucent over the glass) ---------- */
+.app-sidebar{background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha),transparent);border-right:1px solid var(--color-line);min-width:0;contain:size}
+/* Desktop: the sidebar column keeps its tint and hairline for the whole window, and its content
+   stays fixed while long views scroll (sticky, at most one viewport tall; it scrolls on its own
+   only if the viewport is very short). contain:size keeps the sidebar out of the row height,
+   so the window is as tall as the view, not as the viewport. */
+.app-sidebar-inner{position:sticky;top:0;height:100vh;height:100dvh;max-height:100%;overflow-y:auto;scrollbar-width:thin;overscroll-behavior:contain;padding:20px 12px 18px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.app-brand{display:flex;align-items:center;gap:10px;padding:0 8px;min-width:0}
+.app-logo{width:30px;height:30px;border-radius:var(--radius-control-sm);display:grid;place-items:center;background:linear-gradient(155deg,var(--logo-from),var(--logo-to));box-shadow:inset 0 0 0 1px var(--logo-ring),inset 0 1px 0 var(--logo-highlight),0 6px 14px -6px var(--logo-shadow);flex:none}
+.app-logo svg{display:block;width:20px;height:10px;fill:var(--logo-mask)}
+.app-wordmark{font-size:16.5px;font-weight:var(--weight-bold);letter-spacing:-.025em}
+.app-version{font-size:var(--text-2xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0;margin-left:auto}
+.app-bar-tools{display:none}
+.app-nav-label{font-size:var(--text-2xs);font-weight:var(--weight-semibold);color:var(--color-text-faint);padding:0 10px;margin-bottom:-14px}
+.app-tablist{position:relative;display:flex;flex-direction:column;gap:2px}
+.app-tab{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text);text-align:left;cursor:pointer;font-size:14px;font-weight:450;transition:background var(--duration-fast) var(--ease-out),box-shadow var(--duration-fast) var(--ease-out),transform var(--duration-fast) var(--ease-out)}
+.app-tab .ic{color:var(--color-text-muted);transition:color var(--duration-fast)}
+.app-tab:hover{background:var(--color-surface-3)}
+.app-tab:active{transform:scale(.98)}
+.app-tab[aria-selected="true"]{background:var(--color-surface);box-shadow:var(--shadow-pop);font-weight:var(--weight-semibold)}
+.app-tab[aria-selected="true"] .ic{color:var(--color-accent)}
+.app-tab[aria-selected="true"]:focus-visible{box-shadow:var(--shadow-pop),0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.app-tab kbd{margin-left:auto;font-family:var(--font-sans);font-size:var(--text-2xs);color:var(--color-text-faint);opacity:0;transition:opacity var(--duration-fast)}
+.app-tab:hover kbd,.app-tab:focus-visible kbd,.app-tab[aria-selected="true"] kbd{opacity:1}
+.app-tab-dot{width:7px;height:7px;border-radius:50%;margin-left:auto;flex:none}
+.app-tab-dot.is-warn{background:var(--color-warn)} .app-tab-dot.is-danger{background:var(--color-danger)}
+.app-tab-dot+kbd{margin-left:6px}
+.app-sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
+.app-sidebar-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
+.app-local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
+.app-local .dot{color:var(--color-ok)}
+
+/* Status in the header and the phone bar: a dot with a ring that pulses three times when it
+   appears or the state changes (the script restarts it), then stays still; and always a word
+   (never colour alone). No infinite loops anywhere: nothing moves while nobody acts. */
+.app-status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
+.app-status.is-ok{color:var(--color-ok)} .app-status.is-warn{color:var(--color-warn)} .app-status.is-danger{color:var(--color-danger)}
+.app-status-dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.app-status .app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) 3}
+.app-status .app-status-dot.is-reset::after{animation:none}
+
+/* Shared by the views: a static dot (the pulsing ring is only in the header and the phone bar) */
+.dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+@keyframes ring{0%{transform:scale(.4);opacity:.6}70%,100%{transform:scale(1.3);opacity:0}}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
+.status.ok{color:var(--color-ok)} .status.warn{color:var(--color-warn)} .status.danger{color:var(--color-danger)} .status.neutral{color:var(--color-text-muted)}
+
+/* ---------- Header: sticky and translucent; hides on scroll down, returns on scroll up ---------- */
+.app-main{min-width:0;display:flex;flex-direction:column}
+.app-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 28px;background:color-mix(in srgb,var(--color-window) var(--chrome-alpha),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));border-bottom:1px solid var(--color-line);transition:transform var(--duration-base) var(--ease-out),opacity var(--duration-base) var(--ease-out)}
+.app-crumb{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:auto;min-width:0}
+.app-crumb b{color:var(--color-text);font-weight:550}
+.app-iconbtn{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text-muted);cursor:pointer;flex:none;transition:background var(--duration-fast),color var(--duration-fast),transform var(--duration-fast) var(--ease-out)}
+.app-iconbtn:hover{background:var(--color-surface-3);color:var(--color-text)}
+.app-iconbtn:active{transform:scale(.92)}
+.app-iconbtn .ic{transition:transform .5s var(--ease-spring)}
+@media (hover:hover) and (pointer:fine){ .app-iconbtn:hover .ic{transform:rotate(-20deg)} }
+/* Never with reduced motion, and never while the focus is inside the bar */
+@media (prefers-reduced-motion: no-preference){
+  :root.chrome-hidden:not(.reduce-motion) .app-header:not(:focus-within){transform:translateY(-110%);opacity:0}
+}
+
+.app-content{padding:36px 44px 52px;display:flex;flex-direction:column;gap:22px;min-width:0}
+.app-content:focus{outline:none}
+.alerts{display:flex;flex-direction:column;gap:12px}
+.alerts:not(:has(>:not([hidden]))){display:none}
+.view{display:flex;flex-direction:column;gap:22px;min-width:0}
+.view.enter>*{animation:rise .55s var(--ease-out) both;animation-delay:calc(var(--i,0)*45ms)}
+.vh{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
+.vh>div{min-width:0;flex:1 1 320px}
+.vh h1{font-size:var(--text-title);font-weight:var(--weight-title);letter-spacing:var(--tracking-title);line-height:var(--leading-title)}
+.vh p{margin-top:8px;color:var(--color-text-muted);font-size:15.5px;max-width:62ch;letter-spacing:-.012em}
+.vh-side{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:var(--text-sm);color:var(--color-text-muted)}
+
+/* Intro: an orchestrated first appearance (runs once, ends at the normal resting state) */
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.intro .rv{animation:rise .8s var(--ease-out) both;animation-delay:calc(var(--intro-offset,0ms) + 120ms + var(--i,0)*70ms)}
+.intro .app-window{animation:win 1s var(--ease-out) var(--intro-offset,0ms) both}
+/* The pieces start rising while the doors open (1.25 s into the entry) */
+.intro-pending{--intro-offset:1250ms}
+
+/* Entry overlay: the mask appears and lights up indigo from left to right, «ANTIFAZ», then the
+   screen opens like two doors (upper and lower). Own class names: in the reference the doors were
+   called .top like the header and took its z-index. Decoration only: aria-hidden, no clicks, and
+   it fades by itself after 4 s if the script ever fails. */
+.intro-overlay{display:none}
+.intro-pending .intro-overlay{display:block;position:fixed;inset:0;z-index:200;pointer-events:none;animation:intro-failsafe .3s 4s forwards}
+@keyframes intro-failsafe{to{opacity:0;visibility:hidden}}
+.intro-door{position:absolute;left:0;right:0;height:50.2%;background:var(--color-bg)}
+.intro-door-upper{top:0;border-bottom:1px solid var(--color-line)}
+.intro-door-lower{bottom:0;border-top:1px solid var(--color-line)}
+.intro-logo{position:absolute;left:50%;top:50%;width:92px;height:46px;margin:-23px 0 0 -46px;opacity:0}
+.intro-logo svg{position:absolute;inset:0;width:100%;height:100%;fill:var(--color-text)}
+/* The indigo layer is revealed with two opposite translations (window in, picture held still) */
+.intro-lit{position:absolute;inset:0;overflow:hidden;transform:translateX(-100%)}
+.intro-lit svg{fill:var(--color-accent);filter:drop-shadow(0 0 14px var(--color-glow));transform:translateX(100%)}
+.intro-name{position:absolute;left:0;right:0;top:calc(50% + 40px);text-align:center;font-size:var(--text-sm);font-weight:var(--weight-semibold);letter-spacing:.32em;text-transform:uppercase;color:var(--color-text-muted);padding-left:.32em;opacity:0}
+/* The view title rises word by word (only during the entry; the plain text comes back after) */
+.intro-word{display:inline-block;overflow:hidden;vertical-align:top;padding-bottom:.1em;margin-bottom:-.1em}
+.intro-word>span{display:inline-block}
+@keyframes win{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
+
+/* Callouts */
+.callout{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:16px 18px;border-radius:16px;font-size:14px}
+.callout>.ic{width:20px;height:20px;grid-row:span 3;margin-top:1px}
+.callout strong{font-weight:var(--weight-semibold)}
+.callout p,.callout ol{color:var(--color-text)}
+.callout ol{margin:6px 0 0;padding-left:1.15em;display:grid;gap:3px;list-style:decimal}
+.callout.warn{background:var(--color-warn-soft)} .callout.warn>.ic,.callout.warn strong{color:var(--color-warn)}
+.callout.danger{background:var(--color-danger-soft)} .callout.danger>.ic,.callout.danger strong{color:var(--color-danger)}
+.callout.info{background:var(--color-accent-soft)} .callout.info>.ic,.callout.info strong{color:var(--color-accent-ink)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 16px;border:0;border-radius:var(--radius-pill);font-size:14px;font-weight:550;cursor:pointer;background:var(--color-surface-3);color:var(--color-text);transition:transform .2s var(--ease-out),background .2s,filter .2s,box-shadow .3s;white-space:nowrap}
+.btn:hover{filter:brightness(.97)}
+.btn:active{transform:scale(.96)}
+.btn:disabled{cursor:not-allowed;opacity:.55;transform:none;filter:none}
+.btn.primary{position:relative;overflow:hidden;background:var(--color-accent);color:var(--color-on-accent);box-shadow:inset 0 1px 0 var(--color-highlight),0 6px 16px -6px var(--color-glow)}
+.btn.primary::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,var(--color-sheen) 50%,transparent 70%);transform:translateX(-120%);transition:transform .8s var(--ease-out)}
+.btn.primary:not(:disabled):hover{filter:brightness(1.06);box-shadow:inset 0 1px 0 var(--color-highlight),0 10px 22px -8px var(--color-glow)}
+@media (hover:hover) and (pointer:fine){ .btn.primary:not(:disabled):hover::after{transform:translateX(120%)} }
+/* «Probar» is magnetic with a mouse (moves with the translate property; springs back on leave) */
+.btn.magnet{transition:transform .2s var(--ease-out),translate .5s var(--ease-out),background .2s,filter .2s,box-shadow .3s}
+.btn.magnet.is-released{transition:transform .2s var(--ease-out),translate .9s var(--ease-pop),background .2s,filter .2s,box-shadow .3s}
+.btn.primary:focus-visible{box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+.btn.ghost{background:transparent;color:var(--color-accent-ink);padding:0 10px}
+.btn.ghost:hover{background:var(--color-accent-soft)}
+.btn.ghost .ic.spin{transition:transform .6s var(--ease-spring)}
+@media (hover:hover) and (pointer:fine){ .btn.ghost:hover .ic.spin{transform:rotate(-180deg)} }
+.btn .ic{width:16px;height:16px}
+
+/* Composer (Playground) */
+/* The field is the card itself: a hairline (--color-line) and the soft drop, as in the reference. It is
+   identified by its visible label, its placeholder and the card (WCAG 1.4.11 note in design/README.md). */
+.composer{background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
+.composer:has(textarea:focus){box-shadow:0 0 0 1.5px var(--color-focus),0 0 0 6px var(--color-accent-soft),0 10px 28px -12px var(--color-glow)}
+.composer textarea:focus-visible{box-shadow:none}
+.composer label.cap{display:block;padding:16px 20px 0;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.composer textarea{display:block;width:100%;min-height:92px;border:0;outline:none;resize:vertical;background:transparent;padding:6px 20px 14px;font-size:16px;line-height:1.6;color:var(--color-text)}
+.composer textarea::placeholder{color:var(--color-text-faint)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:11px 12px 11px 20px;border-top:1px solid var(--color-line);background:var(--color-surface-2)}
+.bar .lbl{font-size:var(--text-sm);color:var(--color-text-muted)}
+.bar .sp{flex:1}
+#pg-example .short{display:none}
+.kh{font-size:var(--text-xs);color:var(--color-text-faint);white-space:nowrap}
+.kh kbd{margin-inline:1px;font-family:var(--font-sans);font-size:var(--text-2xs);padding:1px 5px;border-radius:5px;background:var(--color-surface);box-shadow:var(--shadow-pop);color:var(--color-text-muted)}
+.hint{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px;margin-top:-8px}
+.hint .ic{width:15px;height:15px}
+
+/* Segmented control with a spring thumb. --n options; the thumb follows the checked one.
+   The thumb is the reference's white pill with --shadow-pop (no dark ring). The selected option
+   does not depend on the pill: its label is --color-text at 600, the others --color-text-muted
+   at 500 (WCAG 1.4.11 is met by that text cue; see design/README.md). */
+.seg{--n:2;--k:0;position:relative;display:inline-grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));padding:3px;border-radius:var(--radius-md);background:var(--color-surface-3);margin:0;border:0;min-width:0}
+.seg legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.seg .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/var(--n));border-radius:8px;background:var(--color-surface);box-shadow:var(--shadow-pop);transform:translateX(calc(100% * var(--k)));transition:transform .45s var(--ease-spring)}
+.seg:has(input:nth-of-type(2):checked){--k:1}
+.seg:has(input:nth-of-type(3):checked){--k:2}
+.seg:has(input:nth-of-type(4):checked){--k:3}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg label{position:relative;z-index:1;padding:4px 14px;font-size:12.5px;font-weight:var(--weight-medium);text-align:center;cursor:pointer;color:var(--color-text-muted);white-space:nowrap;border-radius:8px}
+.seg.mono-l label{font-family:var(--font-mono);letter-spacing:0}
+.seg input:checked+label{color:var(--color-text);font-weight:var(--weight-semibold)}
+.seg input:focus-visible+label{box-shadow:0 0 0 2px var(--color-focus)}
+
+/* Empty states */
+.empty{display:grid;justify-items:center;text-align:center;gap:14px;padding:52px 24px;border-radius:var(--radius-lg);background:var(--color-surface-2)}
+.orb{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;background:var(--color-surface);box-shadow:var(--shadow-card);color:var(--color-accent)}
+.orb .ic{width:26px;height:26px}
+.empty p{max-width:48ch;color:var(--color-text-muted)}
+.empty p b{color:var(--color-text);font-weight:var(--weight-semibold)}
+
+/* ---------- «Así viaja tu texto»: card with a gradient border and a glow on top ----------
+   At rest it shows the last frame of the mask animation (what the AI receives and the reply with
+   the data back). The animation (script below) plays over that same markup. */
+.journey{position:relative;border-radius:20px;padding:20px 26px 24px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid transparent;
+  background:linear-gradient(color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent),color-mix(in srgb,var(--color-stage) var(--stage-alpha),transparent)) padding-box,linear-gradient(135deg,var(--color-edge),transparent 35%,transparent 65%,var(--color-edge)) border-box;
+  box-shadow:0 10px 30px -16px var(--color-glow)}
+.journey::before{content:"";position:absolute;inset:-60% 0 auto;height:80%;background:radial-gradient(45% 60% at 50% 0%,var(--color-accent-soft),transparent 70%);pointer-events:none}
+.jhead{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px}
+.eyebrow{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.jstage{position:relative;display:flex;flex-direction:column;gap:16px}
+.mrow{display:grid;gap:6px}
+.mcap{display:grid;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-faint)}
+.mcap>span{grid-area:1/1}
+.mcap-before{opacity:0}
+.wipe{position:relative}
+.jline{font-size:19px;line-height:1.8;letter-spacing:-.016em;overflow-wrap:anywhere}
+/* The mask: a line of light with a trail, moved only with transform: translateX */
+.gtrack{position:absolute;top:-10px;bottom:-10px;left:0;right:0;pointer-events:none}
+.jstage.is-running .gtrack{will-change:transform}
+.glider{position:absolute;top:0;bottom:0;left:-1px;width:2px;opacity:0}
+.glider::before{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(180deg,transparent,var(--color-accent) 18%,var(--color-accent) 82%,transparent);box-shadow:0 0 16px 3px var(--color-glow)}
+.glider::after{content:"";position:absolute;top:8%;bottom:8%;right:1px;width:90px;background:linear-gradient(90deg,transparent,var(--color-accent-soft));filter:blur(2px)}
+.glider svg{position:absolute;top:50%;left:50%;width:50px;height:25px;margin:-12.5px 0 0 -24px;fill:var(--color-accent);filter:drop-shadow(0 0 12px var(--color-glow))}
+/* A datum that turns into its marker (or back). At rest only the second child (.tok-b) is there;
+   while playing, the first (.tok-a) and a blurred copy (.tok-ghost, a fixed blur that only fades)
+   sit in the same grid cell, and the box width goes from one to the other. */
+.tok{position:relative;display:inline-grid;align-items:baseline;white-space:nowrap}
+.tok>.tok-a,.tok>.tok-ghost,.tok>.tok-b{grid-area:1/1;justify-self:start;transform-origin:0 50%}
+.tok-a,.tok-ghost{display:none;opacity:0}
+.jstage:is(.is-running,.is-measuring) .tok-a,.jstage:is(.is-running,.is-measuring) .tok-ghost{display:block}
+.tok-ghost{filter:blur(4px)}
+.jstage.is-running .tok{clip-path:inset(-12px -6px -12px -12px)}
+.tok-flash{position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 5px var(--color-scan-glow);opacity:0;pointer-events:none}
+.tok-glow{position:absolute;inset:-2px -4px;border-radius:8px;box-shadow:0 0 14px 2px var(--color-restore-glow);opacity:0;pointer-events:none}
+.flight{display:flex;align-items:center;gap:12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.flight span{white-space:nowrap}
+.flight .track{position:relative;flex:1;height:1px;min-width:40px;background:linear-gradient(90deg,var(--color-line-strong),var(--color-line-strong) 70%,transparent);transform-origin:0 50%}
+.flight .track i{position:absolute;top:-3px;left:0;width:7px;height:7px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 12px 2px var(--color-glow);opacity:0}
+
+/* Mouse-only details: a light that follows the cursor on the cards (moved with transform) and a
+   ~2° tilt of the journey card. The script adds them only for (hover: hover) and (pointer: fine). */
+.spot{position:relative}
+:where(.spot>:not(.spot-light,.sr-only)){position:relative}
+.spot-light{position:absolute;left:0;top:0;width:840px;height:840px;margin:-420px 0 0 -420px;border-radius:50%;background:radial-gradient(circle closest-side,var(--color-accent-soft),transparent);opacity:0;pointer-events:none;transition:opacity .4s var(--ease-out)}
+.spot.is-lit>.spot-light{opacity:1}
+@media (hover:hover) and (pointer:fine){
+  .journey.spot{transition:transform .6s var(--ease-out)}
+  .journey.spot.is-released{transition:transform .9s var(--ease-pop)}
+}
+
+/* Tokens in text */
+mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text);padding:1px 4px;border-radius:6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.ptype{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:var(--weight-semibold);letter-spacing:.04em;color:var(--color-pii);margin-left:5px;vertical-align:1px}
+.marker{display:inline-block;font-family:var(--font-mono);font-size:.78em;font-weight:var(--weight-medium);letter-spacing:0;line-height:1.45;background:var(--color-accent-soft);color:var(--color-accent-ink);border-radius:var(--radius-sm);padding:0 6px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent);vertical-align:1px}
+.restored{background:linear-gradient(var(--color-ok),var(--color-ok)) 0 100%/100% 1.5px no-repeat;padding-bottom:1px}
+
+.rm-note{display:none;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.reduce-motion .journey{display:none}
+.reduce-motion .rm-note{display:flex}
+
+/* Three panes as one surface with hairlines. Where they do not fit side by side, the switcher
+   (Escribes / Recibe la IA / Te vuelve) shows one at a time; it is hidden until then. */
+.pswitch{display:none;grid-template-columns:repeat(3,1fr);position:relative;padding:3px;border-radius:11px;background:var(--color-surface-3);margin-bottom:-6px}
+.pswitch .thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-pop);transition:transform .45s var(--ease-spring)}
+.pswitch[data-p="2"] .thumb{transform:translateX(100%)}
+.pswitch[data-p="3"] .thumb{transform:translateX(200%)}
+.pswitch button{position:relative;z-index:1;border:0;background:none;padding:6px 4px;font-size:12.5px;font-weight:var(--weight-medium);color:var(--color-text-muted);cursor:pointer;border-radius:9px;white-space:nowrap}
+.pswitch button[aria-pressed="true"]{color:var(--color-text);font-weight:var(--weight-semibold)}
+.panes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
+.pane{display:flex;flex-direction:column;gap:10px;padding:18px 20px 20px;min-width:0}
+.pane+.pane{border-left:1px solid var(--color-line)}
+.ph{display:flex;align-items:center;gap:9px}
+.num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:var(--text-2xs);font-weight:var(--weight-bold);background:var(--color-surface-3);color:var(--color-text-muted);font-variant-numeric:tabular-nums;flex:none}
+.ph h2{font-size:14px;font-weight:var(--weight-semibold);letter-spacing:-.012em}
+.ptext{font-size:14.5px;line-height:1.85;overflow-wrap:anywhere}
+.pfoot{margin-top:auto;font-size:var(--text-xs);color:var(--color-text-faint)}
+.note{display:grid;gap:6px;padding:14px 16px;border-radius:14px;font-size:13.5px}
+.note strong{display:flex;align-items:center;gap:8px;font-weight:var(--weight-semibold)}
+.note.danger{background:var(--color-danger-soft)} .note.danger strong{color:var(--color-danger)}
+.note.warn{background:var(--color-warn-soft)} .note.warn strong{color:var(--color-warn)}
+.note .sub{color:var(--color-text-muted);font-size:12.5px}
+
+.summary{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 18px}
+.found{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;min-width:0}
+.found dt{font-size:var(--text-sm);color:var(--color-text-muted);margin-right:4px}
+.found dd{margin:0;display:inline-flex;align-items:center;gap:7px;padding:4px 5px 4px 11px;border-radius:var(--radius-pill);background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line);font-size:var(--text-sm);white-space:nowrap}
+.found dd b{min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);display:grid;place-items:center;background:var(--color-surface);font-size:11.5px;font-weight:var(--weight-bold);font-variant-numeric:tabular-nums;box-shadow:var(--shadow-pop)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+/* Tabular digits suit counts and times, not names: in a model name they space out «-4-5» */
+.meta .ident{font-variant-numeric:normal}
+
+/* ---------- Shared by the four views (step 5): surfaces, tags, foot notes ----------
+   Same language as «Prueba un texto»: white surfaces with the soft card shadow, 18 px corners,
+   hairlines only where they separate, near-monochrome. Colour appears only on a state (dot or
+   icon, always with its word). Motion: transform and opacity only. */
+.surface{position:relative;background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);min-width:0;overflow:clip}
+.sh{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;padding:16px 20px 12px}
+.sh h2{font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:-.014em}
+.sh .aside{font-size:var(--text-xs);color:var(--color-text-faint)}
+/* A quiet tag: icon + word on a neutral pill. Colour only on the icon, never alone. */
+.tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border-radius:var(--radius-pill);font-size:var(--text-xs);font-weight:var(--weight-semibold);white-space:nowrap;background:var(--color-surface-2);color:var(--color-text-muted);box-shadow:inset 0 0 0 1px var(--color-line);font-variant-numeric:tabular-nums}
+.tag .ic{width:14px;height:14px}
+.tag.is-mask .ic{color:var(--color-accent)}
+.tag.is-ok .ic{color:var(--color-ok)}
+.tag.is-warn .ic{color:var(--color-warn)}
+.tag.is-danger .ic{color:var(--color-danger)}
+.tag.is-warn,.tag.is-danger{color:var(--color-text)}
+.foot{display:flex;align-items:flex-start;gap:9px;font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px}
+.foot .ic{width:16px;height:16px;margin-top:2px}
+/* Status in a card header: a static dot + word (the dot is decoration) */
+.status .dot{color:inherit}
+/* Neutral button (destructive or secondary actions are never indigo) */
+.btn.quiet{background:transparent;color:var(--color-text-muted);padding:0 12px;min-height:30px;font-size:var(--text-sm)}
+.btn.quiet:hover{background:var(--color-surface-3);color:var(--color-text);filter:none}
+.btn.quiet:focus-visible{box-shadow:0 0 0 3px var(--color-accent-soft),0 0 0 1.5px var(--color-focus)}
+/* Bars (counters by type and provider latency): the fill is full width and scaled with
+   transform: scaleX() from the left, never animated through width. --v is 0..1. */
+.meter{display:block;height:6px;border-radius:var(--radius-pill);background:var(--color-surface-3);overflow:hidden}
+.meter>i{display:block;height:100%;width:100%;border-radius:inherit;background:var(--color-text-muted);transform:scaleX(var(--v,0));transform-origin:0 50%;transition:transform .6s var(--ease-out)}
+
+/* ---------- En directo ---------- */
+.live-pill{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border-radius:var(--radius-pill);background:var(--color-surface);box-shadow:var(--shadow-pop);font-size:var(--text-sm);font-weight:var(--weight-medium);color:var(--color-text)}
+.live-pill .dot{color:var(--color-ok)}
+/* The day's counters: one surface divided by hairlines */
+.stats{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr) minmax(0,1fr);grid-template-areas:"prot block local" "prot chain chain"}
+.stat{padding:20px 22px 22px;display:flex;flex-direction:column;gap:6px;min-width:0;border-left:1px solid var(--color-line)}
+.stat.s-prot{grid-area:prot;border-left:0}
+.stat.s-block{grid-area:block}
+.stat.s-local{grid-area:local}
+.stat.s-chain{grid-area:chain;border-top:1px solid var(--color-line)}
+.stat-num{font-size:var(--text-3xl);font-weight:var(--weight-bold);letter-spacing:-.04em;line-height:1.05;font-variant-numeric:tabular-nums;font-optical-sizing:auto}
+.stat .stat-num.sm{font-size:34px}
+.stat-sub{font-size:var(--text-sm);color:var(--color-text-muted)}
+.bars{display:grid;gap:10px;margin-top:14px}
+.bars li{display:grid;grid-template-columns:76px minmax(0,1fr) 34px;align-items:center;gap:12px;font-size:var(--text-sm)}
+.bars li:first-child .meter>i{background:var(--color-text)}
+.bars .n{text-align:right;font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold)}
+.chain{display:flex;align-items:center;gap:8px;font-size:var(--text-lg);font-weight:var(--weight-semibold);letter-spacing:-.015em}
+.chain .ic{width:20px;height:20px}
+.chain.ok{color:var(--color-ok)} .chain.bad{color:var(--color-danger)}
+.chain-row{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap}
+/* The chain drawn as links (decoration; the word says the state). A cut link tilts and the
+   ones after it fade: they are no longer proof. */
+.chain-links{display:flex;align-items:center;gap:3px}
+.chain-links i{width:18px;height:9px;border-radius:var(--radius-pill);box-shadow:inset 0 0 0 1.5px var(--color-control)}
+.chain-links i.cut{box-shadow:inset 0 0 0 1.5px var(--color-danger);background:var(--color-danger-soft);transform:rotate(-14deg) translateY(1px)}
+.chain-links i.cut:not([hidden])~i{opacity:.4}
+/* Latest requests */
+.feed{display:flex;flex-direction:column}
+.ev{position:relative;display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:4px 14px;padding:12px 20px;border-top:1px solid var(--color-line)}
+.ev>:not(.ev-flash){position:relative}
+/* The highlight of a new row is its own layer: only its opacity moves (never the background) */
+.ev-flash{position:absolute;inset:0;background:var(--color-accent-soft);opacity:0;pointer-events:none}
+.ev time{font-family:var(--font-mono);font-size:12.5px;color:var(--color-text-faint);letter-spacing:0;font-variant-numeric:tabular-nums}
+.ev-main{display:flex;flex-direction:column;min-width:0}
+.ev-who{font-size:14px;font-weight:var(--weight-semibold)}
+.ev-who .ev-app{font-weight:var(--weight-regular);color:var(--color-text-muted)}
+.ev-app>span{white-space:nowrap}
+.ev-what{font-size:var(--text-sm);color:var(--color-text-muted)}
+.feed-empty{display:grid;justify-items:center;gap:10px;padding:28px 20px 32px;border-top:1px solid var(--color-line);text-align:center;color:var(--color-text-muted);font-size:14px}
+.feed-empty .orb{width:44px;height:44px;border-radius:14px}
+.feed-empty .orb .ic{width:20px;height:20px}
+.feed-empty p{max-width:46ch}
+
+/* ---------- Claves ---------- */
+.keys{width:100%;border-collapse:collapse;font-size:14px}
+.keys th{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted);text-align:left;padding:10px 16px;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line);white-space:nowrap;background:var(--color-surface-2)}
+.keys td{padding:14px 16px;border-top:1px solid var(--color-line);vertical-align:middle}
+.keys tbody tr:first-child td{border-top:0}
+.keys th:first-child,.keys td:first-child{padding-left:20px}
+.keys th:last-child,.keys td:last-child{padding-right:12px;text-align:right}
+.keys tbody tr{transition:background var(--duration-fast)}
+.keys tbody tr:hover{background:var(--color-surface-2)}
+.k-name{font-weight:var(--weight-semibold)}
+.k-id{display:block;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-faint);letter-spacing:0}
+.k-pol{font-family:var(--font-mono);font-size:12.5px;letter-spacing:0;padding:2px 8px;border-radius:var(--radius-pill);background:var(--color-surface-2);box-shadow:inset 0 0 0 1px var(--color-line)}
+.k-num{font-variant-numeric:tabular-nums}
+.keys td.k-use{min-width:150px}
+.k-muted{color:var(--color-text-muted)}
+.keys tr.revoked td:not(:last-child){color:var(--color-text-muted)}
+.keys tr.revoked .k-name{text-decoration:line-through;text-decoration-thickness:1px}
+.k-id,.keys td.k-muted{white-space:nowrap}
+/* The table needs about 780 px. Narrower (tablet with the sidebar, phone), each row becomes a
+   compact card: name, state and «Revocar» on top, the four facts below with their labels.
+   The surface is its own container, so this follows the space the table really has. */
+.keys-box{container:keys/inline-size}
+@container keys (max-width: 780px){
+  .keys thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .keys,.keys tbody{display:block;width:100%}
+  .keys tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:start;gap:8px 16px;padding:14px 20px;border-top:1px solid var(--color-line)}
+  .keys tbody tr:first-child{border-top:0}
+  .keys td,.keys td:first-child,.keys td:last-child{display:block;border:0;padding:0;text-align:left;font-size:var(--text-sm);letter-spacing:var(--tracking-small);min-width:0}
+  .keys td[data-label]::before{content:attr(data-label);display:block;font-size:var(--text-2xs);color:var(--color-text-muted)}
+  .keys td:first-child{grid-column:1/3;font-size:14px}
+  .keys td.k-state{grid-column:3;grid-row:1;align-self:center}
+  .keys td.k-state::before{display:none}
+  .keys td.k-act{grid-column:4;grid-row:1;justify-self:end;margin:-2px -8px 0 0}
+  .keys td.k-act:empty{display:none}
+}
+@container keys (max-width: 520px){
+  .keys tr{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;padding:13px 16px}
+  .keys td.k-state{justify-self:end;align-self:start}
+  .keys td.k-use{grid-column:1/3}
+  .keys td.k-act{grid-column:3;grid-row:auto;align-self:end;margin:-4px -8px -4px 0}
+}
+
+/* ---------- Políticas ---------- */
+/* Toolbar: the policy being edited, its revision, and saving */
+.pol-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px 12px 12px 20px;overflow:visible}
+.pol-bar .lbl{font-size:var(--text-sm);color:var(--color-text-muted)}
+.pol-bar .meta{flex:1 1 220px;min-width:0}
+.pol-bar .save-group{display:flex;align-items:center;gap:12px;margin-left:auto}
+.pol-bar .msg{font-size:var(--text-sm);color:var(--color-text-muted)}
+.help{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.help div{display:grid;align-content:start;gap:3px;padding:12px 14px;border-radius:14px;background:var(--color-surface-2)}
+.help dt{display:flex;align-items:center;gap:7px;font-size:var(--text-sm);font-weight:var(--weight-semibold)}
+.help dt .ic{width:15px;height:15px;color:var(--color-text-muted)}
+.help dd{font-size:12.5px;color:var(--color-text-muted)}
+.pol-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}
+.pol-col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.rows{display:flex;flex-direction:column}
+.prow{position:relative;display:flex;align-items:center;justify-content:space-between;gap:10px 16px;padding:11px 12px 11px 20px;border-top:1px solid var(--color-line)}
+.prow>*{position:relative}
+/* A changed row: a soft indigo wash and a bar on the left, both layers that only fade, plus the
+   word «cambiado» (never colour alone) */
+.prow::before,.prow::after{content:"";position:absolute;pointer-events:none;opacity:0;transition:opacity var(--duration-base) var(--ease-out)}
+.prow::before{inset:0;background:linear-gradient(90deg,var(--color-accent-soft),transparent 70%)}
+.prow::after{left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--color-accent)}
+.prow.changed::before,.prow.changed::after{opacity:1}
+.prow .nm{display:flex;flex-direction:column;min-width:0}
+.prow .nm b{font-size:14px;font-weight:var(--weight-semibold)}
+.prow .nm span{font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-faint);letter-spacing:0}
+.prow .nm .chg-note{font-family:var(--font-sans);color:var(--color-accent-ink);font-weight:var(--weight-semibold)}
+.prow .seg{flex:none}
+.prow .seg label{padding:4px 10px}
+/* A narrow column (two columns at about 1024 px) leaves no room for the name beside the four
+   options: then the name and its code go on top and the options below, as on the phone */
+.pol-types{container:poltypes/inline-size}
+@container poltypes (max-width: 420px){
+  .prow{flex-direction:column;align-items:stretch;gap:6px;padding:10px 12px 12px 16px}
+  .prow .nm{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .prow .seg{width:100%}
+  .prow .seg label{padding:5px 2px;font-size:12px}
+}
+.rules{display:flex;flex-direction:column}
+.rules li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px 12px;padding:11px 20px;border-top:1px solid var(--color-line);font-size:14px}
+.rules li:has(.seg){grid-template-columns:minmax(0,1fr) auto}
+.rules li .what{min-width:0}
+.rules .fixed{display:inline-flex;align-items:center;gap:5px;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-muted)}
+.rules .fixed .ic{width:13px;height:13px}
+.rules-foot{padding:12px 20px 16px;border-top:1px solid var(--color-line);font-size:12.5px;color:var(--color-text-muted)}
+.yaml{margin:0 12px 14px;padding:14px 16px;border-radius:14px;background:var(--color-surface-2);font-family:var(--font-mono);font-size:12.5px;line-height:1.7;letter-spacing:0;overflow-x:auto;color:var(--color-text);tab-size:2}
+.yaml .ln{position:relative;display:block;padding:0 6px;margin:0 -6px;white-space:pre}
+.yaml .ln>span{position:relative}
+/* The highlight of a changed line is a layer that only fades in */
+.yaml .ln>.hl{position:absolute;inset:0;border-radius:5px;background:var(--color-accent-soft)}
+.yaml .k{color:var(--color-text-muted)}
+.yaml .ln.chg .v{color:var(--color-accent-ink);font-weight:var(--weight-semibold)}
+
+/* ---------- Estado ---------- */
+.sgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.scard{display:flex;flex-direction:column}
+.scard .sh{padding-bottom:8px}
+.scard .desc{padding:0 20px 12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);margin:0 20px 8px}
+.kv dt,.kv dd{padding:9px 0;border-top:1px solid var(--color-line);font-size:var(--text-sm)}
+.kv dt{color:var(--color-text-muted);padding-right:16px}
+.kv dd{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.kv dd.mono{font-size:12.5px}
+.scard .cmd{margin-top:auto;padding:12px 20px 16px;border-top:1px solid var(--color-line);font-size:12.5px;color:var(--color-text-muted)}
+.ner{display:flex;flex-direction:column;gap:2px;padding:0 10px 12px}
+.ner li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:2px 10px;padding:8px 10px;border-radius:12px;font-size:var(--text-sm)}
+.ner li .dot{margin-top:6px}
+.ner li.now{background:var(--color-surface-2)}
+.ner b{font-weight:var(--weight-semibold)}
+.ner .mono{font-size:11.5px;color:var(--color-text-faint)}
+.ner p{grid-column:2/4;color:var(--color-text-muted);font-size:12.5px}
+.ner .dot.ok{color:var(--color-ok)} .ner .dot.warn{color:var(--color-warn)} .ner .dot.danger{color:var(--color-danger)}
+/* One grid for the three rows (each row is a subgrid): the name column is as wide as the longest
+   host, so a host never breaks and the bars line up */
+.prov{display:grid;grid-template-columns:max-content minmax(48px,1fr) minmax(0,max-content);column-gap:12px;padding:0 20px 8px}
+.prov li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;row-gap:12px;padding:11px 0;border-top:1px solid var(--color-line);font-size:14px}
+.prov .nm{display:flex;flex-direction:column;min-width:0}
+.prov .nm span{font-size:var(--text-xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0}
+.prov .status{justify-self:end;font-size:var(--text-sm);white-space:normal;text-align:right}
+.prov .status b{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold);color:var(--color-text)}
+.prov .meter.is-down>i{transform:scaleX(0)}
+
+/* ---------- Logo (prototype annex, outside the panel) ---------- */
+.annex{display:flex;flex-direction:column;gap:18px;padding:26px 28px 30px;border-radius:var(--radius-xl);background:var(--color-window);box-shadow:var(--shadow-window)}
+.annex h2{font-size:var(--text-xl);font-weight:var(--weight-bold);letter-spacing:-.025em}
+.annex>header p{margin-top:6px;color:var(--color-text-muted);font-size:14px;max-width:70ch}
+.lrow{display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;align-items:center;padding-top:18px;border-top:1px solid var(--color-line)}
+.lrow h3{font-size:var(--text-md);font-weight:var(--weight-semibold)}
+.lrow p{font-size:12.5px;color:var(--color-text-muted);margin-top:4px}
+.lsets{display:flex;flex-wrap:wrap;gap:12px}
+.lset{display:flex;align-items:flex-end;gap:16px;padding:16px 18px 10px;border-radius:16px;box-shadow:inset 0 0 0 1px var(--color-line)}
+/* Fixed stages: the logo is tested on light and dark whatever the page theme (documented exception). */
+.lset.on-light{background:#ffffff;color:#1d1d1f}
+.lset.on-dark{background:#0e0e11;color:#f5f5f7}
+.lset figure{display:grid;justify-items:center;gap:6px}
+.lset figcaption{font-size:var(--text-2xs);font-family:var(--font-mono);opacity:.75}
+.lset svg{display:block}
+
+/* Identifiers (key, team, model and policy names, ids, versions, markers, codes, commands) never
+   break inside: each one is an atomic inline box, so it moves whole to the next line and the text
+   between identifiers is what wraps. Only an identifier wider than its whole container may break,
+   as a last resort: max-width:100% caps the box at the container and overflow-wrap:anywhere then
+   breaks it. width:max-content keeps the box as wide as its text otherwise, and it is also what
+   tables, flex and grid items see when they size themselves (a percentage max-width does not
+   count there), so a column never shrinks an identifier to break it.
+   Last in the sheet so it wins over the white-space of .code, .k-id and friends.
+   scripts/check_design.py fails if an .ident renders on more than one line without needing to. */
+.ident{display:inline-block;width:max-content;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
+/* Small text (11-13 px): no negative tracking (--tracking-small = 0). The body's -0.011em suits
+   15 px and up; below that it closes the letters. Uppercase mono badges keep their own spacing. */
+.proto-strip,.chips label,.app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
+.composer label.cap,.bar .lbl,.kh,.hint,.seg label,.eyebrow,.mcap,.flight,.rm-note,.pfoot,.note .sub,.found dt,.found dd,.found dd b,
+.meta,.sh .aside,.tag,.foot,.live-pill,.stat-sub,.bars li,.ev-what,.keys th,.pol-bar .lbl,.help dt,.help dd,.rules .fixed,
+.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.lrow p,.num,
+.pswitch button{letter-spacing:var(--tracking-small)}
+
+/* ---------- Medium: one pane at a time, grids stack ---------- */
+/* The three panes need about 230 px each so an IBAN fits whole on one line. Below 1040 px of
+   window they are never stacked (a long page of three texts): the phone switcher shows one at a
+   time, «Recibe la IA» first. */
+@container app (width < 1040px){
+  .pswitch[aria-controls="pg-panes"]{display:grid}
+  .panes{grid-template-columns:minmax(0,1fr)}
+  .pane+.pane{border-left:0}
+  .panes[data-p="1"] .pane:not(.p1),.panes[data-p="2"] .pane:not(.p2),.panes[data-p="3"] .pane:not(.p3){display:none}
+  .panes .ph{display:none}
+  .pane{animation:rise .4s var(--ease-out)}
+}
+@container app (max-width: 980px){
+  .app-content{padding:30px 30px 44px}
+  .pol-grid{grid-template-columns:minmax(0,1fr)}
+  .flight .lbl2{display:none}
+  .help{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@container app (max-width: 800px){
+  .sgrid{grid-template-columns:minmax(0,1fr)}
+  .stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"prot prot" "block local" "chain chain"}
+  .stat.s-block{border-left:0;border-top:1px solid var(--color-line)}
+  .stat.s-local{border-top:1px solid var(--color-line)}
+  .stat.s-chain{border-left:0}
+}
+/* ---------- Phone (or simulated phone): compact, little scrolling ---------- */
+@container app (max-width: 640px){
+  .app-shell{grid-template-columns:minmax(0,1fr);min-height:0}
+  /* The sidebar becomes the fixed bar: brand, status and theme, with the tabs scrolling below */
+  .app-sidebar{position:sticky;top:0;z-index:6;contain:none;border-right:0;border-bottom:1px solid var(--color-line);background:color-mix(in srgb,var(--color-sidebar) var(--sidebar-alpha-phone),transparent);-webkit-backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));backdrop-filter:saturate(var(--chrome-saturate)) blur(var(--chrome-blur));transition:transform var(--duration-base) var(--ease-out)}
+  .app-sidebar-inner{position:static;height:auto;max-height:none;overflow:visible;padding:12px 12px 8px;gap:8px}
+  .app-brand{padding:0 4px}
+  .app-version{display:none}
+  .app-bar-tools{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
+  .app-bar-tools .app-status{font-size:var(--text-xs)}
+  .app-tablist{flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;padding:3px;margin:-3px;overscroll-behavior-x:contain}
+  .app-tablist::-webkit-scrollbar{display:none}
+  .app-nav-label,.app-sidebar-foot,.app-header,.app-tab kbd{display:none}
+  .app-tab{width:auto;flex:none;white-space:nowrap;padding:6px 11px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
+  .app-tab .ic{width:15px;height:15px}
+  .app-tab-dot{margin-left:2px}
+  .app-content{padding:18px 14px 24px;gap:14px}
+  .view{gap:14px}
+  .vh h1{font-size:var(--text-title-phone)}
+  .vh p{font-size:13.5px;margin-top:4px}
+  .composer{border-radius:16px}
+  .composer label.cap{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .composer textarea{min-height:0;height:74px;font-size:14.5px;line-height:1.5;padding:12px 14px 8px;resize:none}
+  .bar{padding:8px 8px 8px 12px;gap:8px;flex-wrap:nowrap}
+  .bar .lbl,.kh{display:none}
+  .btn{min-height:32px;padding:0 13px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
+  #pg-example .full{display:none}
+  #pg-example .short{display:inline}
+  .seg label{padding:4px 9px}
+  .hint{font-size:var(--text-xs);margin-top:-6px}
+  .journey{padding:12px 14px 16px;gap:8px;border-radius:16px}
+  .jstage{gap:10px}
+  .jline{font-size:14.5px;line-height:1.7}
+  .flight{font-size:11.5px;gap:8px}
+  .flight .lbl2{display:none}
+  .callout{padding:12px 14px;font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
+  .pswitch{display:grid}
+  .pane{padding:14px 16px}
+  .ptext{font-size:13.5px;line-height:1.75}
+  .pfoot{font-size:11.5px}
+  .found{gap:5px}
+  .found dt{display:none}
+  .found dd{font-size:var(--text-xs);padding:3px 4px 3px 9px;gap:6px}
+  .found dd b{min-width:18px;height:18px;font-size:10.5px}
+  .meta{font-size:11.5px;gap:2px 12px}
+  /* En directo: the big counter with its bars side by side, the rest in two columns */
+  .stat{padding:14px 16px 16px}
+  .stat.s-prot{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 18px;align-items:start}
+  .stat.s-prot>.eyebrow,.stat.s-prot>.stat-sub{grid-column:1/-1}
+  .stat.s-prot .bars{grid-column:2;grid-row:2/span 2;margin-top:2px;gap:6px}
+  .stat-num{font-size:36px}
+  .stat .stat-num.sm{font-size:26px}
+  .bars li{grid-template-columns:58px minmax(0,1fr) 26px;gap:8px;font-size:12px}
+  .chain{font-size:var(--text-md)}
+  .chain .ic{width:18px;height:18px}
+  .ev{grid-template-columns:minmax(0,1fr) auto;padding:10px 16px;gap:1px 10px}
+  .ev time{grid-column:2;grid-row:1;justify-self:end;font-size:11.5px}
+  .ev-main{grid-column:1;grid-row:1/3}
+  .ev>.tag{grid-column:2;grid-row:2;justify-self:end}
+  .ev-who{font-size:var(--text-sm)}
+  .ev-what{font-size:12.5px}
+  .sh{padding:14px 16px 10px}
+  .feed-empty{padding:20px 16px 24px}
+  /* Políticas: a column switcher (types / rules / file) instead of one long page */
+  .pol-bar{padding:10px 10px 10px 14px;gap:8px 10px}
+  .pol-bar .lbl{display:none}
+  .pol-bar .meta{order:3;flex-basis:100%}
+  .pol-bar .save-group{order:2;flex-basis:100%;justify-content:space-between}
+  .help{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .help div{padding:9px 11px}
+  .help dd{font-size:12px}
+  .pol-grid[data-p="1"] :is(.pol-rules,.pol-yaml),.pol-grid[data-p="2"] :is(.pol-types,.pol-yaml),.pol-grid[data-p="3"] :is(.pol-types,.pol-rules){display:none}
+  .pol-col{display:contents}
+  .pol-grid{gap:14px}
+  .pol-grid>*,.pol-col>*{animation:rise .4s var(--ease-out)}
+  .prow{flex-direction:column;align-items:stretch;gap:6px;padding:10px 12px 12px 16px}
+  .prow .nm{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .prow .seg{width:100%}
+  .prow .seg label{padding:5px 2px;font-size:12px}
+  .rules li{padding:11px 16px}
+  .rules-foot{padding-inline:16px}
+  .yaml{margin:12px 10px 12px;font-size:11.5px}
+  /* Estado */
+  .kv{margin:0 16px 6px}
+  .kv dt,.kv dd{padding:7px 0}
+  .scard .desc,.scard .cmd{padding-inline:16px}
+  .ner{padding:0 6px 10px}
+  .ner li{padding:6px 10px}
+  .prov{padding:0 16px 6px}
+  .prov{grid-template-columns:max-content minmax(0,1fr);column-gap:10px}
+  .prov li{row-gap:6px;padding:10px 0}
+  .prov .status{max-width:190px}
+  .prov .meter{grid-column:1/-1;grid-row:2}
+}
+@media (max-width:640px){
+  .proto-title,.proto-spacer{display:none}
+  .chips{flex:1 1 100%}
+  .chips label{padding:4px 8px;font-size:var(--text-xs)}
+  .annex{padding:20px 16px 22px;border-radius:20px}
+  .lrow{grid-template-columns:minmax(0,1fr)}
+  .lset{gap:12px;padding:14px 14px 8px}
+}
+
+/* Phone bar: hides on scroll down like the header (same guards) */
+@media (prefers-reduced-motion: no-preference){
+  @container app (max-width: 640px){
+    :root.chrome-hidden:not(.reduce-motion) .app-sidebar:not(:focus-within){transform:translateY(-100%)}
+  }
+}
+
+/* Reduced motion: the system setting, or the prototype toggle that previews it */
+.reduce-motion *,.reduce-motion *::before,.reduce-motion *::after{animation:none!important;transition:none!important}
+.reduce-motion .intro-overlay{display:none!important}
+@media (prefers-reduced-motion: reduce){
+  .journey,.intro-overlay{display:none!important}
+  .rm-note{display:flex}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+<!-- Entry, only the first time per session (decoration: hidden from screen readers, takes no clicks) -->
+<div class="intro-overlay" id="intro" aria-hidden="true">
+  <div class="intro-door intro-door-upper"></div><div class="intro-door intro-door-lower"></div>
+  <div class="intro-logo"><svg viewBox="0 0 52 26"><use href="#mask"/></svg><span class="intro-lit"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></div>
+  <p class="intro-name">Antifaz</p>
+</div>
+
+<!-- Shapes reused across the page -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <!-- The mask: one path with the eyes cut out (evenodd), so it takes any fill. -->
+  <symbol id="mask" viewBox="10 22 52 26"><path fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
+  <!-- The project logo: the mask in a rounded tile with the indigo gradient (same as docs/images/logo.svg). -->
+  <linearGradient id="logo-grad" x1="0.29" y1="0.05" x2="0.71" y2="0.95"><stop offset="0" style="stop-color:var(--logo-from)"/><stop offset="1" style="stop-color:var(--logo-to)"/></linearGradient>
+  <symbol id="logo-new" viewBox="0 0 32 32"><rect width="32" height="32" rx="9.6" fill="url(#logo-grad)"/><rect x="0.5" y="0.5" width="31" height="31" rx="9.1" fill="none" stroke="#ffffff" stroke-opacity="0.2"/><path transform="translate(0.08 0.52) scale(0.4423)" fill="#ffffff" fill-rule="evenodd" d="M12 32c0-6 6-8 12-8 5 0 8 3 12 3s7-3 12-3c6 0 12 2 12 8 0 8-6 14-13 14-5 0-8-4-11-4s-6 4-11 4c-7 0-13-6-13-14zM19 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0zM41 34a6 4.5 0 1 0 12 0a6 4.5 0 1 0-12 0z"/></symbol>
+  <!-- Line icons (stroke = currentColor) -->
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 15l4 3-4 3z"/></symbol>
+  <symbol id="i-live" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
+  <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-status" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 15l3-3 3 2 4-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2L2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17v.01"/></symbol>
+  <symbol id="i-block" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3 3.5M6.5 7.6C4.3 9.2 3 12 3 12s4 6 9 6a8.7 8.7 0 0 0 3.5-.7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M3 12s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-local" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2.5"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+  <symbol id="i-chain" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</defs></svg>
+
+<!-- Ambient light behind the window (decoration only) -->
+<div class="ambient" aria-hidden="true"><span class="ambient-blob is-1"></span><span class="ambient-blob is-2"></span><span class="ambient-blob is-3"></span></div>
+
+<a class="skip" href="#main">Saltar al contenido</a>
+
+<div class="page" lang="es">
+  <!-- Prototype only: not part of the panel -->
+  <section class="proto-strip rv" style="--i:0" aria-label="Controles del prototipo (no son parte del panel)">
+    <span class="proto-badge">Solo prototipo</span>
+    <span class="proto-title"><b>Muestra de estilo</b> · estos controles no son parte del panel</span>
+    <span class="proto-spacer"></span>
+    <fieldset class="chips">
+      <legend>Estado de ejemplo</legend>
+      <label><input type="radio" name="proto-state" id="st-empty" value="empty">Vacío</label>
+      <label><input type="radio" name="proto-state" id="st-data" value="data" checked>Con datos</label>
+      <label><input type="radio" name="proto-state" id="st-blocked" value="blocked">Bloqueo</label>
+      <label><input type="radio" name="proto-state" id="st-error" value="error">Error</label>
+      <label><input type="radio" name="proto-state" id="st-broken" value="broken">Cadena rota</label>
+    </fieldset>
+    <label class="tg" for="proto-mobile"><input type="checkbox" id="proto-mobile"><span class="sw"></span>Móvil (390 px)</label>
+    <label class="tg" for="proto-motion"><input type="checkbox" id="proto-motion"><span class="sw"></span>Menos movimiento</label>
+  </section>
+
+  <div class="stage-wrap" id="stage-wrap">
+  <div class="app-window" id="app" data-state="data"><div class="app-shell">
+    <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
+      <div class="app-brand rv" style="--i:1">
+        <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span><span class="app-wordmark">Antifaz</span><span class="app-version ident">v0.2.0</span>
+        <span class="app-bar-tools">
+          <span class="app-status is-ok" data-only="empty data blocked"><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Todo en orden</span>
+          <span class="app-status is-warn" data-only="error" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Sin respuesta</span>
+          <span class="app-status is-danger" data-only="broken" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Cadena rota</span>
+          <button class="app-iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+        </span>
+      </div>
+      <p class="app-nav-label rv" style="--i:2" id="nav-label">Panel</p>
+      <div class="app-nav">
+        <div class="app-tablist" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
+          <button class="app-tab rv" style="--i:2" role="tab" id="tab-playground" data-name="Prueba un texto" aria-controls="panel-playground" aria-selected="true" aria-keyshortcuts="1" tabindex="0"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Prueba un texto<kbd aria-hidden="true">1</kbd></button>
+          <button class="app-tab rv" style="--i:3" role="tab" id="tab-live" data-name="En directo" aria-controls="panel-live" aria-selected="false" aria-keyshortcuts="2" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg>En directo<kbd aria-hidden="true">2</kbd></button>
+          <button class="app-tab rv" style="--i:4" role="tab" id="tab-keys" data-name="Claves" aria-controls="panel-keys" aria-selected="false" aria-keyshortcuts="3" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Claves<kbd aria-hidden="true">3</kbd></button>
+          <button class="app-tab rv" style="--i:5" role="tab" id="tab-policies" data-name="Políticas" aria-controls="panel-policies" aria-selected="false" aria-keyshortcuts="4" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-policy"/></svg>Políticas<kbd aria-hidden="true">4</kbd></button>
+          <button class="app-tab rv" style="--i:6" role="tab" id="tab-status" data-name="Estado" aria-controls="panel-status" aria-selected="false" aria-keyshortcuts="5" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-status"/></svg>Estado<span class="app-tab-dot is-warn" data-only="error" hidden><span class="sr-only"> (aviso)</span></span><span class="app-tab-dot is-danger" data-only="broken" hidden><span class="sr-only"> (alerta)</span></span><kbd aria-hidden="true">5</kbd></button>
+        </div>
+      </div>
+      <div class="app-sidebar-foot rv" style="--i:7">
+        <p>Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.</p>
+        <span class="app-local"><span class="dot" aria-hidden="true"></span>Todo se procesa en tu red</span>
+      </div>
+    </nav></div>
+
+    <div class="app-main">
+      <header class="app-header">
+        <p class="app-crumb">Antifaz · <b id="crumb-name">Prueba un texto</b></p>
+        <span class="app-status is-ok" data-only="empty data blocked"><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Todo en orden</span>
+        <span class="app-status is-warn" data-only="error" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Anthropic no responde</span>
+        <span class="app-status is-danger" data-only="broken" hidden><span class="app-status-dot" aria-hidden="true"></span><span class="sr-only">Estado: </span>Cadena de evidencias rota</span>
+        <button class="app-iconbtn theme-btn" type="button" aria-label="Cambiar de tema"><svg class="ic" aria-hidden="true"><use href="#i-moon" class="theme-icon"/></svg></button>
+      </header>
+
+      <main class="app-content" id="main" tabindex="-1">
+        <!-- Alerts shown in every view -->
+        <div class="alerts">
+          <div class="callout warn" role="status" data-only="error" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>
+            <strong>Anthropic no responde</strong>
+            <p>Las peticiones a Anthropic fallan con un error 504 y no llega nada a la IA. OpenAI y la IA local funcionan. Antifaz lo vuelve a comprobar cada minuto.</p>
+          </div>
+          <div class="callout danger" role="alert" data-only="broken" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-chain"/></svg>
+            <strong>La cadena de evidencias está rota en el registro 18.193</strong>
+            <p>Ese registro no encaja con el anterior: alguien ha cambiado o borrado registros. Lo detectó la verificación de las 10:40. Desde ese punto, el registro ya no sirve como prueba.</p>
+            <ol>
+              <li>No borres ni arregles nada a mano.</li>
+              <li>Ejecuta <span class="code ident">antifaz audit verify</span> para ver el detalle.</li>
+              <li>Compara con el último punto de control firmado (hoy, 00:00) y avisa a tu responsable de seguridad.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- ===================== 1 · Prueba un texto ===================== -->
+        <section class="view" id="panel-playground" role="tabpanel" aria-labelledby="tab-playground">
+          <div class="vh rv" style="--i:3"><div>
+            <h1>Prueba un texto</h1>
+            <p>Pega un texto con datos inventados y mira qué recibiría la IA y qué te devolvería. Lo que pruebas no se guarda.</p>
+          </div></div>
+
+          <form class="composer rv" style="--i:4" id="pg-form" novalidate>
+            <label class="cap" for="pg-text">Texto de prueba</label>
+            <textarea id="pg-text" name="pg-text" rows="3" aria-keyshortcuts="Control+Enter Meta+Enter" placeholder="Por ejemplo: Hola, soy Carmen Prueba López, con DNI 12345678Z…"></textarea>
+            <div class="bar">
+              <span class="lbl" aria-hidden="true">Política</span>
+              <fieldset class="seg mono-l" style="--n:2">
+                <legend>Política</legend>
+                <span class="thumb" aria-hidden="true"></span>
+                <input type="radio" name="pg-policy" id="pg-pol-default" value="default" checked><label for="pg-pol-default">default</label>
+                <input type="radio" name="pg-policy" id="pg-pol-rrhh" value="rrhh"><label for="pg-pol-rrhh">rrhh</label>
+              </fieldset>
+              <span class="sp"></span>
+              <span class="kh" aria-hidden="true"><kbd id="pg-mod">Ctrl</kbd> <kbd>↵</kbd> para probar</span>
+              <button class="btn" type="button" id="pg-example"><span><span class="full">Usar el e</span><span class="short">E</span>jemplo</span></button>
+              <button class="btn primary" type="submit">Probar</button>
+            </div>
+          </form>
+          <p class="hint rv" style="--i:5"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Usa solo datos inventados. El texto se descarta al terminar.</p>
+
+          <div class="empty" data-only="empty" hidden>
+            <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg></span>
+            <p><b>Aquí verás tres cosas:</b> tu texto con los datos encontrados, lo que recibe la IA (con marcadores en lugar de datos) y la respuesta con tus datos de vuelta.</p>
+            <button class="btn primary" type="button" data-action="example">Usar el ejemplo</button>
+          </div>
+
+          <section class="journey rv" style="--i:6" data-only="data broken" aria-labelledby="j-t">
+            <div class="jhead">
+              <h2 class="eyebrow" id="j-t">Así viaja tu texto</h2>
+              <button class="btn ghost" type="button" id="anim-replay"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Ver otra vez</button>
+            </div>
+            <p class="sr-only">Animación: el antifaz pasa por encima de tu texto y cambia el nombre, el DNI, el email y el IBAN por marcadores. La IA solo recibe los marcadores. Su respuesta vuelve y el antifaz pone cada dato otra vez en su sitio. Abajo tienes el mismo contenido, columna por columna.</p>
+            <!-- At rest this is the last frame. While it plays, each datum (.tok-a) turns into its marker (.tok-b). -->
+            <div class="jstage" id="mask-anim" aria-hidden="true">
+              <div class="mrow">
+                <p class="mcap"><span class="mcap-before">Tú escribes</span><span class="mcap-after">La IA recibe</span></p>
+                <div class="wipe">
+                  <p class="jline">Hola, soy <span class="tok"><span class="tok-a"><mark class="pii">Carmen Prueba López</mark></span><span class="tok-b marker">[[PERSON_1]]</span></span>, con DNI <span class="tok"><span class="tok-a"><mark class="pii">12345678Z</mark></span><span class="tok-b marker">[[ES_DNI_1]]</span></span>. Escribid a <span class="tok"><span class="tok-a"><mark class="pii">ana.prueba@example.com</mark></span><span class="tok-b marker">[[EMAIL_1]]</span></span> y pagad en <span class="tok"><span class="tok-a"><mark class="pii">ES9121000418450200051332</mark></span><span class="tok-b marker">[[IBAN_1]]</span></span>.</p>
+                  <span class="gtrack"><span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></span>
+                </div>
+              </div>
+              <div class="flight"><span>Sale hacia Anthropic sin datos personales</span><span class="track"><i></i><i></i><i></i></span><span class="lbl2">vuelve la respuesta</span></div>
+              <div class="mrow">
+                <p class="mcap"><span class="mcap-before">La IA responde</span><span class="mcap-after">Te llega, con tus datos</span></p>
+                <div class="wipe">
+                  <p class="jline">Gracias, <span class="tok"><span class="tok-a"><span class="marker">[[PERSON_1]]</span></span><span class="tok-b restored">Carmen Prueba López</span></span>. Enviaremos el recibo a <span class="tok"><span class="tok-a"><span class="marker">[[EMAIL_1]]</span></span><span class="tok-b restored">ana.prueba@example.com</span></span> cuando llegue el pago a <span class="tok"><span class="tok-a"><span class="marker">[[IBAN_1]]</span></span><span class="tok-b restored">ES9121000418450200051332</span></span>.</p>
+                  <span class="gtrack"><span class="glider"><svg viewBox="0 0 52 26"><use href="#mask"/></svg></span></span>
+                </div>
+              </div>
+            </div>
+          </section>
+          <p class="rm-note" data-only="data broken"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Movimiento reducido: no hay animación. Abajo tienes el antes y el después.</p>
+
+          <div class="pswitch" role="group" aria-label="Qué columna ver" aria-controls="pg-panes" data-p="2" data-only="data blocked error broken">
+            <span class="thumb" aria-hidden="true"></span>
+            <button type="button" data-p="1" aria-pressed="false">Escribes</button>
+            <button type="button" data-p="2" aria-pressed="true">Recibe la IA</button>
+            <button type="button" data-p="3" aria-pressed="false">Te vuelve</button>
+          </div>
+          <div class="panes rv" style="--i:7" id="pg-panes" data-p="2" data-only="data blocked error broken">
+            <article class="pane p1" aria-labelledby="pane1-t">
+              <div class="ph"><span class="num" aria-hidden="true">1</span><h2 id="pane1-t">Lo que escribes</h2></div>
+              <p class="ptext">Hola, soy <mark class="pii">Carmen Prueba López<span class="ptype">NOMBRE</span></mark>, con DNI <mark class="pii"><span class="ident">12345678Z</span><span class="ptype">DNI</span></mark>. Escribid a mi gestora <mark class="pii"><span class="ident">ana.prueba@example.com</span><span class="ptype">EMAIL</span></mark> y haced el pago en <mark class="pii"><span class="ident">ES9121000418450200051332</span><span class="ptype">IBAN</span></mark>. ¿Podéis confirmarlo?<span data-only="blocked" hidden> Está de <mark class="pii">baja médica<span class="ptype">SALUD</span></mark> desde el lunes.</span></p>
+              <p class="pfoot">Resaltado: dato encontrado, con su tipo al lado.</p>
+            </article>
+            <article class="pane p2" aria-labelledby="pane2-t">
+              <div class="ph"><span class="num" aria-hidden="true">2</span><h2 id="pane2-t">Lo que recibe la IA</h2></div>
+              <p class="ptext" data-only="data error broken">Hola, soy <span class="marker ident">[[PERSON_1]]</span>, con DNI <span class="marker ident">[[ES_DNI_1]]</span>. Escribid a mi gestora <span class="marker ident">[[EMAIL_1]]</span> y haced el pago en <span class="marker ident">[[IBAN_1]]</span>. ¿Podéis confirmarlo?</p>
+              <div class="note danger" data-only="blocked" hidden>
+                <strong><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloqueado: no se ha enviado nada</strong>
+                <p>El texto habla de salud (categoría especial del RGPD) y la política <b class="ident">rrhh</b> bloquea esos textos.</p>
+                <p class="sub">Motivo <span class="code ident">special_category</span> · código <span class="code ident">antifaz_blocked</span></p>
+              </div>
+              <p class="pfoot" data-only="data error broken">Marcador: la IA solo ve esto.</p>
+            </article>
+            <article class="pane p3" aria-labelledby="pane3-t">
+              <div class="ph"><span class="num" aria-hidden="true">3</span><h2 id="pane3-t">Lo que te vuelve</h2></div>
+              <p class="ptext" data-only="data broken">Gracias, <span class="restored">Carmen Prueba López</span>. Enviaremos el recibo a <span class="restored ident">ana.prueba@example.com</span> cuando llegue el pago a <span class="restored ident">ES9121000418450200051332</span>.</p>
+              <p class="pfoot" data-only="data broken">Subrayado verde: dato devuelto a su sitio. Respuesta de ejemplo.</p>
+              <div class="note warn" data-only="error" hidden>
+                <strong><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>Sin respuesta</strong>
+                <p>Anthropic no ha respondido a tiempo. Tu texto ya iba sin datos personales y no hay nada que restaurar.</p>
+                <p class="sub">Error <span class="code ident">504</span> · prueba más tarde o elige otra ruta.</p>
+              </div>
+              <p class="pfoot" data-only="blocked" hidden>No hay respuesta: la petición se paró antes de salir.</p>
+            </article>
+          </div>
+
+          <div class="summary rv" style="--i:8" data-only="data blocked error broken">
+            <dl class="found">
+              <dt>Datos encontrados</dt>
+              <dd>Nombre <b>1</b></dd><dd>DNI <b>1</b></dd><dd>Email <b>1</b></dd><dd>IBAN <b>1</b></dd>
+              <dd data-only="blocked" hidden>Salud <b>1</b></dd>
+            </dl>
+            <p class="meta" data-only="data broken"><span>4 datos ocultados</span><span>Revisado en 3 ms</span><span>Política <span class="ident">default</span></span><span>Anthropic · <span class="ident">claude-sonnet-4-5</span></span></p>
+            <p class="meta" data-only="blocked" hidden><span>5 datos encontrados</span><span>Política <span class="ident">rrhh</span></span><span>Nada ha salido de tu red</span></p>
+            <p class="meta" data-only="error" hidden><span>4 datos ocultados</span><span>Política <span class="ident">default</span></span><span>Anthropic no responde</span></p>
+          </div>
+          <!-- Says what came out each time the result changes (screen readers) -->
+          <p class="sr-only" id="pg-live" role="status" aria-live="polite"></p>
+        </section>
+
+        <!-- ===================== 2 · En directo ===================== -->
+        <section class="view" id="panel-live" role="tabpanel" aria-labelledby="tab-live" hidden>
+          <div class="vh">
+            <div>
+              <h1>En directo</h1>
+              <p>Lo que pasa ahora por Antifaz. Solo tipos y cantidades: nunca un dato ni un marcador.</p>
+            </div>
+            <span class="live-pill"><span class="dot" aria-hidden="true"></span>Conectado · hoy, martes 6 de octubre</span>
+          </div>
+
+          <div class="surface stats">
+            <article class="stat s-prot" aria-labelledby="st-prot">
+              <h2 class="eyebrow" id="st-prot">Datos protegidos hoy</h2>
+              <p class="stat-num" id="st-total">128</p>
+              <p class="stat-sub" data-only="empty" hidden>Aún no hay datos. Cuando pase la primera petición, verás aquí cuántos datos de cada tipo se han protegido.</p>
+              <ul class="bars" id="st-bars" aria-label="Por tipo" data-only="data blocked error broken"></ul>
+            </article>
+            <article class="stat s-block" aria-labelledby="st-block">
+              <h2 class="eyebrow" id="st-block">Bloqueos</h2>
+              <p class="stat-num sm" id="st-blocks">3</p>
+              <p class="stat-sub" id="st-blocks-sub">2 adjuntos · 1 categoría especial</p>
+            </article>
+            <article class="stat s-local" aria-labelledby="st-local">
+              <h2 class="eyebrow" id="st-local">Enviadas a IA local</h2>
+              <p class="stat-num sm" id="st-locals">2</p>
+              <p class="stat-sub">No salen de tu red (Ollama).</p>
+            </article>
+            <article class="stat s-chain" aria-labelledby="st-chain">
+              <h2 class="eyebrow" id="st-chain">Cadena de evidencias</h2>
+              <div class="chain-row">
+                <p class="chain ok" data-only="empty data blocked error"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Íntegra</p>
+                <p class="chain bad" data-only="broken" hidden><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Rota en el registro 18.193</p>
+                <span class="chain-links" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i class="cut" data-only="broken" hidden></i><i></i><i></i></span>
+              </div>
+              <p class="stat-sub" data-only="data blocked error">Verificada a las 10:40 · 18.204 registros · último punto de control firmado hoy a las 00:00.</p>
+              <p class="stat-sub" data-only="empty" hidden>Verificada a las 10:40 · 0 registros hoy · último punto de control firmado hoy a las 00:00.</p>
+              <p class="stat-sub" data-only="broken" hidden>Verificada a las 10:40. Los registros anteriores al 18.193 siguen siendo válidos.</p>
+            </article>
+          </div>
+
+          <article class="surface" aria-labelledby="feed-t">
+            <div class="sh"><h2 id="feed-t">Últimas peticiones</h2><span class="aside">Las más nuevas, arriba</span></div>
+            <div class="feed-empty" data-only="empty" hidden>
+              <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-live"/></svg></span>
+              <p>Hoy aún no ha pasado ninguna petición. Cuando alguien use una clave, lo verás aquí al momento.</p>
+            </div>
+            <div role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="feed-t" data-only="data blocked error broken"><ol class="feed" id="feed"></ol></div>
+          </article>
+
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Si nadie mira este panel, Antifaz no prepara ni envía nada: 0 % de CPU. El flujo se abre al entrar aquí y se cierra al salir.</p>
+        </section>
+
+        <!-- ===================== 3 · Claves ===================== -->
+        <section class="view" id="panel-keys" role="tabpanel" aria-labelledby="tab-keys" hidden>
+          <div class="vh">
+            <div>
+              <h1>Claves</h1>
+              <p>Una clave por equipo o aplicación: así sabes quién usa la IA, con qué límites y con qué política.</p>
+            </div>
+            <button class="btn primary" type="button" data-only="data blocked error broken"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Crear clave</button>
+          </div>
+
+          <div class="empty" data-only="empty" hidden>
+            <span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg></span>
+            <p><b>Aún no hay claves.</b> Crea una para cada equipo (por ejemplo, «soporte» o «rrhh») y ponle límites y una política.</p>
+            <button class="btn primary" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Crear la primera clave</button>
+          </div>
+
+          <article class="surface keys-box" aria-labelledby="keys-t" data-only="data blocked error broken">
+            <div class="sh"><h2 id="keys-t">Claves virtuales</h2><span class="aside">4 activas · 1 revocada</span></div>
+            <table class="keys" aria-labelledby="keys-t">
+              <thead><tr><th scope="col">Nombre</th><th scope="col">Puede usar</th><th scope="col">Política</th><th scope="col">Límites</th><th scope="col">Último uso</th><th scope="col">Estado</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
+              <tbody>
+                <tr><td><span class="k-name ident">equipo-soporte</span><span class="k-id">id <span class="ident">kid_3f9a</span></span></td><td class="k-use" data-label="Puede usar">Anthropic · <span class="ident">claude-sonnet-4-5</span></td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">60/min</span> · <span class="ident">5.000/día</span></td><td data-label="Último uso" class="k-muted">hace 1 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> equipo-soporte</span></button></td></tr>
+                <tr><td><span class="k-name ident">rrhh-nominas</span><span class="k-id">id <span class="ident">kid_81c2</span></span></td><td class="k-use" data-label="Puede usar">OpenAI · <span class="ident">gpt-4.1-mini</span></td><td data-label="Política"><span class="k-pol ident">rrhh</span></td><td data-label="Límites" class="k-num"><span class="ident">20/min</span> · <span class="ident">1.000/día</span></td><td data-label="Último uso" class="k-muted">hace 2 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> rrhh-nominas</span></button></td></tr>
+                <tr><td><span class="k-name ident">desarrollo</span><span class="k-id">id <span class="ident">kid_c47e</span></span></td><td class="k-use" data-label="Puede usar">Anthropic y OpenAI · todos</td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">120/min</span></td><td data-label="Último uso" class="k-muted">hace 5 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> desarrollo</span></button></td></tr>
+                <tr><td><span class="k-name ident">script-facturas</span><span class="k-id">id <span class="ident">kid_09bd</span></span></td><td class="k-use" data-label="Puede usar">Ollama (local)</td><td data-label="Política"><span class="k-pol ident">rrhh</span></td><td data-label="Límites" class="k-num"><span class="ident">30/min</span></td><td data-label="Último uso" class="k-muted">hace 4 min</td><td class="k-state" data-label="Estado"><span class="status ok"><span class="dot" aria-hidden="true"></span>Activa</span></td><td class="k-act"><button class="btn quiet" type="button">Revocar<span class="sr-only"> script-facturas</span></button></td></tr>
+                <tr class="revoked"><td><span class="k-name ident">becarios-2025</span><span class="k-id">id <span class="ident">kid_5d10</span></span></td><td class="k-use" data-label="Puede usar">OpenAI · <span class="ident">gpt-4.1-nano</span></td><td data-label="Política"><span class="k-pol ident">default</span></td><td data-label="Límites" class="k-num"><span class="ident">10/min</span></td><td data-label="Último uso" class="k-muted">hace 40 días</td><td class="k-state" data-label="Estado"><span class="status neutral"><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Revocada</span></td><td class="k-act"></td></tr>
+              </tbody>
+            </table>
+          </article>
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>La clave solo se ve una vez, al crearla. Antifaz guarda su huella, no la clave, así que aquí nunca aparece (ni un trozo). Si se pierde, revócala y crea otra.</p>
+        </section>
+
+        <!-- ===================== 4 · Políticas ===================== -->
+        <section class="view" id="panel-policies" role="tabpanel" aria-labelledby="tab-policies" hidden>
+          <div class="vh"><div>
+            <h1>Políticas</h1>
+            <p>Qué hace Antifaz con cada tipo de dato. Cada clave usa una política. Al guardar se crea una revisión nueva y su huella queda en cada evidencia.</p>
+          </div></div>
+
+          <div class="callout info" data-only="empty" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
+            <strong>Usas la política por defecto</strong>
+            <p>Oculta todos los datos menos el CIF de empresa. Cámbiala aquí y guárdala con un nombre propio.</p>
+          </div>
+
+          <div class="surface pol-bar">
+            <span class="lbl" aria-hidden="true">Política</span>
+            <fieldset class="seg mono-l" style="--n:2" id="pol-pick">
+              <legend>Política que editas</legend>
+              <span class="thumb" aria-hidden="true"></span>
+              <input type="radio" name="pol-pick" id="pol-pick-default" value="default" checked><label for="pol-pick-default">default</label>
+              <input type="radio" name="pol-pick" id="pol-pick-rrhh" value="rrhh"><label for="pol-pick-rrhh">rrhh</label>
+            </fieldset>
+            <p class="meta" id="pol-meta"></p>
+            <span class="save-group">
+              <span class="msg" id="pol-dirty" role="status">Sin cambios</span>
+              <button class="btn primary" type="button" id="pol-save" disabled>Guardar como revisión 5</button>
+            </span>
+          </div>
+
+          <h2 class="sr-only">Qué significa cada opción</h2>
+          <dl class="help">
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar</dt><dd>Cambia el dato por un marcador y lo devuelve en la respuesta.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg>Permitir</dt><dd>El dato pasa tal cual.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</dt><dd>No se envía nada a la IA.</dd></div>
+            <div><dt><svg class="ic" aria-hidden="true"><use href="#i-local"/></svg>IA local</dt><dd>La petición entera va a un modelo de tu red (Ollama).</dd></div>
+          </dl>
+
+          <div class="pswitch" role="group" aria-label="Qué parte ver" aria-controls="pol-grid" data-p="1">
+            <span class="thumb" aria-hidden="true"></span>
+            <button type="button" data-p="1" aria-pressed="true">Tipos</button>
+            <button type="button" data-p="2" aria-pressed="false">Reglas</button>
+            <button type="button" data-p="3" aria-pressed="false">Archivo</button>
+          </div>
+          <div class="pol-grid" id="pol-grid" data-p="1">
+            <article class="surface pol-types" aria-labelledby="types-t">
+              <div class="sh"><h2 id="types-t">Tipos de dato</h2><span class="aside">10 tipos · ES y UE</span></div>
+              <div class="rows" id="pol-rows"></div>
+            </article>
+
+            <div class="pol-col">
+              <article class="surface pol-rules" aria-labelledby="fixed-t">
+                <div class="sh"><h2 id="fixed-t">Reglas de seguridad</h2></div>
+                <ul class="rules">
+                  <li><span class="what">Si el detector falla</span><span class="tag is-danger"><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what">Imágenes, PDF y archivos</span><span class="tag is-danger"><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>Bloquear</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what">Campos de texto desconocidos</span><span class="tag is-mask"><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg>Ocultar</span><span class="fixed"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>Fija</span></li>
+                  <li><span class="what" id="special-t">Salud, religión, sindicato… (categorías especiales)</span>
+                    <fieldset class="seg" style="--n:2" id="pol-special" aria-labelledby="special-t">
+                      <span class="thumb" aria-hidden="true"></span>
+                      <input type="radio" name="pol-special" id="pol-special-local" value="route_local" checked><label for="pol-special-local">IA local</label>
+                      <input type="radio" name="pol-special" id="pol-special-block" value="block"><label for="pol-special-block">Bloquear</label>
+                    </fieldset></li>
+                </ul>
+                <p class="rules-foot">Nunca ocultar: <span class="code ident">Antifaz</span> · Propios: <span class="code ident">CLIENT_CODE</span> (código de cliente) → ocultar</p>
+              </article>
+
+              <article class="surface pol-yaml" aria-labelledby="yaml-t">
+                <div class="sh"><h2 id="yaml-t">Así queda el archivo</h2><span class="aside"><span class="ident">policies/<span id="yaml-name">default</span>.yaml</span></span></div>
+                <pre class="yaml" id="yaml-out" tabindex="0" role="region" aria-label="Vista previa de la política en YAML"></pre>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== 5 · Estado ===================== -->
+        <section class="view" id="panel-status" role="tabpanel" aria-labelledby="tab-status" hidden>
+          <div class="vh">
+            <div>
+              <h1>Estado</h1>
+              <p>Si una pieza falla, Antifaz bloquea: nunca deja pasar datos sin proteger.</p>
+            </div>
+            <span class="vh-side"><span id="check-time" role="status">Comprobado a las 10:44</span><button class="btn ghost" type="button" id="check-now"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>Comprobar ahora</button></span>
+          </div>
+
+          <div class="sgrid">
+            <article class="surface scard" aria-labelledby="s-gw">
+              <div class="sh"><h2 id="s-gw">Pasarela</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funciona</span></div>
+              <dl class="kv">
+                <dt>Versión</dt><dd class="mono"><span class="ident">0.2.0</span></dd>
+                <dt><span class="ident">/healthz</span></dt><dd class="mono"><span class="ident">"status": "ok"</span></dd>
+                <dt>Escucha en</dt><dd class="mono"><span class="ident">127.0.0.1:8000</span></dd>
+                <dt>Base de datos</dt><dd>PostgreSQL · conectada</dd>
+                <dt>En marcha desde</dt><dd>hace 3 días</dd>
+              </dl>
+            </article>
+
+            <article class="surface scard" aria-labelledby="s-ner">
+              <div class="sh"><h2 id="s-ner">Detector de nombres (NER)</h2><span class="status ok"><span class="dot" aria-hidden="true"></span>Funcionando</span></div>
+              <p class="desc">Encuentra nombres de persona. Viene apagado por defecto; aquí está encendido. Sus cuatro estados:</p>
+              <ul class="ner" aria-label="Estados posibles del detector">
+                <li class="now" aria-current="true"><span class="dot ok" aria-hidden="true"></span><b>Funcionando</b><span class="tag">Ahora</span><p><span class="mono ident">ok</span> · busca nombres.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>Arrancando</b><span></span><p><span class="mono ident">starting</span> · carga el modelo; mientras, se bloquea.</p></li>
+                <li><span class="dot warn" aria-hidden="true"></span><b>En pausa tras fallos</b><span></span><p><span class="mono ident">circuit_open</span> · bloquea unos segundos y lo vuelve a intentar.</p></li>
+                <li><span class="dot danger" aria-hidden="true"></span><b>Parado</b><span></span><p><span class="mono ident">closed</span> · bloquea todo lo que necesite el NER.</p></li>
+              </ul>
+            </article>
+
+            <article class="surface scard" aria-labelledby="s-prov">
+              <div class="sh"><h2 id="s-prov">Proveedores de IA</h2>
+                <span class="status ok" data-only="empty data blocked broken"><span class="dot" aria-hidden="true"></span>Todos responden</span>
+                <span class="status warn" data-only="error" hidden><span class="dot" aria-hidden="true"></span>1 no responde</span></div>
+              <ul class="prov">
+                <li><span class="nm">Anthropic<span class="ident">api.anthropic.com</span></span>
+                  <span class="meter" data-only="empty data blocked broken" aria-hidden="true"><i style="--v:.6"></i></span>
+                  <span class="status ok" data-only="empty data blocked broken"><span class="dot" aria-hidden="true"></span><span>Responde · <b>180 ms</b></span></span>
+                  <span class="meter is-down" data-only="error" hidden aria-hidden="true"><i></i></span>
+                  <span class="status danger" data-only="error" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>No responde · tiempo agotado</span></li>
+                <li><span class="nm">OpenAI<span class="ident">api.openai.com</span></span><span class="meter" aria-hidden="true"><i style="--v:.8"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>240 ms</b></span></span></li>
+                <li><span class="nm">Ollama (local)<span class="ident">127.0.0.1:11434</span></span><span class="meter" aria-hidden="true"><i style="--v:.1"></i></span><span class="status ok"><span class="dot" aria-hidden="true"></span><span>Responde · <b>30 ms</b></span></span></li>
+              </ul>
+              <p class="cmd">Desde la terminal: <span class="code ident">antifaz doctor --providers</span></p>
+            </article>
+
+            <article class="surface scard" aria-labelledby="s-ev">
+              <div class="sh"><h2 id="s-ev">Evidencias</h2>
+                <span class="status ok" data-only="empty data blocked error"><span class="dot" aria-hidden="true"></span>Cadena íntegra</span>
+                <span class="status danger" data-only="broken" hidden><svg class="ic" aria-hidden="true" style="width:14px;height:14px"><use href="#i-x"/></svg>Cadena rota</span></div>
+              <dl class="kv">
+                <dt>Registros</dt><dd data-only="data blocked error">18.204, encadenados</dd><dd data-only="empty" hidden>0 hoy</dd><dd data-only="broken" hidden>Rota en el 18.193 de 18.204</dd>
+                <dt>Última verificación</dt><dd>Hoy, 10:40</dd>
+                <dt>Punto de control</dt><dd>Firmado hoy a las 00:00</dd>
+                <dt>Guarda</dt><dd>Quién, cuándo, qué tipos y cuántos. Nunca los datos.</dd>
+              </dl>
+              <p class="cmd">Desde la terminal: <span class="code ident">antifaz audit verify</span></p>
+            </article>
+          </div>
+
+          <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Esta página no se actualiza sola: no hay sondeos en segundo plano. Pulsa «Comprobar ahora» cuando lo necesites.</p>
+        </section>
+      </main>
+    </div>
+  </div></div>
+  </div>
+
+  <!-- ===================== Logo (prototype annex, outside the panel) ===================== -->
+  <section class="annex" aria-labelledby="logo-t">
+    <header>
+      <h2 id="logo-t">Logo</h2>
+      <p>El logo del proyecto (aprobado por Miquel el 7 de octubre de 2026): el antifaz blanco en un cuadro redondeado con degradado índigo, el mismo que lleva el panel. A 64, 32 y 16 px, sobre claro y sobre oscuro, y en un solo color.</p>
+    </header>
+    <div class="lrow">
+      <div><h3>Logo</h3><p><span class="code ident">docs/images/logo.svg</span> y <span class="code ident">design/logo-mark.svg</span> (un color)</p></div>
+      <div class="lsets">
+        <div class="lset on-light">
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre claro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo, 32 px, sobre claro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo, 16 px, sobre claro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-dark">
+          <figure><svg width="64" height="64" viewBox="0 0 32 32" role="img" aria-label="Logo, 64 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>64</figcaption></figure>
+          <figure><svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Logo, 32 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>32</figcaption></figure>
+          <figure><svg width="16" height="16" viewBox="0 0 32 32" role="img" aria-label="Logo, 16 px, sobre oscuro"><use href="#logo-new"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-light">
+          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre claro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+        </div>
+        <div class="lset on-dark">
+          <figure><svg width="48" height="24" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>1 color</figcaption></figure>
+          <figure><svg width="16" height="8" viewBox="0 0 52 26" role="img" aria-label="Antifaz en un color, 16 px, sobre oscuro" fill="currentColor"><use href="#mask"/></svg><figcaption>16</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var root=document.documentElement, app=document.getElementById("app");
+  var reduceQ=matchMedia("(prefers-reduced-motion: reduce)");
+  function calm(){ return root.classList.contains("reduce-motion"); }
+  function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+  function icon(id){ var s=document.createElementNS("http://www.w3.org/2000/svg","svg"); s.setAttribute("class","ic"); s.setAttribute("aria-hidden","true");
+    var u=document.createElementNS("http://www.w3.org/2000/svg","use"); u.setAttribute("href","#"+id); s.appendChild(u); return s; }
+
+  /* ---- Theme: follows the system until the viewer picks one ---- */
+  var darkQ=matchMedia("(prefers-color-scheme: dark)");
+  function eff(){ return root.getAttribute("data-theme") || (darkQ.matches?"dark":"light"); }
+  function paint(){ var next=eff()==="dark"?"light":"dark";
+    document.querySelectorAll(".theme-icon").forEach(function(u){ u.setAttribute("href", next==="dark"?"#i-moon":"#i-sun"); });
+    document.querySelectorAll(".theme-btn").forEach(function(b){ b.setAttribute("aria-label", next==="dark"?"Cambiar a tema oscuro":"Cambiar a tema claro"); }); }
+  document.querySelectorAll(".theme-btn").forEach(function(b){ b.addEventListener("click",function(){ root.setAttribute("data-theme", eff()==="dark"?"light":"dark"); paint(); }); });
+  darkQ.addEventListener("change",paint); paint();
+
+  /* ---- Tabs: roving tabindex, arrows, Home/End, and 1–5 as shortcuts ---- */
+  var tablist=document.querySelector(".app-tablist"), tabs=[].slice.call(tablist.querySelectorAll('[role="tab"]'));
+  /* On the phone bar the tabs are a row that scrolls sideways: keep the chosen one in view
+     (by hand, so the page itself never scrolls). */
+  function reveal(tab){ var l=tablist; if(l.scrollWidth<=l.clientWidth) return;
+    var a=tab.offsetLeft, b=a+tab.offsetWidth;
+    if(a<l.scrollLeft) l.scrollLeft=a-8; else if(b>l.scrollLeft+l.clientWidth) l.scrollLeft=b-l.clientWidth+8; }
+  function enter(v){ v.classList.remove("enter"); void v.offsetWidth; [].forEach.call(v.children,function(c,i){ c.style.setProperty("--i",i); }); v.classList.add("enter"); }
+  function current(){ return document.getElementById(tabs.filter(function(t){ return t.getAttribute("aria-selected")==="true"; })[0].getAttribute("aria-controls")); }
+  function select(tab,focus){
+    var before=current();
+    tabs.forEach(function(t){ var on=t===tab; t.setAttribute("aria-selected",on?"true":"false"); t.tabIndex=on?0:-1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden=!on; });
+    var view=document.getElementById(tab.getAttribute("aria-controls"));
+    document.getElementById("crumb-name").textContent=tab.getAttribute("data-name");
+    if(!calm()) enter(view);
+    if(focus) tab.focus();
+    reveal(tab);
+    syncLive();
+    /* The mask animation stops when the view changes and plays again when its view comes back */
+    if(view!==before){ if(tab.id==="tab-playground") queueMask(250); else cancelMask();
+      if(tab.id==="tab-status") growMeters(); } }
+  tabs.forEach(function(tab,i){
+    tab.addEventListener("click",function(){ select(tab,false); });
+    tab.addEventListener("keydown",function(e){ var to=null;
+      if(e.key==="ArrowDown"||e.key==="ArrowRight") to=tabs[(i+1)%tabs.length];
+      else if(e.key==="ArrowUp"||e.key==="ArrowLeft") to=tabs[(i-1+tabs.length)%tabs.length];
+      else if(e.key==="Home") to=tabs[0]; else if(e.key==="End") to=tabs[tabs.length-1];
+      if(to){ e.preventDefault(); select(to,true); } }); });
+  document.addEventListener("keydown",function(e){ if(e.target.matches("input,textarea,select,[contenteditable]")||e.metaKey||e.ctrlKey||e.altKey||e.repeat) return;
+    var n=parseInt(e.key,10); if(n>=1&&n<=5) select(tabs[n-1],true); });
+
+  /* ---- Playground: step switcher on phones ---- */
+  /* The same switcher shows one part at a time on phones in Políticas (types / rules / file) */
+  function setSwitch(sw,p){ sw.setAttribute("data-p",p); document.getElementById(sw.getAttribute("aria-controls")).setAttribute("data-p",p);
+    sw.querySelectorAll("button").forEach(function(x){ x.setAttribute("aria-pressed",x.getAttribute("data-p")===p?"true":"false"); }); }
+  document.querySelectorAll(".pswitch").forEach(function(sw){ sw.querySelectorAll("button").forEach(function(b){ b.addEventListener("click",function(){ setSwitch(sw,b.getAttribute("data-p")); }); }); });
+  var psw=document.querySelector(".pswitch"), panes=document.getElementById("pg-panes");
+  function setPane(p){ setSwitch(psw,p); }
+
+  /* ---- En directo: counters and the feed (types and counts only, never a value) ---- */
+  var TYPES=[["ES_DNI","DNI"],["EMAIL","Email"],["PERSON","Nombre"],["IBAN","IBAN"],["PHONE","Teléfono"]];
+  var counts={};
+  var BASE=[
+    {t:"10:44",who:"equipo-soporte",app:"Claude Code",what:"1 email y 1 teléfono ocultados · Anthropic",k:"mask",n:2},
+    {t:"10:43",who:"rrhh-nominas",app:"Open WebUI",what:"PDF adjunto → bloqueado",k:"block"},
+    {t:"10:42",who:"equipo-soporte",app:"Claude Code",what:"2 DNI y 1 IBAN ocultados · Anthropic",k:"mask",n:3},
+    {t:"10:41",who:"script-facturas",app:"",what:"Categoría especial (salud) → IA local · Ollama",k:"local"},
+    {t:"10:40",who:"desarrollo",app:"Codex",what:"Sin datos personales · OpenAI",k:"none"},
+    {t:"10:38",who:"equipo-soporte",app:"Claude Code",what:"3 nombres ocultados · Anthropic",k:"mask",n:3}];
+  var TOP={
+    blocked:{t:"10:45",who:"rrhh-nominas",app:"script",what:"Categoría especial (salud) → bloqueado",k:"block"},
+    error:{t:"10:45",who:"equipo-soporte",app:"Claude Code",what:"Anthropic no responde · no se ha enviado nada",k:"error"},
+    broken:{t:"10:40",who:"Verificación automática",app:"",what:"Cadena de evidencias rota en el registro 18.193",k:"chain"}};
+  /* Synthetic arrivals while someone watches the view (prototype only). */
+  var POOL=[
+    {who:"equipo-soporte",app:"Claude Code",what:"1 DNI y 1 email ocultados · Anthropic",k:"mask",n:2,add:{ES_DNI:1,EMAIL:1}},
+    {who:"desarrollo",app:"Codex",what:"Sin datos personales · OpenAI",k:"none"},
+    {who:"equipo-soporte",app:"Claude Code",what:"2 nombres ocultados · Anthropic",k:"mask",n:2,add:{PERSON:2}},
+    {who:"rrhh-nominas",app:"Open WebUI",what:"1 IBAN y 1 teléfono ocultados · OpenAI",k:"mask",n:2,add:{IBAN:1,PHONE:1}}];
+  var BADGE={mask:["is-mask","i-eye-off","Ocultados "],block:["is-danger","i-block","Bloqueado"],local:["","i-local","IA local"],none:["","i-check","Sin datos"],error:["is-warn","i-alert","Error 504"],chain:["is-danger","i-chain","Alerta"]};
+  var feed=document.getElementById("feed");
+  function evItem(ev,isNew){
+    var li=el("li","ev");
+    if(isNew){ var fl=el("span","ev-flash"); fl.setAttribute("aria-hidden","true"); li.appendChild(fl); }
+    var tm=el("time",null,ev.t); tm.setAttribute("datetime","2026-10-06T"+ev.t); li.appendChild(tm);
+    var main=el("span","ev-main"), who=el("span","ev-who");
+    who.appendChild(/\s/.test(ev.who)?document.createTextNode(ev.who):el("span","ident",ev.who));
+    if(ev.app){ var ap=el("span","ev-app"," · "); ap.appendChild(el("span",null,ev.app)); who.appendChild(ap); }
+    main.appendChild(who); main.appendChild(el("span","ev-what",ev.what)); li.appendChild(main);
+    var b=BADGE[ev.k], badge=el("span","tag "+b[0]); badge.appendChild(icon(b[1])); badge.appendChild(document.createTextNode(b[2]+(ev.k==="mask"?ev.n:""))); li.appendChild(badge);
+    return li; }
+  /* The rows are built once per state (sorted) and then only updated: the fill is scaled with
+     transform: scaleX() (--v), so a new count slides instead of re-laying out. */
+  var barRows={};
+  function buildBars(){ var ul=document.getElementById("st-bars"); ul.textContent=""; barRows={};
+    TYPES.slice().sort(function(a,b){ return counts[b[0]]-counts[a[0]]; }).forEach(function(t){
+      var li=el("li"); li.appendChild(el("span",null,t[1]));
+      var m=el("span","meter"), f=el("i"); m.setAttribute("aria-hidden","true"); m.appendChild(f); li.appendChild(m);
+      var n=el("span","n"); li.appendChild(n); ul.appendChild(li); barRows[t[0]]={f:f,n:n}; }); }
+  function renderBars(){ var max=0, total=0;
+    TYPES.forEach(function(t){ max=Math.max(max,counts[t[0]]); total+=counts[t[0]]; });
+    TYPES.forEach(function(t){ var r=barRows[t[0]], c=counts[t[0]]; r.f.style.setProperty("--v",max?(c/max).toFixed(3):"0"); r.n.textContent=String(c); });
+    document.getElementById("st-total").textContent=String(total); }
+  /* A counter that changes ticks up (transform and opacity only) */
+  function bump(node){ if(calm()||!node.animate) return;
+    node.animate([{transform:"translateY(35%)",opacity:0},{transform:"none",opacity:1}],{duration:380,easing:EASE.out}); }
+  var clock=45, poolIx=0, timer=null;
+  function renderLive(s){
+    counts={ES_DNI:41,EMAIL:37,PERSON:22,IBAN:18,PHONE:10};
+    if(s==="empty") TYPES.forEach(function(t){ counts[t[0]]=0; });
+    buildBars(); renderBars(); clock=46; poolIx=0;
+    document.getElementById("st-blocks").textContent=s==="empty"?"0":s==="blocked"?"4":"3";
+    document.getElementById("st-blocks-sub").textContent=s==="empty"?"Ninguno hoy.":s==="blocked"?"2 adjuntos · 2 categoría especial":"2 adjuntos · 1 categoría especial";
+    document.getElementById("st-locals").textContent=s==="empty"?"0":"2";
+    feed.textContent="";
+    if(s==="empty") return;
+    if(TOP[s]) feed.appendChild(evItem(TOP[s],false));
+    BASE.forEach(function(ev){ feed.appendChild(evItem(ev,false)); }); }
+  function tick(){
+    var ev=POOL[poolIx++%POOL.length], e={t:"10:"+(clock++),who:ev.who,app:ev.app,what:ev.what,k:ev.k,n:ev.n};
+    if(clock>59) clock=46;
+    if(ev.add) Object.keys(ev.add).forEach(function(k){ counts[k]+=ev.add[k]; });
+    renderBars();
+    var li=evItem(e,!calm());
+    feed.insertBefore(li,feed.firstChild);
+    while(feed.children.length>9) feed.removeChild(feed.lastChild);
+    if(calm()||!li.animate) return;
+    bump(document.getElementById("st-total"));
+    /* The new row slides in and the others make room (transform); the highlight is its own layer
+       and only its opacity moves. */
+    var h=li.offsetHeight;
+    li.animate([{opacity:0,transform:"translateY(-10px)"},{opacity:1,transform:"none"}],{duration:450,easing:EASE.out});
+    li.querySelector(".ev-flash").animate([{opacity:0},{opacity:1,offset:.15},{opacity:1,offset:.45},{opacity:0}],{duration:2200,easing:"ease-out"});
+    [].slice.call(feed.children,1).forEach(function(r){ r.animate([{transform:"translateY("+(-h)+"px)"},{transform:"none"}],{duration:450,easing:EASE.out}); }); }
+  /* The stream only runs while the view is open and the page is visible (0 % CPU otherwise). */
+  function syncLive(){
+    var on=!document.getElementById("panel-live").hidden && document.visibilityState==="visible" && app.getAttribute("data-state")!=="empty";
+    if(on&&!timer) timer=setInterval(tick,6000);
+    if(!on&&timer){ clearInterval(timer); timer=null; } }
+  document.addEventListener("visibilitychange",syncLive);
+
+  /* ---- Políticas: rows, presets and the YAML preview ---- */
+  var ROWS=[["ES_DNI","DNI"],["ES_NIE","NIE"],["ES_CIF","CIF de empresa"],["ES_NSS","Seguridad Social"],["IBAN","IBAN"],["CREDIT_CARD","Tarjeta de pago"],["EMAIL","Email"],["PHONE","Teléfono"],["ADDRESS","Dirección postal"],["PERSON","Nombre de persona"]];
+  var ACTS=[["mask","Ocultar"],["allow","Permitir"],["block","Bloquear"],["route_local","IA local"]];
+  var PRESET={
+    "default":{rev:4,hash:"sha256:3f9c…e21a",keys:3,special:"route_local",e:{ES_CIF:"allow"}},
+    rrhh:{rev:2,hash:"sha256:81b0…7c4d",keys:2,special:"block",e:{ES_CIF:"allow",CREDIT_CARD:"block",ES_NSS:"route_local"}}};
+  var rowsBox=document.getElementById("pol-rows");
+  ROWS.forEach(function(r){
+    var row=el("div","prow"); row.setAttribute("data-type",r[0]);
+    var nm=el("span","nm"); nm.appendChild(el("b",null,r[1])); var code=el("span"); code.appendChild(el("span","ident",r[0]));
+    if(r[0]==="PERSON") code.appendChild(document.createTextNode(" · necesita el NER")); nm.appendChild(code);
+    var cn=el("span","chg-note","cambiado"); cn.hidden=true; nm.appendChild(cn); row.appendChild(nm);
+    var fs=el("fieldset","seg"); fs.style.setProperty("--n","4");
+    fs.appendChild(el("legend",null,r[1])); var th=el("span","thumb"); th.setAttribute("aria-hidden","true"); fs.appendChild(th);
+    ACTS.forEach(function(a){ var id="p-"+r[0]+"-"+a[0], inp=el("input"); inp.type="radio"; inp.name="pt-"+r[0]; inp.id=id; inp.value=a[0];
+      var lb=el("label",null,a[1]); lb.htmlFor=id; fs.appendChild(inp); fs.appendChild(lb); });
+    row.appendChild(fs); rowsBox.appendChild(row); });
+  var yamlOut=document.getElementById("yaml-out"), saveBtn=document.getElementById("pol-save"), dirty=document.getElementById("pol-dirty");
+  var saved=null, polName="default";
+  function readPolicy(){ var p={entities:{},special:document.querySelector('input[name="pol-special"]:checked').value};
+    ROWS.forEach(function(r){ p.entities[r[0]]=document.querySelector('input[name="pt-'+r[0]+'"]:checked').value; }); return p; }
+  function loadPreset(name){ var pr=PRESET[name]; polName=name;
+    ROWS.forEach(function(r){ document.getElementById("p-"+r[0]+"-"+(pr.e[r[0]]||"mask")).checked=true; });
+    document.getElementById(pr.special==="block"?"pol-special-block":"pol-special-local").checked=true;
+    var meta=document.getElementById("pol-meta"); meta.textContent="";
+    meta.appendChild(el("span",null,"Revisión "+pr.rev)); var fp=el("span",null,"huella "); fp.appendChild(el("span","ident",pr.hash));
+    meta.appendChild(fp); meta.appendChild(el("span",null,"la usan "+pr.keys+" claves"));
+    document.getElementById("yaml-name").textContent=name;
+    saveBtn.textContent="Guardar como revisión "+(pr.rev+1);
+    saved=readPolicy(); renderYaml(); }
+  /* A changed line gets a highlight layer; it fades in only when the line has just changed */
+  var wasChg={};
+  function line(k,v,chg,indent){ var s=el("span","ln"+(chg?" chg":""));
+    if(chg){ var hl=el("span","hl"); hl.setAttribute("aria-hidden","true"); s.appendChild(hl);
+      if(!wasChg[k]&&!calm()&&hl.animate) hl.animate([{opacity:0},{opacity:1}],{duration:350,easing:EASE.out}); }
+    wasChg[k]=!!chg;
+    s.appendChild(el("span","k",(indent||"")+k+":"));
+    if(v!=null) s.appendChild(el("span","v"," "+v));
+    s.appendChild(document.createTextNode("\n")); return s; }
+  function renderYaml(){
+    var p=readPolicy(), n=0; yamlOut.textContent="";
+    [["version","1"],["name",polName],["on_detector_error","block"],["unknown_text_fields","mask"],["attachments","block"]].forEach(function(kv){ yamlOut.appendChild(line(kv[0],kv[1])); });
+    yamlOut.appendChild(line("entities",null));
+    ROWS.forEach(function(r){ var c=p.entities[r[0]]!==saved.entities[r[0]]; if(c) n++;
+      yamlOut.appendChild(line(r[0],p.entities[r[0]],c,"  "));
+      var row=rowsBox.querySelector('[data-type="'+r[0]+'"]'); row.classList.toggle("changed",c); row.querySelector(".chg-note").hidden=!c; });
+    var cs=p.special!==saved.special; if(cs) n++;
+    yamlOut.appendChild(line("special_categories",p.special,cs));
+    yamlOut.appendChild(line("allowlist",'["Antifaz"]'));
+    yamlOut.appendChild(line("custom",null));
+    yamlOut.appendChild(line("  - name","CLIENT_CODE"));
+    yamlOut.appendChild(line("    regex",'"CLI-\\d{5}"'));
+    yamlOut.appendChild(line("    action","mask"));
+    saveBtn.disabled=n===0;
+    dirty.textContent=n===0?"Sin cambios":n===1?"1 cambio sin guardar":n+" cambios sin guardar"; }
+  document.getElementById("panel-policies").addEventListener("change",function(e){
+    if(e.target.name==="pol-pick") loadPreset(e.target.value);
+    else if(e.target.name&&(e.target.name.indexOf("pt-")===0||e.target.name==="pol-special")) renderYaml(); });
+  saveBtn.addEventListener("click",function(){ PRESET[polName].rev++; var keep=readPolicy(); loadPreset(polName);
+    ROWS.forEach(function(r){ document.getElementById("p-"+r[0]+"-"+keep.entities[r[0]]).checked=true; });
+    document.getElementById(keep.special==="block"?"pol-special-block":"pol-special-local").checked=true;
+    saved=readPolicy(); renderYaml(); dirty.textContent="Guardada (en el prototipo no se escribe nada)"; });
+
+  /* ---- Estado: checked on demand only ---- */
+  var chk=0;
+  /* The latency bars grow from the left with transform: scaleX() (never width) */
+  function growMeters(){ if(calm()) return;
+    document.querySelectorAll("#panel-status .meter:not([hidden])>i").forEach(function(f,i){ if(!f.animate) return;
+      f.getAnimations().forEach(function(a){ a.cancel(); });
+      var v=getComputedStyle(f).transform; f.animate([{transform:"scaleX(0)"},{transform:v}],{duration:700,delay:i*60,easing:EASE.out,fill:"backwards"}); }); }
+  document.getElementById("check-now").addEventListener("click",function(){
+    var out=document.getElementById("check-time"), b=this; b.disabled=true; out.textContent="Comprobando…";
+    setTimeout(function(){ chk++; out.textContent="Comprobado a las 10:"+(44+chk>59?59:44+chk); b.disabled=false; growMeters(); },calm()?0:700); });
+
+  /* The header (and phone bar) status ring pulses three times (CSS) when it appears or the state
+     changes, then stays still: restart it on every state change, also when the same status stays
+     on screen (its three pulses may be long over). The CSS animation is removed for one style
+     pass and put back. With reduced motion the CSS has no animation, so nothing moves. */
+  function pulseStatus(){ var d=document.querySelectorAll(".app-status:not([hidden]) .app-status-dot");
+    d.forEach(function(x){ x.classList.add("is-reset"); }); void app.offsetWidth;
+    d.forEach(function(x){ x.classList.remove("is-reset"); }); }
+
+  /* ---- Prototype states. Only the synthetic example is ever shown in the results: what
+     someone types is never copied anywhere on the page. ---- */
+  var EX="Hola, soy Carmen Prueba López, con DNI 12345678Z. Escribid a mi gestora ana.prueba@example.com y haced el pago en ES9121000418450200051332. ¿Podéis confirmarlo?";
+  var TXT={empty:"",data:EX,error:EX,broken:EX,blocked:EX+" Está de baja médica desde el lunes."};
+  var OK="Listo. 4 datos encontrados y ocultados: la IA recibe marcadores y la respuesta te vuelve con tus datos.";
+  var SAY={empty:"",data:OK,broken:OK,
+    blocked:"Bloqueado: no se ha enviado nada. El texto habla de salud y la política rrhh bloquea esos textos.",
+    error:"Sin respuesta. Los 4 datos se ocultaron, pero Anthropic no ha respondido a tiempo."};
+  var txt=document.getElementById("pg-text"), live=document.getElementById("pg-live");
+  /* Cleared first so the same message is read again after another «Probar» */
+  function say(s){ live.textContent=""; if(SAY[s]) setTimeout(function(){ live.textContent=SAY[s]; },60); }
+  function setState(s,announce,play){ app.setAttribute("data-state",s);
+    document.querySelectorAll("[data-only]").forEach(function(n){ n.hidden=n.getAttribute("data-only").split(" ").indexOf(s)===-1; });
+    txt.value=TXT[s]; document.getElementById(s==="blocked"?"pg-pol-rrhh":"pg-pol-default").checked=true;
+    setPane("2"); renderLive(s); syncLive(); if(announce) say(s); pulseStatus();
+    if(play) playMask(); else cancelMask(); }
+  document.querySelectorAll('input[name="proto-state"]').forEach(function(r){ r.addEventListener("change",function(){ if(r.checked) setState(r.value,true,true); }); });
+  function useExample(){ document.getElementById("st-data").checked=true; setState("data",true,true); }
+  document.getElementById("pg-example").addEventListener("click",useExample);
+  document.querySelector('[data-action="example"]').addEventListener("click",function(){ useExample(); txt.focus(); });
+  var form=document.getElementById("pg-form");
+  form.addEventListener("submit",function(e){ e.preventDefault();
+    var s=app.getAttribute("data-state");
+    if(s==="empty") useExample(); else { say(s); playMask(); } });
+  txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
+  if(/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent)) document.getElementById("pg-mod").textContent="⌘";
+
+  /* ---- Motion: Web Animations API, no library. Easing curves come from design/tokens.css. ---- */
+  function token(n,fb){ return getComputedStyle(root).getPropertyValue(n).trim()||fb; }
+  var EASE={out:token("--ease-out","cubic-bezier(.22,1,.36,1)"),pop:token("--ease-pop","cubic-bezier(.34,1.56,.64,1)"),
+    sweep:token("--ease-sweep","cubic-bezier(.45,0,.55,1)"),inout:token("--ease-in-out","cubic-bezier(.65,0,.35,1)"),
+    door:token("--ease-door","cubic-bezier(.87,0,.13,1)"),expo:token("--ease-expo-out","cubic-bezier(.16,1,.3,1)")};
+  function bezier(str){ var m=/cubic-bezier\(([^)]*)\)/.exec(str), n=m?m[1].split(",").map(parseFloat):[];
+    return n.length===4&&n.every(isFinite)?n:[.45,0,.55,1]; }
+  function bz(p1,p2,t){ var u=1-t; return 3*u*u*t*p1+3*u*t*t*p2+t*t*t; }
+  /* The mask crosses a line with the sweep curve: at time fraction x(s) it has covered y(s) of the
+     line. To know WHEN it reaches a datum that sits at fraction p, invert the curve: find s with
+     y(s) = p (bisection, y only grows) and return x(s). */
+  function arrival(c,p){ var lo=0,hi=1; for(var k=0;k<32;k++){ var m=(lo+hi)/2; if(bz(c[1],c[3],m)<p) lo=m; else hi=m; }
+    return bz(c[0],c[2],(lo+hi)/2); }
+  /* The other way round: how far an eased motion has gone at time fraction f */
+  function progress(c,f){ var lo=0,hi=1; for(var k=0;k<32;k++){ var m=(lo+hi)/2; if(bz(c[0],c[2],m)<f) lo=m; else hi=m; }
+    return bz(c[1],c[3],(lo+hi)/2); }
+  function px(n){ return n+"px"; }
+
+  /* ---- «Así viaja tu texto»: the mask animation (about 7.5 s, --duration-mask).
+     At rest the card shows the last frame. Playing builds every animation at once, each with its
+     delay; they hold their first values until their turn (fill: both), so the card starts in the
+     "before" picture. When all have finished they are cancelled, which leaves the resting CSS: the
+     same picture as the last frame, so nothing jumps. Only transform and opacity move, plus the
+     width of each datum while it turns into its marker (short and small). ---- */
+  var stage=document.getElementById("mask-anim"), journey=stage.parentNode;
+  var wipes=[].slice.call(stage.querySelectorAll(".wipe")), mrows=stage.querySelectorAll(".mrow");
+  var flight=stage.querySelector(".flight"), track=flight.querySelector(".track"), dots=track.querySelectorAll("i");
+  var replay=document.getElementById("anim-replay");
+  var running=[], runId=0, maskTimer=0, stageW=0, pendingPlay=false;
+  var SWEEP=[[1300,2100],[5300,1900]], MORPH=550; /* when each line is crossed (start, length) and how long a datum morphs */
+  var TOKS=wipes.map(function(w,ri){ return [].map.call(w.querySelectorAll(".tok"),function(t){
+    var a=t.querySelector(".tok-a"), b=t.querySelector(".tok-b"), g=a.cloneNode(true), o={t:t,a:a,b:b,g:g};
+    g.className="tok-ghost"; t.insertBefore(g,b);
+    if(ri===0){ o.f=el("span","tok-flash"); a.firstElementChild.appendChild(o.f); }
+    else { o.l=el("span","tok-glow"); t.appendChild(o.l); }
+    return o; }); });
+  function wOf(x){ return parseFloat(getComputedStyle(x).width)||0; }
+  /* Measures both pictures of each line and keeps the taller one as its min-height, so the card
+     never changes height while data turn into markers and back (no layout shift around it).
+     With timing, it also works out WHEN the mask reaches each datum (o.t0, ms): its distance along
+     the line is turned into a time by inverting the sweep curve. A datum's place depends on the
+     data that have already started to change width (lines can rewrap), so this walks forward in
+     time: at each moment the line is laid out as it will be then, every datum still waiting gets
+     its arrival time from the inverted curve, and the walk moves to the earliest one (or 40 ms on,
+     whichever comes first) and measures again. A datum the mask has already passed (it rewrapped
+     behind it) changes at that moment. */
+  function measure(timing){
+    stage.classList.add("is-measuring");
+    var out=wipes.map(function(w,ri){
+      var line=w.querySelector(".jline"), list=TOKS[ri], W=w.offsetWidth||1;
+      line.style.minHeight="";
+      list.forEach(function(o){ o.t.style.width=""; o.wA=wOf(o.a); o.wB=wOf(o.b); });
+      list.forEach(function(o){ o.t.style.width=px(o.wA); }); var hA=line.offsetHeight;
+      list.forEach(function(o){ o.t.style.width=px(o.wB); }); var hB=line.offsetHeight;
+      if(timing){ var at=SWEEP[ri][0], d=SWEEP[ri][1], cs=bezier(EASE.sweep), cw=bezier(EASE.inout), t=at, wait=list.slice();
+        list.forEach(function(o){ o.t0=Infinity; });
+        while(wait.length&&t<at+d){
+          list.forEach(function(q){ var f=(t-q.t0)/MORPH;
+            q.t.style.width=px(f>0?q.wA+(q.wB-q.wA)*progress(cw,Math.min(1,f)):q.wA); });
+          var next=null, nt=Infinity;
+          wait.forEach(function(o){ var ta=at+d*arrival(cs,Math.min(1,Math.max(0,(o.t.offsetLeft+o.wA*.2)/W))); if(ta<nt){ nt=ta; next=o; } });
+          if(nt<=t+1){ next.t0=Math.round(t); wait.splice(wait.indexOf(next),1); }
+          else t=Math.min(nt,t+40); }
+        wait.forEach(function(o){ o.t0=at+d; }); }
+      list.forEach(function(o){ o.t.style.width=""; });
+      line.style.minHeight=px(Math.max(hA,hB));
+      return list; });
+    stage.classList.remove("is-measuring");
+    stageW=stage.clientWidth;
+    return out; }
+  function reserve(){ if(stage.clientWidth>0&&!running.length) measure(false); }
+  function cancelMask(){ runId++; clearTimeout(maskTimer); pendingPlay=false;
+    running.forEach(function(a){ a.cancel(); }); running=[]; stage.classList.remove("is-running"); }
+  function queueMask(ms){ clearTimeout(maskTimer); maskTimer=setTimeout(playMask,ms); }
+  function playMask(){
+    cancelMask();
+    var s=app.getAttribute("data-state");
+    if(calm()||!stage.animate||(s!=="data"&&s!=="broken")||document.getElementById("panel-playground").hidden||!stage.clientWidth) return;
+    if(document.hidden){ pendingPlay=true; return; }
+    var T=measure(true), id=runId;
+    stage.classList.add("is-running");
+    function A(node,kf,at,d,e){ var a=node.animate(kf,{duration:d,delay:at,easing:e||EASE.out,fill:"both"}); running.push(a); return a; }
+    /* 1 · the data flash amber, one after another */
+    T[0].forEach(function(o,i){ A(o.f,[{opacity:0},{opacity:1},{opacity:0}],200+i*180,600,"ease-in-out"); });
+    /* 2-3 and 6 · the mask crosses a line; each datum changes in place exactly when it is reached:
+       it blurs away, its slot narrows or widens to the new width and the new text pops in */
+    function sweep(w,list,at,d,glow){ var g=w.querySelector(".glider"), fade=250/d;
+      A(w.querySelector(".gtrack"),[{transform:"translateX(0)"},{transform:"translateX(100%)"}],at,d,EASE.sweep);
+      A(g,[{opacity:0},{opacity:1,offset:fade},{opacity:1,offset:1-fade},{opacity:0}],at,d,"linear");
+      A(g.querySelector("svg"),[{transform:"rotate(-10deg)"},{transform:"rotate(8deg)"}],at,d,"ease-in-out");
+      list.forEach(function(o){ var t0=o.t0;
+        A(o.t,[{width:px(o.wA)},{width:px(o.wB)}],t0,MORPH,EASE.inout);
+        A(o.a,[{opacity:1,transform:"scale(1)"},{opacity:0,transform:"scale(.9)"}],t0,300,"ease-in");
+        A(o.g,[{opacity:0,transform:"scale(1)"},{opacity:.9,transform:"scale(.96)",offset:.4},{opacity:0,transform:"scale(.9)"}],t0,380,"ease-out");
+        A(o.b,[{opacity:0,transform:"scale(.6)"},{opacity:1,transform:"scale(1)"}],t0+120,650,EASE.pop);
+        if(glow) A(o.l,[{opacity:0},{opacity:1},{opacity:0}],t0+150,700,"ease-in-out"); }); }
+    function caption(row,at){
+      A(row.querySelector(".mcap-before"),[{opacity:1,transform:"translateY(0)"},{opacity:0,transform:"translateY(-5px)"}],at,300);
+      A(row.querySelector(".mcap-after"),[{opacity:0,transform:"translateY(5px)"},{opacity:1,transform:"translateY(0)"}],at+50,450); }
+    sweep(wipes[0],T[0],SWEEP[0][0],SWEEP[0][1],false);
+    /* 4 · «Tú escribes» → «La IA recibe» */
+    caption(mrows[0],3300);
+    /* 5 · three dots travel to Anthropic */
+    A(flight,[{opacity:0},{opacity:1}],3400,400);
+    A(track,[{transform:"scaleX(0)"},{transform:"scaleX(1)"}],3500,600);
+    var TW=Math.max(0,track.offsetWidth-7);
+    [].forEach.call(dots,function(dot,i){ A(dot,[{opacity:0,transform:"translateX(0)"},{opacity:1,offset:.14},{opacity:1,offset:.8},{opacity:0,transform:"translateX("+TW+"px)"}],3800+i*120,900,EASE.sweep); });
+    /* 6 · the reply rises and the mask comes back: each marker opens to the real value */
+    A(mrows[1],[{opacity:0,transform:"translateY(12px)"},{opacity:1,transform:"translateY(0)"}],4600,700);
+    sweep(wipes[1],T[1],SWEEP[1][0],SWEEP[1][1],true);
+    /* 7 · «Te llega, con tus datos»; the last animation ends at 7.5 s */
+    caption(mrows[1],7000);
+    Promise.all(running.map(function(a){ return a.finished; })).then(function(){ if(id===runId) cancelMask(); },function(){}); }
+  function pauseMask(){ running.forEach(function(a){ if(a.playState==="running") a.pause(); }); }
+  function resumeMask(){ running.forEach(function(a){ if(a.playState==="paused") a.play(); }); }
+  /* Hidden tab: the animation pauses and goes on where it was when the tab comes back */
+  document.addEventListener("visibilitychange",function(){ if(document.hidden) pauseMask(); else { resumeMask(); if(pendingPlay) queueMask(200); } });
+  replay.addEventListener("click",function(){ var ic=replay.querySelector(".ic");
+    if(!calm()&&ic.animate) ic.animate([{transform:"rotate(0deg)"},{transform:"rotate(-360deg)"}],{duration:700,easing:EASE.pop});
+    playMask(); });
+  /* A new width (window, phone toggle) changes the lines: stop and measure again */
+  if(window.ResizeObserver) new ResizeObserver(function(){ var w=stage.clientWidth; if(!w||w===stageW) return;
+    if(running.length) cancelMask(); measure(false); }).observe(stage);
+
+  /* ---- Entry: only the first time per session (decided in <head>, before the first paint) ---- */
+  var introAnims=[], introTimer=0, title=document.querySelector("#panel-playground .vh h1"), titleText=title.textContent;
+  function restoreTitle(){ if(title.querySelector(".intro-word")) title.textContent=titleText; }
+  function endIntro(){ clearTimeout(introTimer); introAnims.forEach(function(a){ a.cancel(); }); introAnims=[];
+    var ov=document.getElementById("intro"); if(ov) ov.remove();
+    restoreTitle(); root.classList.remove("intro-pending","intro"); }
+  function runIntro(){
+    var ov=document.getElementById("intro");
+    if(!root.classList.contains("intro-pending")||!ov||!ov.animate||calm()){ endIntro(); return false; }
+    function A(n,kf,o){ o.fill=o.fill||"both"; var a=n.animate(kf,o); introAnims.push(a); return a; }
+    var shown="translateY(0) scale(1)";
+    /* the mask appears (0-0.5 s), lights up indigo from left to right (0.3-0.9 s), then leaves (1-1.3 s) */
+    A(ov.querySelector(".intro-logo"),[{opacity:0,transform:"translateY(0) scale(.86)",easing:EASE.out},{opacity:1,transform:shown,offset:.385},{opacity:1,transform:shown,offset:.77,easing:"ease-in"},{opacity:0,transform:"translateY(0) scale(1.06)"}],{duration:1300});
+    A(ov.querySelector(".intro-name"),[{opacity:0,transform:"translateY(6px) scale(1)",easing:EASE.out},{opacity:1,transform:shown,offset:.583},{opacity:1,transform:shown,offset:.75,easing:"ease-in"},{opacity:0,transform:"translateY(0) scale(1.06)"}],{duration:1200,delay:100});
+    A(ov.querySelector(".intro-lit"),[{transform:"translateX(-100%)"},{transform:"translateX(0)"}],{duration:600,delay:300,easing:EASE.sweep});
+    A(ov.querySelector(".intro-lit svg"),[{transform:"translateX(100%)"},{transform:"translateX(0)"}],{duration:600,delay:300,easing:EASE.sweep});
+    /* the doors open (1.1-1.9 s); the pieces rise from 1.25 s (CSS, --intro-offset) */
+    A(ov.querySelector(".intro-door-upper"),[{transform:"translateY(0)"},{transform:"translateY(-101%)"}],{duration:800,delay:1100,easing:EASE.door});
+    var doors=A(ov.querySelector(".intro-door-lower"),[{transform:"translateY(0)"},{transform:"translateY(101%)"}],{duration:800,delay:1100,easing:EASE.door});
+    /* the view title rises word by word */
+    title.textContent="";
+    titleText.split(" ").forEach(function(w,i){ if(i) title.appendChild(document.createTextNode(" "));
+      var box=el("span","intro-word"), word=el("span",null,w); box.appendChild(word); title.appendChild(box);
+      A(word,[{transform:"translateY(115%)"},{transform:"translateY(0)"}],{duration:1000,delay:1500+i*90,easing:EASE.expo,fill:"backwards"}); });
+    /* the mask animation starts 0.2 s after the doors are open (tied to the doors, not to the clock:
+       a page opened in a background tab does not animate until it is shown) */
+    doors.finished.then(function(){ queueMask(200); },function(){});
+    Promise.all(introAnims.map(function(a){ return a.finished; })).then(function(){ introTimer=setTimeout(endIntro,600); },function(){});
+    return true; }
+
+  /* ---- Details for a mouse only ((hover: hover) and (pointer: fine)), never with reduced motion ---- */
+  var fineQ=matchMedia("(hover: hover) and (pointer: fine)");
+  function lively(e){ return fineQ.matches&&!calm()&&e.pointerType==="mouse"; }
+  var probar=form.querySelector(".btn.primary"), mx=0, my=0;
+  probar.classList.add("magnet");
+  probar.addEventListener("pointermove",function(e){ if(!lively(e)) return; var r=probar.getBoundingClientRect();
+    mx=(e.clientX-(r.left-mx)-r.width/2)*.3; my=(e.clientY-(r.top-my)-r.height/2)*.45;
+    probar.classList.remove("is-released"); probar.style.translate=mx.toFixed(1)+"px "+my.toFixed(1)+"px"; });
+  probar.addEventListener("pointerleave",function(){ mx=my=0; probar.classList.add("is-released"); probar.style.translate=""; });
+  var spots=[form,journey,panes].concat([].slice.call(document.querySelectorAll(".view .surface:not(.pol-bar)")));
+  spots.forEach(function(card){
+    var light=el("span","spot-light"); light.setAttribute("aria-hidden","true"); card.insertBefore(light,card.firstChild); card.classList.add("spot");
+    card.addEventListener("pointermove",function(e){ if(!lively(e)) return;
+      var r=card.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+      light.style.transform="translate("+Math.round(x)+"px,"+Math.round(y)+"px)"; card.classList.add("is-lit");
+      if(card===journey){ journey.classList.remove("is-released");
+        journey.style.transform="perspective(1400px) rotateX("+(-(y/r.height-.5)*3).toFixed(2)+"deg) rotateY("+((x/r.width-.5)*4).toFixed(2)+"deg)"; } });
+    card.addEventListener("pointerleave",function(){ card.classList.remove("is-lit");
+      if(card===journey){ journey.classList.add("is-released"); journey.style.transform=""; } }); });
+  /* With reduced motion switched on halfway, the small script animations of the four views
+     (counters, new rows, bars, YAML lines) jump to their end */
+  function settleViews(){ if(!document.getAnimations) return;
+    document.getAnimations().forEach(function(a){ var t=a.effect&&a.effect.target;
+      if(typeof CSSAnimation!=="undefined"&&(a instanceof CSSAnimation||a instanceof CSSTransition)) return;
+      if(t&&t.closest&&t.closest("#panel-live,#panel-keys,#panel-policies,#panel-status")) a.finish(); }); }
+  function stillDetails(){ settleViews(); mx=my=0; probar.style.translate=""; journey.style.transform="";
+    spots.forEach(function(c){ c.classList.remove("is-lit"); }); }
+
+  /* ---- Window size: the tab list is vertical on the sidebar and a row on the phone bar ---- */
+  function syncOrientation(){ tablist.setAttribute("aria-orientation", app.clientWidth<=640?"horizontal":"vertical"); }
+  if(window.ResizeObserver) new ResizeObserver(syncOrientation).observe(app); syncOrientation();
+
+  /* ---- Header (and phone bar): hides on scroll down, returns on scroll up.
+     CSS keeps it in place with reduced motion and while the focus is inside it. ---- */
+  var lastY=window.scrollY;
+  window.addEventListener("scroll",function(){ var y=window.scrollY, d=y-lastY; if(Math.abs(d)<6) return;
+    root.classList.toggle("chrome-hidden", d>0 && y>140); lastY=y; },{passive:true});
+
+  /* ---- Simulated phone ---- */
+  document.getElementById("proto-mobile").addEventListener("change",function(e){ document.getElementById("stage-wrap").classList.toggle("is-mobile",e.target.checked);
+    cancelMask(); queueMask(620); });
+
+  /* ---- Reduced motion: system setting, or the toggle to preview it ---- */
+  var mBox=document.getElementById("proto-motion");
+  /* Reduced motion: no animation at all, the static before/after (the three columns) is shown */
+  function syncM(){ if(reduceQ.matches){ mBox.checked=true; mBox.disabled=true; } root.classList.toggle("reduce-motion",mBox.checked);
+    if(calm()){ cancelMask(); endIntro(); stillDetails(); } }
+  mBox.addEventListener("change",function(){ syncM(); if(!calm()) queueMask(100); });
+  reduceQ.addEventListener("change",syncM); syncM();
+
+  loadPreset("default");
+  setState("data");
+  reserve();
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(reserve);
+  if(!runIntro()) queueMask(400);
+})();
+</script>
+</body>
+</html>

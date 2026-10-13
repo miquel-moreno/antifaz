@@ -4,6 +4,18 @@
 
 <p align="center"><b>Usa la IA con datos de clientes sin enviarle sus datos.</b><br><a href="README.md">Read in English</a></p>
 
+<p align="center">
+  <a href="https://github.com/miquel-moreno/antifaz/releases"><img src="https://img.shields.io/github/v/release/miquel-moreno/antifaz?include_prereleases&amp;label=versi%C3%B3n" alt="Versión"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/miquel-moreno/antifaz/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/miquel-moreno/antifaz?label=licencia" alt="Licencia"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&amp;logoColor=white" alt="Python 3.12"></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/pkgs/container/antifaz"><img src="https://img.shields.io/badge/ghcr.io-antifaz-2496ED?logo=docker&amp;logoColor=white" alt="Imagen Docker en ghcr.io"></a>
+  <a href="#puesta-en-marcha"><img src="https://img.shields.io/badge/compatible%20con-OpenAI%20%7C%20Anthropic-412991" alt="Compatible con OpenAI y Anthropic"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/estado-beta-orange" alt="Estado: beta"></a>
+  <a href="https://github.com/miquel-moreno/antifaz/stargazers"><img src="https://img.shields.io/github/stars/miquel-moreno/antifaz?style=flat&amp;logo=github&amp;label=estrellas" alt="Estrellas en GitHub"></a>
+</p>
+
 **EN** · Use any LLM with your customers' data, without sending it.
 
 Las empresas quieren usar ChatGPT o Claude con emails y documentos de clientes, pero enviarles datos personales es un riesgo para la privacidad. Antifaz se pone en medio y cambia esos datos por marcadores antes de que salga el texto.
@@ -17,7 +29,7 @@ Las empresas quieren usar ChatGPT o Claude con emails y documentos de clientes, 
 
 ## Resultado
 - En un benchmark público en español, los nombres que quedan a la vista bajan de 100 a 2,5 de cada 100 con el detector de nombres opcional (también tapa algo de texto que no es personal: detalles abajo).
-- Revisa un documento en unos 3 milisegundos sin el detector de nombres, y pasa 829 tests de ataque.
+- Revisa un documento en unos 3 milisegundos sin el detector de nombres, y pasa 960 tests de ataque.
 
 ## Tecnologías
 Python · FastAPI · APIs de LLM (OpenAI, Anthropic) · NLP (GLiNER) · Privacidad (RGPD) · Docker · GitHub Actions · pytest
@@ -30,11 +42,36 @@ Lo he diseñado y desarrollado de principio a fin. Desarrollo asistido por IA ba
 ---
 
 > [!WARNING]
-> **Beta (v0.1, en preparación).** Antifaz **no garantiza encontrar todos los datos personales**: solo protege lo que detecta, y el [benchmark](docs/benchmark.md) dice cuánto se escapa. Pruébalo con tu tipo de textos antes de usarlo con datos reales.
+> **Beta: [ya está publicada la v0.1.1](https://github.com/miquel-moreno/antifaz/releases/tag/v0.1.1).** Antifaz **no garantiza encontrar todos los datos personales**: solo protege lo que detecta, y el [benchmark](docs/benchmark.md) dice cuánto se escapa. Pruébalo con tu tipo de textos antes de usarlo con datos reales.
 
 ## Puesta en marcha
 
-Necesitas Docker con Compose.
+Necesitas Docker con Compose. **Guía de instalación** para empresas, paso a paso (también Windows, Claude Code, actualizaciones y problemas frecuentes): [docs/instalacion.md](docs/instalacion.md) · [in English](docs/install.md).
+
+**Desde la v0.2.0 (todavía no publicada): un minuto, sin clonar.** En una carpeta vacía:
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+docker compose exec antifaz antifaz doctor   # revisa .env y la pasarela
+```
+
+`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: las imágenes 0.1.x solo sirven.
+
+`doctor` dice qué falla, si falla algo: la variable que hay que arreglar (nunca su valor), si la pasarela responde y los pasos siguientes. Con `--providers` también prueba las claves de los proveedores: solo pide su lista de modelos, que es gratis.
+
+En Windows (PowerShell), `curl.exe` en vez de `curl`, sin `--user` y con `${PWD}`, en una sola línea (o partida con una comilla invertida `` ` `` al final de cada línea, no con `\`):
+
+```powershell
+curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+docker compose exec antifaz antifaz doctor
+```
+
+**Con la v0.1.1 (hoy), a mano:**
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -43,11 +80,21 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: un valor aleatorio, por ejemplo la salida de `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY y/o ANTIFAZ_ANTHROPIC_API_KEY: las claves de tus proveedores
 #   (borra la línea del proveedor que no uses: su ruta responde 503)
-docker compose up -d --build
+docker compose up -d                 # descarga ghcr.io/miquel-moreno/antifaz:0.1.1
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 Antifaz se niega a arrancar mientras una clave tenga su valor de ejemplo (`change-me...`); `docker compose logs antifaz` dice qué variable hay que arreglar, nunca su valor. Solo escucha en `127.0.0.1`: para llegar desde otras máquinas, pon delante un proxy inverso con HTTPS ([detalles](docs/TECNICO.md)).
+
+**Sin Compose**, el mismo endurecimiento en un solo `docker run` (también vale con la 0.1.1):
+
+```bash
+docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
+  ghcr.io/miquel-moreno/antifaz:0.1.1
+```
 
 Después, apunta tu cliente a Antifaz en vez de al proveedor, con tu `ANTIFAZ_API_KEY` como clave (las claves de los proveedores se quedan en `.env`):
 
@@ -69,7 +116,14 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "gpt-4.1-nano", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
 ```
 
-**Claude Code**: pon `ANTHROPIC_BASE_URL=http://localhost:8000` y en `ANTHROPIC_API_KEY` tu `ANTIFAZ_API_KEY`. Todavía no se ha probado con la API real de Anthropic (solo con el SDK oficial y respuestas grabadas).
+**Claude Code**: en la máquina donde lo usas, desde un clon (con [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv run antifaz setup claude-code            # enseña el cambio; no escribe nada
+uv run antifaz setup claude-code --apply    # lo escribe (pregunta antes y guarda una copia)
+```
+
+Solo pone `ANTHROPIC_BASE_URL` en tu configuración de Claude Code (`~/.claude/settings.json`; con `--project`, el `.claude/settings.local.json` de esta carpeta). Nunca escribe una clave: pon tu `ANTIFAZ_API_KEY` en la variable de entorno `ANTHROPIC_AUTH_TOKEN` y reinicia Claude Code. Si Antifaz está caído, Claude Code da un error de conexión y no envía nada a Anthropic. Para deshacerlo: `--uninstall --apply`. Todavía no se ha probado con la API real de Anthropic (solo con el SDK oficial y respuestas grabadas).
 
 Qué funciona en la v0.1: OpenAI Chat Completions y Anthropic Messages (con `count_tokens`), con y sin streaming, llamadas a herramientas y bloques de razonamiento; `GET /v1/models`; y `POST /antifaz/scan`, que dice dónde están los datos personales (tipos y posiciones, nunca los valores). Probado con los SDK oficiales de OpenAI y Anthropic para Python, y una vez con la API real de OpenAI.
 

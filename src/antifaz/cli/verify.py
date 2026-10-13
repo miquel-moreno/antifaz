@@ -3,8 +3,8 @@
 It uses your configuration (ANTIFAZ_* variables and .env) and NEVER calls a provider: the
 gateway runs in this process (httpx.ASGITransport) and its upstream is a fake
 (httpx.MockTransport) that records every byte it receives and answers with the placeholders
-it saw. For the run, the provider URLs and keys are replaced by fake ones (so a missing or
-real provider key makes no difference) and one extra Host name is allowed.
+it saw. For the run, the provider URLs and keys and the panel token are replaced by fake ones
+(so a missing or real provider key makes no difference) and one extra Host name is allowed.
 
 A battery of synthetic values (DNI, NIE, IBAN, email, phone, card) goes into every place a
 client can put text, through both endpoints, with and without streaming. It checks that:
@@ -462,13 +462,18 @@ class Report:
 async def run_checks(settings: Settings, policy: Policy) -> Report:
     """Run every probe through an in-process gateway built from `settings`."""
     gateway_key = settings.antifaz_api_key.get_secret_value() if settings.antifaz_api_key else ""
-    fake_keys = {name: SecretStr(f"verify-canary-{secrets.token_hex(16)}") for name in ("o", "a")}
+    # Canaries for both provider keys and the panel token (invariant 13): the user's own
+    # values never take part, and none of these may come back to the client.
+    fake_keys = {
+        name: SecretStr(f"verify-canary-{secrets.token_hex(16)}") for name in ("o", "a", "t")
+    }
     run_settings = settings.model_copy(
         update={
             "openai_base_url": f"{FAKE_UPSTREAM}/v1",
             "openai_api_key": fake_keys["o"],
             "anthropic_base_url": FAKE_UPSTREAM,
             "anthropic_api_key": fake_keys["a"],
+            "admin_token": fake_keys["t"],
             "allowed_hosts": [*settings.allowed_hosts, VERIFY_HOST],
             "log_level": "WARNING",
         }

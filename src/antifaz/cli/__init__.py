@@ -1,9 +1,16 @@
-"""Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`.
+"""Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`,
+`antifaz init`, `antifaz serve`, `antifaz doctor`, `antifaz setup claude-code`.
 
 Uses the library functions directly. `scan` prints `TYPE start end` per detection and
 `mask` prints the masked text. Neither prints values nor the placeholder table, and errors
 are generic messages that never echo the input. `verify` (cli/verify.py) plants synthetic
-data with the current configuration and checks that none reaches a fake provider.
+data with the current configuration and checks that none reaches a fake provider. `init`
+(cli/init.py) writes a .env with a new key; provider keys never come from argv. `serve`
+(cli/serve.py) runs the gateway with fixed uvicorn settings: it is the image's default command.
+`doctor` (cli/doctor.py) checks the configuration, the running gateway and, only with
+--providers, the provider keys (a free model list). `setup claude-code`
+(cli/setup_claude_code.py) points Claude Code at Antifaz by its settings file, never writing a
+key.
 
 Forbidden: No dependency on the database for scan.
 """
@@ -14,6 +21,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
+from antifaz.cli import doctor, init, serve, setup_claude_code
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
@@ -26,7 +34,10 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="antifaz", description="Find or mask personal data.")
+    parser = _Parser(
+        prog="antifaz",
+        description="Privacy gateway for LLMs: run it, set it up, or find and mask personal data.",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("scan", "print TYPE start end for each detection (never the value)"),
@@ -38,6 +49,13 @@ def _parser() -> argparse.ArgumentParser:
         "verify",
         help="plant synthetic data with your configuration and check that none reaches a fake "
         "provider (never calls a real one)",
+    )
+    init.add_parser(commands)
+    doctor.add_parser(commands)
+    setup_claude_code.add_parser(commands)
+    commands.add_parser(
+        "serve",
+        help="run the gateway on 0.0.0.0:8000 (the image's default command; no options)",
     )
     return parser
 
@@ -53,6 +71,14 @@ def _read(name: str) -> str | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "init":
+        return init.run(args)
+    if args.command == "doctor":
+        return doctor.run(args)
+    if args.command == "setup":
+        return setup_claude_code.run(args)
+    if args.command == "serve":
+        return serve.run()
     if args.command == "verify":
         # Imported here: scan and mask do not need the web app and its dependencies.
         from antifaz.cli.verify import verify_from_environment

@@ -88,10 +88,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["python", "-m", "antifaz.healthcheck"]
 
-# --factory: the app is built at start, and a refused configuration (ADR-0015) stops it.
-# --no-proxy-headers: X-Forwarded-* are ignored; behind a reverse proxy see docs/TECNICO.md.
-# --no-server-header: the answers do not say which server runs the gateway.
-ENTRYPOINT ["uvicorn", "--factory", "antifaz.api.app:create_app", \
-            "--host", "0.0.0.0", "--port", "8000", \
-            "--no-access-log", "--no-proxy-headers", "--no-server-header", \
-            "--timeout-graceful-shutdown", "20"]
+# One command for everything (ADR-0017): `docker run IMAGE` serves, and the same image runs
+# `docker run --rm -it -v "$PWD:/work" -w /work IMAGE init` or `... IMAGE verify`.
+# `antifaz serve` runs uvicorn with the settings this ENTRYPOINT had up to v0.1.0, fixed in
+# src/antifaz/cli/serve.py: --factory (a refused configuration stops it), 0.0.0.0:8000, no
+# access log, no X-Forwarded-* (docs/TECNICO.md), no Server header, 20 s graceful shutdown.
+ENTRYPOINT ["antifaz"]
+CMD ["serve"]

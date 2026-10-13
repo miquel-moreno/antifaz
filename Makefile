@@ -3,17 +3,19 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.12.23 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo
+.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures
 
 help:
 	@echo "install    Install dependencies and git hooks"
 	@echo "dev        Run the API with auto-reload on http://localhost:8000"
+	@echo "up         Build the image from this clone and start it with Compose (needs .env)"
+	@echo "down       Stop what make up started"
 	@echo "lint       Check style and common bugs (ruff)"
 	@echo "format     Auto-format the code (ruff)"
 	@echo "typecheck  Check types (mypy strict)"
 	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
-	@echo "e2e        End-to-end: builds the image, runs Compose with a fake provider (needs Docker)"
+	@echo "e2e        End-to-end: builds the image, runs init and Compose with a fake provider (needs Docker)"
 	@echo "secrets    Scan the git history for secrets (gitleaks, redacted)"
 	@echo "workflows  Security audit of the GitHub workflows (zizmor)"
 	@echo "check      lint + typecheck + test + secrets + workflows (run before every commit)"
@@ -26,6 +28,9 @@ help:
 	@echo "           make bench PRESIDIO=1: also Presidio on the shared types (bench group, ~51 MB once)"
 	@echo "ner-model  Install the ner extra and download the pinned NER model (about 1.16 GB)"
 	@echo "demo       Regenerate docs/images/demo.gif from real commands (synthetic data, fake provider)"
+	@echo "design-check  Panel prototype in Chromium: console, requests, overflow, motion, axe-core"
+	@echo "           (Playwright, axe and Pillow in the script's inline metadata; needs Playwright's Chromium)"
+	@echo "design-captures  Reference captures of the prototype into design/captures/ (same script)"
 
 install:
 	uv sync
@@ -33,6 +38,15 @@ install:
 
 dev:
 	uv run uvicorn --factory $(PKG).api.app:create_app --reload --no-access-log
+
+# The image built from this clone (compose.build.yml) instead of the published one.
+COMPOSE_LOCAL := docker compose -f docker-compose.yml -f compose.build.yml
+
+up:
+	$(COMPOSE_LOCAL) up -d --build
+
+down:
+	$(COMPOSE_LOCAL) down
 
 lint:
 	uv run ruff check .
@@ -97,3 +111,17 @@ ner-model:
 # not a project dependency). ARGS=--text prints the captured session without drawing it.
 demo:
 	uv run --with pillow==12.3.0 python -m scripts.demo_gif $(ARGS)
+
+# The panel prototype (design/prototype) in headless Chromium: console, third-party requests,
+# horizontal scroll, clipped or ellipsised text, identifiers broken inside, motion and axe-core, at
+# 390/768/1024/1280 px, both themes and reduced motion. Not part of `check`. Its dependencies
+# (Playwright, axe-playwright-python, Pillow) are in the script's PEP 723 metadata, never in uv.lock;
+# Chromium comes once with
+# `uv run --with playwright==1.63.0 playwright install chromium`.
+design-check:
+	uv run scripts/check_design.py $(ARGS)
+
+# Reference captures of the prototype (design/captures/): the five views in light and dark, desktop
+# and mobile, plus the other states of the Playground. Same script and dependencies as design-check.
+design-captures:
+	uv run scripts/check_design.py --captures

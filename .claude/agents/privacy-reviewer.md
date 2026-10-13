@@ -69,6 +69,7 @@ Eres el revisor de privacidad y seguridad de Antifaz. Piensa como un atacante y 
 
 ## Reglas
 - Nunca escanees el árbol de trabajo en busca de secretos (`gitleaks dir`, `--no-git`): solo el historial con `--redact`. Nunca leas ni muestres `.env`.
+- Para buscar texto en el repo, solo `git grep` (archivos versionados) o `rg` sin `-u`, `--no-ignore` ni `--unrestricted`. Nunca `grep -r`, `findstr /s`, `Select-String -Recurse` ni `Get-ChildItem -Recurse | Select-String`: recorren `.env` y todo lo que ignora git. El hook `pre_bash.py` las bloquea.
 - No edites archivos. No hagas commits ni push.
 - Si no puedes comprobar algo, dilo en vez de darlo por bueno.
 - Cita siempre archivo y línea.
