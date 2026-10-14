@@ -31,15 +31,17 @@ docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --networ
 docker compose up -d
 ```
 
-A mano, desde un clon (vale también con la 0.1.0):
+A mano, desde un clon (es el camino de la 0.1.1 publicada; también vale con la 0.2.0):
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
 cp .env.example .env
 # En .env: ANTIFAZ_API_KEY con un valor aleatorio (openssl rand -hex 32) y la clave de cada
 # proveedor que uses; borra la línea del proveedor que no uses (sin clave, su ruta da 503).
+# ANTIFAZ_ADMIN_TOKEN: otro valor aleatorio distinto de la clave, o borra la línea (panel
+# apagado). La 0.1.1 la ignora; la 0.2.0 no arranca si sigue con el valor de ejemplo.
 docker compose up -d                 # la imagen publicada; `make up` la construye desde el clon
-curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.0"}
+curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
 El flujo a mano con `docker compose up -d --build` se comprobó el 2026-10-01 desde un clon limpio (Docker 29.8, Compose 5.5); desde el issue 42 la construcción local va en `compose.build.yml` (`make up`). Con los valores de ejemplo (`change-me...`) Antifaz se niega a arrancar: es a propósito (ADR-0015). Como Compose usa `restart: unless-stopped`, el contenedor se reinicia una y otra vez, cada vez con más espera entre intentos, y `docker compose ps` lo muestra como `restarting`. El motivo está en `docker compose logs antifaz` (un mensaje sin ninguna clave); se arregla `.env` y se vuelve a lanzar `docker compose up -d`. En `.env` no uses `$` en los valores: Compose intentaría sustituirlo.
@@ -56,7 +58,7 @@ El flujo a mano con `docker compose up -d --build` se comprobó el 2026-10-01 de
 | `.dockerignore` como lista de permitidos (`pyproject.toml`, `uv.lock`, `README.md`, `LICENSE`, `NOTICE`, `src/`), más exclusiones explícitas (`.env*`, `models/`, `evals/`, `.git`, `.venv`, cachés) por si la lista crece por error | Un `.env`, un modelo, un dataset o un archivo nuevo no entran en la imagen por despiste. Ninguna clave va en la imagen: todas llegan como variables de entorno al arrancar |
 | Sin pip, setuptools, wheel ni `ensurepip`: se borran de la imagen base en la etapa final | La pasarela no instala nada al ejecutarse; un instalador es una herramienta más para un atacante y más paquetes que escanear. Se borran en una capa posterior: no aparecen en el sistema de archivos del contenedor (`make e2e` comprueba que `python -m pip` falla), pero sus bytes siguen en la capa de la imagen base, por eso el tamaño casi no cambia |
 | `HEALTHCHECK` con `python -m antifaz.healthcheck` (sin curl) | La imagen no lleva curl ni wget. El healthcheck pide `/healthz` en `127.0.0.1:8000` con una cabecera `Host` sacada de `ANTIFAZ_ALLOWED_HOSTS`, así lo acepta la comprobación de host sea cual sea la configuración. No usa nunca un proxy aunque haya `HTTP_PROXY`/`HTTPS_PROXY` en el entorno. Cada comprobación (cada 30 s) deja una línea `INFO` de la petición a `/healthz` en el log de Antifaz: es ruido esperado y no lleva datos |
-| `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`; `antifaz serve` arranca uvicorn con `--factory antifaz.api.app:create_app`, `0.0.0.0:8000`, sin log de acceso, sin `X-Forwarded-*`, sin cabecera `Server` y 20 s de apagado limpio | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso". Hasta la 0.1.0 el `ENTRYPOINT` era el propio `uvicorn` con esos parámetros (ver «Una sola orden en la imagen») |
+| `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`; `antifaz serve` arranca uvicorn con `--factory antifaz.api.app:create_app`, `0.0.0.0:8000`, sin log de acceso, sin `X-Forwarded-*`, sin cabecera `Server` y 20 s de apagado limpio | La app se construye al arrancar, así una configuración insegura impide arrancar. Sin log de acceso de uvicorn (Antifaz tiene el suyo, sin datos). `X-Forwarded-*` se ignoran: ver "Proxy inverso". Hasta la 0.1.x (0.1.0 y 0.1.1) el `ENTRYPOINT` era el propio `uvicorn` con esos parámetros (ver «Una sola orden en la imagen») |
 
 Tamaño medido el 2026-10-01: **259,1 MB** en disco según `docker image inspect` (la base `python:3.12-slim` ya ocupa 177 MB; el virtualenv, 51 MB; la capa de `apt-get upgrade`, 14,4 MB, porque los archivos viejos siguen en la capa de la base) y **60,9 MB comprimida**. `make e2e` lo vuelve a medir en cada ejecución y falla por encima de 300 MB.
 
@@ -83,19 +85,19 @@ La imagen tiene `ENTRYPOINT ["antifaz"]` y `CMD ["serve"]`. Sin argumentos sirve
 docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
   ghcr.io/miquel-moreno/antifaz:0.2.0 init
 
-# Servir sin Compose, con el mismo endurecimiento que docker-compose.yml (vale con la 0.1.0)
+# Servir sin Compose, con el mismo endurecimiento que docker-compose.yml (vale con la 0.1.1)
 docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   --read-only --tmpfs /tmp:size=16m,mode=1777,noexec,nosuid,nodev \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
-  ghcr.io/miquel-moreno/antifaz:0.1.0
+  ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
 
 | Decisión | Por qué |
 |---|---|
 | `antifaz serve` (`src/antifaz/cli/serve.py`) llama a `uvicorn.run` con los parámetros fijos del `ENTRYPOINT` anterior, más `workers=1`, y no acepta opciones | Un test (`tests/unit/test_cli_serve.py`) fija los parámetros y otro compara, valor a valor, lo que habría ejecutado la línea de órdenes de uvicorn con los argumentos antiguos: solo cambian `app_dir` (uvicorn añadía la carpeta actual a `sys.path`; ahora solo se importa el paquete instalado) `headers` (`[]` frente a `None`: ninguna cabecera extra en los dos casos) y `workers` (antes `None`, un proceso salvo que hubiera `WEB_CONCURRENCY`; ahora siempre 1) |
 | `uvicorn.run` en vez de la línea de órdenes de uvicorn | La línea de órdenes leía variables `UVICORN_*` del entorno (por ejemplo `UVICORN_FORWARDED_ALLOW_IPS`), y el entorno sale de `.env`; `uvicorn.run` no las lee. La configuración de uvicorn todavía lee dos variables sin prefijo: `WEB_CONCURRENCY` solo si no se da `workers` (se da: 1) y `FORWARDED_ALLOW_IPS`, que se lee pero no tiene efecto porque las cabeceras de proxy están desactivadas. Así nada de `.env` cambia cómo se sirve. Lo comprueban dos tests (con `WEB_CONCURRENCY=4` y `FORWARDED_ALLOW_IPS=*`) |
-| `docker-compose.yml` sin `command:` | Corre el `CMD` de la imagen, así el mismo archivo vale para la 0.1.0 (cuyo `ENTRYPOINT` era uvicorn y no entiende `serve`) y para las siguientes |
+| `docker-compose.yml` sin `command:` | Corre el `CMD` de la imagen, así el mismo archivo vale para la 0.1.x (cuyo `ENTRYPOINT` era uvicorn y no entiende `serve`) y para las siguientes |
 | Versión por defecto en Compose = la de `pyproject.toml` | En `main` es la última publicada (la 0.2.0 todavía no existe en ghcr.io), y el commit de cada release sube las dos a la vez. Un test las ata. `ANTIFAZ_VERSION=X.Y.Z` elige otra |
 | `init` en el contenedor con `--rm`, `--network none` y `--user` | `--rm`: la clave que imprime `init` queda en el log del contenedor, que desaparece con él. `--network none`: `init` no usa la red. `--user`: en Linux, el `.env` lo crea tu usuario y no el `10001` de la imagen (con `0600`, si no, no podrías leerlo). En Docker Desktop para Windows no hace falta |
 | Las claves por **nombre** de variable (`-e NOMBRE` en docker, sin valor) | Con `docker run -e NOMBRE`, docker toma el valor de su propio entorno: la clave no aparece en los argumentos ni en `ps`. Así lo hace `make e2e` |
@@ -152,20 +154,22 @@ La imagen se publica en `ghcr.io/miquel-moreno/antifaz` con un workflow aparte, 
 Cómo va una release:
 
 1. En `main`, con la CI en verde: la versión de `pyproject.toml` y la sección `## [X.Y.Z]` del `CHANGELOG.md` ya están puestas. **En el mismo commit, justo antes del tag**, se sube también la versión por defecto de `docker-compose.yml` (`${ANTIFAZ_VERSION:-X.Y.Z}`, un test la ata a `pyproject.toml`) y la versión de la vía manual del README (EN y ES).
-2. **Miquel** crea y sube el tag (`git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`). Nadie más (ni un agente) crea tags.
+2. El tag y la publicación necesitan el OK explícito de Miquel cada vez. Puede delegar en el agente el tag o la aprobación del environment release caso a caso, nunca como permiso permanente. (`git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`)
 3. El job `publish-image` espera en el environment protegido `release`: solo lo pueden usar tags `v*` y, cuando el repo sea público, pide la aprobación manual de Miquel antes de recibir ningún permiso.
 4. Comprueba que el commit del tag está en `main` (si no, falla), que el tag es exactamente `vX.Y.Z`, que coincide con `pyproject.toml` y que el `CHANGELOG.md` tiene su sección; si no, falla sin construir nada.
 5. Construye la imagen sin caché y la sube como `:X.Y.Z` y `:X.Y`, con el SBOM y la procedencia completa (`provenance: mode=max`) adjuntos por buildx.
 6. Firma una atestación de procedencia SLSA con la identidad OIDC del job (Sigstore) y la sube junto a la imagen.
 7. Job `release-asset` (issue 42), después de `publish-image` (`needs`) y sin environment propio: solo arranca si `publish-image`, que ya esperó la aprobación en `release`, terminó bien, así que cada release se aprueba **una vez**. No tiene secretos, solo `contents: write`: genera el `docker-compose.yml` de la release con `python3 -m scripts.release_compose` (solo biblioteca estándar y sin token: copia el del repo y cambia solo la línea `image:` a `ghcr.io/miquel-moreno/antifaz:X.Y.Z@sha256:…`, con el digest que sale del paso de construcción; falla si la versión o el digest no tienen la forma esperada) y lo sube a la GitHub Release del tag con `gh release upload --clobber`. Si Miquel todavía no ha creado la release (`gh release view` responde exactamente `release not found`), crea un **borrador** (`--draft --prerelease --verify-tag`, nunca un tag nuevo): Miquel escribe las notas (la sección del CHANGELOG) y lo publica. Cualquier otro error al leer la release (red, token, límite de peticiones) hace fallar el job en vez de crear otra. El borrador sale marcado como *pre-release* (Antifaz es beta); cuando se publique una versión que no lo sea, hay que desmarcarlo al publicarlo.
 
+**Parche desde un tag antiguo** (así salió la 0.1.1): la rama `release/0.1.1` sale del tag `v0.1.0`, lleva solo el cambio del parche y se fusiona en `main` con un **merge commit normal**, así el commit que lleva el tag queda en `main`. No se puede fusionar con *squash* ni con *rebase*: los dos crean commits nuevos, el commit del tag no llegaría a `main` y `release.yml` fallaría en `git merge-base --is-ancestor` con `origin/main` (paso 4). Ojo: un tag ejecuta el `release.yml` **de su propio commit**, no el de `main`. El de la 0.1.1 era el de la v0.1.0, que todavía no tenía el job `release-asset`: por eso la release 0.1.1 no tiene `docker-compose.yml` adjunto ni se creó un borrador, y Miquel creó la release a mano, igual que la de la 0.1.0.
+
 Comprobar que una imagen salió de este repo y de este workflow:
 
 ```bash
-gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.0 \
+gh attestation verify oci://ghcr.io/miquel-moreno/antifaz:0.1.1 \
   --repo miquel-moreno/antifaz \
   --signer-workflow miquel-moreno/antifaz/.github/workflows/release.yml
-docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.0 --format "{{ json .SBOM }}"
+docker buildx imagetools inspect ghcr.io/miquel-moreno/antifaz:0.1.1 --format "{{ json .SBOM }}"
 ```
 
 `--repo` y `--signer-workflow` exigen que la firma sea de este repo **y** de `release.yml`, no de cualquier workflow de la cuenta.

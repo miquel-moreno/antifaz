@@ -46,32 +46,13 @@ Lo he diseñado y desarrollado de principio a fin. Desarrollo asistido por IA ba
 
 ## Puesta en marcha
 
-Necesitas Docker con Compose. **Guía de instalación** para empresas, paso a paso (también Windows, Claude Code, actualizaciones y problemas frecuentes): [docs/instalacion.md](docs/instalacion.md) · [in English](docs/install.md).
+Necesitas Docker con Compose, y git. **Guía de instalación** para empresas, paso a paso (también Windows, Claude Code, actualizaciones y problemas frecuentes): [docs/instalacion.md](docs/instalacion.md) · [in English](docs/install.md).
 
-**Desde la v0.2.0 (todavía no publicada): un minuto, sin clonar.** En una carpeta vacía:
+Hay dos caminos. **Instalar la v0.1.1 publicada** funciona hoy. **Llega con la v0.2.0** solo está en `main`: no funciona con la imagen 0.1.1.
 
-```bash
-curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
-docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
-  ghcr.io/miquel-moreno/antifaz:0.2.0 init
-docker compose up -d
-docker compose exec antifaz antifaz doctor   # revisa .env y la pasarela
-```
+### Instalar la v0.1.1 publicada (hoy)
 
-`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest. Ejecutar `init` dentro del contenedor necesita la v0.2.0 o posterior: las imágenes 0.1.x solo sirven.
-
-`doctor` dice qué falla, si falla algo: la variable que hay que arreglar (nunca su valor), si la pasarela responde y los pasos siguientes. Con `--providers` también prueba las claves de los proveedores: solo pide su lista de modelos, que es gratis.
-
-En Windows (PowerShell), `curl.exe` en vez de `curl`, sin `--user` y con `${PWD}`, en una sola línea (o partida con una comilla invertida `` ` `` al final de cada línea, no con `\`):
-
-```powershell
-curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
-docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
-docker compose up -d
-docker compose exec antifaz antifaz doctor
-```
-
-**Con la v0.1.1 (hoy), a mano:**
+Todas estas órdenes funcionan con la imagen publicada `ghcr.io/miquel-moreno/antifaz:0.1.1`.
 
 ```bash
 git clone https://github.com/miquel-moreno/antifaz && cd antifaz
@@ -80,13 +61,25 @@ cp .env.example .env
 #   ANTIFAZ_API_KEY: un valor aleatorio, por ejemplo la salida de `openssl rand -hex 32`
 #   ANTIFAZ_OPENAI_API_KEY y/o ANTIFAZ_ANTHROPIC_API_KEY: las claves de tus proveedores
 #   (borra la línea del proveedor que no uses: su ruta responde 503)
+#   ANTIFAZ_ADMIN_TOKEN: otro valor aleatorio, distinto de ANTIFAZ_API_KEY, o borra la línea
 docker compose up -d                 # descarga ghcr.io/miquel-moreno/antifaz:0.1.1
 curl http://127.0.0.1:8000/healthz   # {"status":"ok","version":"0.1.1"}
 ```
 
+En Windows (PowerShell), lo mismo con `Copy-Item` y `curl.exe`. Edita `.env` (guardado en UTF-8) antes de `docker compose up -d`. Para crear un valor aleatorio en PowerShell, mira la [guía de instalación](docs/instalacion.md#22-escribir-el-archivo-env).
+
+```powershell
+git clone https://github.com/miquel-moreno/antifaz; cd antifaz
+Copy-Item .env.example .env
+docker compose up -d
+curl.exe http://127.0.0.1:8000/healthz
+```
+
+`ANTIFAZ_ADMIN_TOKEN` es para el panel del navegador de la v0.2.0. La 0.1.1 lo ignora, pero la v0.2.0 no arranca mientras tenga su valor de ejemplo. Así que genéralo ahora o borra la línea (entonces el panel se queda apagado).
+
 Antifaz se niega a arrancar mientras una clave tenga su valor de ejemplo (`change-me...`); `docker compose logs antifaz` dice qué variable hay que arreglar, nunca su valor. Solo escucha en `127.0.0.1`: para llegar desde otras máquinas, pon delante un proxy inverso con HTTPS ([detalles](docs/TECNICO.md)).
 
-**Sin Compose**, el mismo endurecimiento en un solo `docker run` (también vale con la 0.1.1):
+**Sin Compose**, el mismo endurecimiento en un solo `docker run` (bash; para PowerShell, mira [la guía de instalación, 2.4](docs/instalacion.md#24-sin-compose-un-solo-docker-run)):
 
 ```bash
 docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
@@ -95,6 +88,14 @@ docker run -d --name antifaz --env-file .env -p 127.0.0.1:8000:8000 \
   --memory 512m --cpus 1 --pids-limit 128 --restart unless-stopped \
   ghcr.io/miquel-moreno/antifaz:0.1.1
 ```
+
+Para comprobar tu configuración sin llamar a ningún proveedor (con Compose):
+
+```bash
+docker compose exec antifaz antifaz verify
+```
+
+Planta valores falsos en cada parte de una petición y falla si alguno llega a un proveedor falso.
 
 Después, apunta tu cliente a Antifaz en vez de al proveedor, con tu `ANTIFAZ_API_KEY` como clave (las claves de los proveedores se quedan en `.env`):
 
@@ -116,7 +117,37 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "gpt-4.1-nano", "messages": [{"role": "user", "content": "Mi DNI es 12345678Z"}]}'
 ```
 
-**Claude Code**: en la máquina donde lo usas, desde un clon (con [uv](https://docs.astral.sh/uv/)):
+Qué funciona en la v0.1: OpenAI Chat Completions y Anthropic Messages (con `count_tokens`), con y sin streaming, llamadas a herramientas y bloques de razonamiento; `GET /v1/models`; y `POST /antifaz/scan`, que dice dónde están los datos personales (tipos y posiciones, nunca los valores). Probado con los SDK oficiales de OpenAI y Anthropic para Python, y una vez con la API real de OpenAI.
+
+### Llega con la v0.2.0 (hoy solo en `main`)
+
+> [!NOTE]
+> **Todavía no está publicada.** Nada de esto funciona con la imagen 0.1.1 (responde "invalid arguments"), y el enlace de descarga de abajo solo funciona cuando salga la v0.2.0.
+
+**Un minuto, sin clonar.** En una carpeta vacía:
+
+```bash
+curl -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "$PWD:/work" -w /work --user "$(id -u):$(id -g)" --network none \
+  ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+docker compose exec antifaz antifaz doctor   # revisa .env y la pasarela
+```
+
+`init` te pide las claves de los proveedores sin mostrarlas, escribe `.env` y crea una `ANTIFAZ_API_KEY` aleatoria nueva, que enseña una sola vez: es la que usan tus clientes. Ninguna clave pasa por la línea de órdenes. `--rm` borra el contenedor y su log (que guarda esa clave); `--user` hace que `.env` sea tuyo. El `docker-compose.yml` descargado fija la imagen por digest.
+
+`doctor` dice qué falla, si falla algo: la variable que hay que arreglar (nunca su valor), si la pasarela responde y los pasos siguientes. Con `--providers` también prueba las claves de los proveedores: solo pide su lista de modelos, que es gratis.
+
+En Windows (PowerShell), `curl.exe` en vez de `curl`, sin `--user` y con `${PWD}`, en una sola línea (o partida con una comilla invertida `` ` `` al final de cada línea, no con `\`):
+
+```powershell
+curl.exe -LO https://github.com/miquel-moreno/antifaz/releases/download/v0.2.0/docker-compose.yml
+docker run --rm -it -v "${PWD}:/work" -w /work --network none ghcr.io/miquel-moreno/antifaz:0.2.0 init
+docker compose up -d
+docker compose exec antifaz antifaz doctor
+```
+
+**Claude Code**: en la máquina donde lo usas, desde un clon de `main` (con [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 uv run antifaz setup claude-code            # enseña el cambio; no escribe nada
@@ -125,9 +156,7 @@ uv run antifaz setup claude-code --apply    # lo escribe (pregunta antes y guard
 
 Solo pone `ANTHROPIC_BASE_URL` en tu configuración de Claude Code (`~/.claude/settings.json`; con `--project`, el `.claude/settings.local.json` de esta carpeta). Nunca escribe una clave: pon tu `ANTIFAZ_API_KEY` en la variable de entorno `ANTHROPIC_AUTH_TOKEN` y reinicia Claude Code. Si Antifaz está caído, Claude Code da un error de conexión y no envía nada a Anthropic. Para deshacerlo: `--uninstall --apply`. Todavía no se ha probado con la API real de Anthropic (solo con el SDK oficial y respuestas grabadas).
 
-Qué funciona en la v0.1: OpenAI Chat Completions y Anthropic Messages (con `count_tokens`), con y sin streaming, llamadas a herramientas y bloques de razonamiento; `GET /v1/models`; y `POST /antifaz/scan`, que dice dónde están los datos personales (tipos y posiciones, nunca los valores). Probado con los SDK oficiales de OpenAI y Anthropic para Python, y una vez con la API real de OpenAI.
-
-Para comprobar tu configuración sin llamar a ningún proveedor: `uv run antifaz verify` (desde un clon, con [uv](https://docs.astral.sh/uv/)). Planta valores falsos en cada parte de una petición y falla si alguno llega a un proveedor falso.
+**Panel**: un panel en el navegador, en `/panel`, que se abre con `ANTIFAZ_ADMIN_TOKEN`, está en desarrollo (issue #53).
 
 ## Qué detecta
 
