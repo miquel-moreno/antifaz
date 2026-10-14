@@ -130,6 +130,8 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - «Sesiones con cierre real»: el nombre y la ruta de la cookie dependen del esquema.
 - «Cierre de sesión»: se hace caducar solo la cookie del esquema de la petición.
 
+**Nota (2026-10-14, PR 11b-2b).** La sesión guarda el esquema con el que se creó; si se presenta por el otro esquema, se rechaza y se borra (motivo `scheme_mismatch`). El nombre de la cookie ya separaba los esquemas; esto cubre que alguien copie el id a mano de uno a otro. El CSRF se comprueba en la puerta para todo lo que no es GET o HEAD; la única excepción a la capa del token es el login, que conserva origen + JSON.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
