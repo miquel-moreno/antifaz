@@ -1,4 +1,4 @@
-"""Attacks on the panel door (issue 53, ADR-0018, PR 11b-2a: getting in).
+"""Attacks on the panel door (issue 53, ADR-0018, PRs 11b-2a: getting in, 11b-2b: getting out).
 
 - Cookies: the cookie of the OTHER scheme is never a session, even when its id is valid;
   case variants, duplicates and a second cookie next to the right one.
@@ -9,6 +9,11 @@
   X-Forwarded-Proto, oversized bodies (chunked, without or with a false Content-Length).
 - Every failed login answers the same bytes; the admin token, the session id and the CSRF
   token never reach a log, and only travel where they must.
+- 11b-2b: the CSRF token on every route that changes something (missing, wrong, another
+  session's, repeated, not ASCII, empty), layer 3 and JSON with a valid session and token,
+  forms, logout from another origin or another localhost port, cookie reuse and double logout,
+  a session id moved by hand to the other scheme (refused AND closed), fixation across logout,
+  OPTIONS and HEAD, and no route but the login without the token layer.
 """
 
 import asyncio
@@ -38,12 +43,17 @@ from tests.integration.panel_client import (
     LOCAL_COOKIE,
     LOCAL_URL,
     SECURE_COOKIE,
+    action_headers,
+    alive,
     clients,
+    csrf_of,
     log_in,
+    logged_in,
     login_headers,
     panel_client,
     panel_settings,
     post_login,
+    post_logout,
     set_cookie,
 )
 from tests.redteam.conftest import both_echo
@@ -555,9 +565,17 @@ def test_bad_bodies_count_as_failures() -> None:
 ADMIN_CANARY = "canary-admin-token-not-real-3b9f1d7e5c2a8f60"
 
 
+def _meta_token(page: Any) -> str:
+    return str(page.text.split('name="antifaz-csrf" content="', 1)[1].split('"', 1)[0])
+
+
 def test_secrets_never_reach_a_log_and_only_travel_where_they_must(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """With everything at DEBUG, through logins, logout, CSRF failures and a session id moved by
+    hand to the other scheme: no admin token, session id, fingerprint or CSRF token in any log,
+    each session id only in the Set-Cookie of its own login, each CSRF token only in the body of
+    its own GET /panel (no-store), and nothing of it in any header."""
     settings = panel_settings(admin_token=SecretStr(ADMIN_CANARY), log_level="DEBUG")
     with panel_client(HTTPS_URL, settings=settings) as client:
         for name in ("", "http", "uvicorn", "fastapi", "antifaz", "starlette"):
@@ -569,35 +587,71 @@ def test_secrets_never_reach_a_log_and_only_travel_where_they_must(
         session_id = set_cookie(first)[1]
         cookie = {"Cookie": f"{SECURE_COOKIE}={session_id}"}
         page = client.get("/panel", headers=cookie)
-        csrf = page.text.split('name="antifaz-csrf" content="', 1)[1].split('"', 1)[0]
+        csrf = _meta_token(page)
         responses.append(client.get("/panel/unknown", headers=cookie))
         responses.append(client.get("/panel/login/", headers=cookie))
         again = post_login(client, token=ADMIN_CANARY, headers={**login_headers(client), **cookie})
         responses.append(client.get("/panel", headers=cookie))  # the old session is gone
+        # 11b-2b: CSRF failures and the logout of the second session.
+        second_id = set_cookie(again)[1]
+        second_page = client.get("/panel", headers={"Cookie": f"{SECURE_COOKIE}={second_id}"})
+        second_csrf = _meta_token(second_page)
+        for token in (None, "wrong", csrf, second_csrf + "x"):
+            responses.append(post_logout(client, second_id, token))
+        responses.append(
+            post_logout(
+                client,
+                second_id,
+                second_csrf,
+                action_headers(client, second_id, second_csrf, **{"Sec-Fetch-Site": "cross-site"}),
+            )
+        )
+        logout = post_logout(client, second_id, second_csrf)
+        responses.append(post_logout(client, second_id, second_csrf))  # after logout: 401
+        # A third session, its id moved by hand under the local cookie name: closed.
+        third = post_login(client, token=ADMIN_CANARY)
+        third_id = set_cookie(third)[1]
+        responses.append(
+            client.get(f"{LOCAL_URL}/panel", headers={"Cookie": f"{LOCAL_COOKIE}={third_id}"})
+        )
+        responses.append(
+            client.get("/panel", headers={"Cookie": f"{SECURE_COOKIE}={third_id}"})
+        )  # gone over its own scheme too
 
+    assert logout.status_code == 200
+    assert [r.status_code for r in responses[-2:]] == [303, 303]
     assert caplog.records, "nothing was logged: the check would be empty"
     logs = [caplog.text, *(str(record.__dict__) for record in caplog.records)]
+    ids = (session_id, second_id, third_id)
+    secrets = (
+        ADMIN_CANARY,
+        hashlib.sha256(ADMIN_CANARY.encode()).hexdigest(),
+        csrf,
+        second_csrf,
+        *ids,
+        *(hashlib.sha256(i.encode()).hexdigest() for i in ids),
+    )
     for text in logs:
-        for secret in (
-            ADMIN_CANARY,
-            session_id,
-            csrf,
-            hashlib.sha256(ADMIN_CANARY.encode()).hexdigest(),
-        ):
+        for secret in secrets:
             assert secret not in text
-    for response in [*responses, first, page, again]:
+    everything = [*responses, first, page, again, second_page, logout, third]
+    for response in everything:
         assert ADMIN_CANARY not in response.text
         assert ADMIN_CANARY not in str(response.headers.raw)
-    # The session id only in the Set-Cookie of its own login; the CSRF token only in the meta.
-    for response in [*responses, page, again]:
-        assert session_id not in response.text
-        assert session_id not in str(response.headers.raw)
-    assert session_id not in first.text
-    for response in [*responses, first, again]:
-        assert csrf not in response.text
-        assert csrf not in str(response.headers.raw)
-    assert page.text.count(csrf) == 1
-    assert csrf not in str(page.headers.raw)
+    # Each session id only in the Set-Cookie of its own login.
+    for secret, own in ((session_id, first), (second_id, again), (third_id, third)):
+        for response in everything:
+            assert secret not in response.text
+            if response is not own:
+                assert secret not in str(response.headers.raw)
+    # Each CSRF token only in the body of its own page, once, and never in a header.
+    for secret, own in ((csrf, page), (second_csrf, second_page)):
+        for response in everything:
+            assert secret not in str(response.headers.raw)
+            if response is not own:
+                assert secret not in response.text
+        assert own.text.count(secret) == 1
+        assert own.headers["cache-control"] == "no-store"
 
 
 # --- Review fixes: disconnects, slow bodies, root_path, 500s, shared counters ---------------
@@ -765,10 +819,26 @@ def test_a_500_inside_the_panel_carries_the_panel_headers(
         assert "boom" not in response.text
 
 
-def test_put_on_the_panel_with_a_session_is_405_with_the_headers(client: TestClient) -> None:
-    cookie = {"Cookie": f"{SECURE_COOKIE}={log_in(client)}"}
+def test_put_on_the_panel_with_a_session_but_no_csrf_token_is_403(client: TestClient) -> None:
+    session_id = log_in(client)
 
-    response = client.put("/panel", headers=cookie)
+    bare = client.put("/panel", headers={"Cookie": f"{SECURE_COOKIE}={session_id}"})
+    no_token = client.put("/panel", headers=action_headers(client, session_id, None))
+
+    for response in (bare, no_token):
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "csrf_rejected"
+        _assert_security_headers(response.headers)
+
+
+def test_put_on_the_panel_with_every_csrf_layer_is_405_with_the_headers(
+    client: TestClient,
+) -> None:
+    session_id, token = logged_in(client)
+
+    response = client.put(
+        "/panel", content=b"{}", headers=action_headers(client, session_id, token)
+    )
 
     assert response.status_code == 405
     _assert_security_headers(response.headers)
@@ -784,3 +854,352 @@ def test_behind_a_trusted_proxy_without_forwarded_for_every_client_shares_one_co
             headers = login_headers(client, **proto)
             assert post_login(client, token="wrong", headers=headers).status_code == 401
         assert post_login(client, headers=login_headers(client, **proto)).status_code == 429
+
+
+# --- 11b-2b: the CSRF token on everything that changes something ----------------------------
+
+
+def _token_cases(token: str, other: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """X-Antifaz-CSRF variants that must all fail: (name, the header lines)."""
+    return [
+        ("missing", []),
+        ("empty", [("X-Antifaz-CSRF", "")]),
+        ("wrong", [("X-Antifaz-CSRF", "A" * len(token))]),
+        ("another session's", [("X-Antifaz-CSRF", other)]),
+        ("duplicated", [("X-Antifaz-CSRF", token), ("X-Antifaz-CSRF", token)]),
+        ("right then wrong", [("X-Antifaz-CSRF", token), ("X-Antifaz-CSRF", "x")]),
+        ("one character short", [("X-Antifaz-CSRF", token[:-1])]),
+        ("the session id", []),  # filled below
+    ]
+
+
+def _with_token_lines(
+    client: TestClient, session_id: str, lines: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    return [*action_headers(client, session_id, None).items(), *lines]
+
+
+@pytest.mark.parametrize("base_url", [HTTPS_URL, LOCAL_URL])
+def test_logout_without_exactly_the_right_csrf_token_is_403_and_the_session_lives(
+    base_url: str,
+) -> None:
+    """A page of another site cannot read the token: without it, nothing is closed."""
+    for client in clients(base_url):
+        session_id, token = logged_in(client)
+        _, other = logged_in(client)
+        cases = _token_cases(token, other)
+        cases[-1] = ("the session id", [("X-Antifaz-CSRF", session_id)])
+        for name, lines in cases:
+            response = post_logout(
+                client, session_id, None, _with_token_lines(client, session_id, lines)
+            )
+
+            assert response.status_code == 403, name
+            assert response.json()["error"]["code"] == "csrf_rejected", name
+            assert "set-cookie" not in response.headers, name
+            assert "clear-site-data" not in response.headers, name
+            _assert_security_headers(response.headers)
+            assert alive(client, session_id), name
+
+
+def test_a_non_ascii_csrf_token_is_403_and_the_session_lives(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+    headers = [
+        (k.encode(), v.encode()) for k, v in action_headers(client, session_id, None).items()
+    ]
+    for value in ("ñ" + token[1:]).encode("utf-8"), token[:-1].encode() + b"\xff":
+        response = client.post(
+            "/panel/logout", content=b"{}", headers=[*headers, (b"x-antifaz-csrf", value)]
+        )
+        client.cookies.clear()
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "csrf_rejected"
+    assert alive(client, session_id)
+
+
+def test_layer_3_and_json_still_hold_with_a_valid_cookie_and_token(client: TestClient) -> None:
+    """Every Sec-Fetch-Site, Origin and Content-Type trick of the login, now with the right
+    cookie and token: still 403, and the session is not even looked up (it stays alive)."""
+    session_id, token = logged_in(client)
+    secret = [("Cookie", f"{SECURE_COOKIE}={session_id}"), ("X-Antifaz-CSRF", token)]
+    for name, case in CSRF_CASES:
+        response = client.post(
+            "/panel/logout", content=b"{}", headers=[*_csrf_headers(client, case), *secret]
+        )
+        client.cookies.clear()
+
+        assert response.status_code == 403, name
+        assert response.json()["error"]["code"] == "csrf_rejected", name
+        assert "set-cookie" not in response.headers, name
+        _assert_security_headers(response.headers)
+    assert alive(client, session_id)
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body"),
+    [
+        ("text/plain", b"ok=1"),
+        ("multipart/form-data; boundary=x", b"--x\r\n\r\nok\r\n--x--\r\n"),
+        ("application/x-www-form-urlencoded", b"ok=1"),
+    ],
+)
+def test_a_form_of_another_site_cannot_log_out_even_with_the_cookie(
+    client: TestClient, content_type: str, body: bytes
+) -> None:
+    """What a plain HTML form can send (it carries the cookie only if SameSite failed)."""
+    session_id, token = logged_in(client)
+    for headers in (
+        {"Cookie": f"{SECURE_COOKIE}={session_id}", "Content-Type": content_type},
+        action_headers(client, session_id, token, **{"Content-Type": content_type}),
+    ):
+        response = client.post("/panel/logout", content=body, headers=headers)
+        client.cookies.clear()
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "csrf_rejected"
+    assert alive(client, session_id)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost:3000",  # another app on another localhost port
+        "http://localhost:8001",  # another Antifaz
+        "http://127.0.0.1",  # the same machine, another origin
+        "https://localhost",
+        "null",
+    ],
+)
+def test_logout_from_another_localhost_origin_is_403_and_the_session_lives(origin: str) -> None:
+    """Cookies and SameSite do not separate localhost ports; the Origin with its port does."""
+    for client in clients("http://localhost:8000"):
+        session_id, token = logged_in(client)
+        headers = action_headers(client, session_id, token, Origin=origin)
+
+        response = post_logout(client, session_id, token, headers)
+
+        assert response.status_code == 403
+        assert "set-cookie" not in response.headers
+        assert alive(client, session_id)
+
+
+def test_logout_from_another_origin_with_same_site_fetch_is_403(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+    for site in ("same-site", "cross-site", "none"):
+        headers = action_headers(client, session_id, token, **{"Sec-Fetch-Site": site})
+
+        assert post_logout(client, session_id, token, headers).status_code == 403
+    assert alive(client, session_id)
+
+
+def test_logout_without_a_session_is_401_and_touches_no_cookie(client: TestClient) -> None:
+    for session_id in (None, "A" * 43, "garbage!"):
+        response = post_logout(client, session_id, "some-token")
+
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "panel_unauthorized"
+        assert "set-cookie" not in response.headers
+        assert "clear-site-data" not in response.headers
+        _assert_security_headers(response.headers)
+
+
+def test_the_second_logout_is_401_and_the_cookie_is_dead(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+
+    first = post_logout(client, session_id, token)
+    second = post_logout(client, session_id, token)
+
+    assert first.status_code == 200
+    assert second.status_code == 401
+    assert "set-cookie" not in second.headers
+    assert _panel(client, HTTPS_URL, f"{SECURE_COOKIE}={session_id}").status_code == 303
+
+
+def test_logout_expires_only_the_cookie_of_its_scheme_once(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+
+    response = post_logout(client, session_id, token)
+
+    (cookie,) = response.headers.get_list("set-cookie")
+    assert cookie.startswith(f"{SECURE_COOKIE}=;")
+    assert LOCAL_COOKIE + "=" not in cookie.replace(SECURE_COOKIE, "")
+    assert response.headers.get_list("clear-site-data") == ['"cache"']
+    assert "cookies" not in response.headers["clear-site-data"]
+
+
+@pytest.mark.parametrize(
+    ("made_at", "moved_to", "moved_name"),
+    [(HTTPS_URL, LOCAL_URL, LOCAL_COOKIE), (LOCAL_URL, HTTPS_URL, SECURE_COOKIE)],
+)
+def test_a_session_id_moved_by_hand_to_the_other_scheme_is_refused_and_closed(
+    client: TestClient, made_at: str, moved_to: str, moved_name: str
+) -> None:
+    """The cookie names already differ; this is the id copied by hand under the other name."""
+    own_name = SECURE_COOKIE if made_at == HTTPS_URL else LOCAL_COOKIE
+    session_id = set_cookie(_login_at(client, made_at))[1]
+    assert _panel(client, made_at, f"{own_name}={session_id}").status_code == 200
+
+    moved = _panel(client, moved_to, f"{moved_name}={session_id}")
+
+    assert moved.status_code == 303
+    assert "set-cookie" not in moved.headers
+    assert _panel(client, made_at, f"{own_name}={session_id}").status_code == 303  # closed
+
+
+def test_a_moved_session_id_on_logout_is_401_and_closes_the_session(client: TestClient) -> None:
+    session_id = set_cookie(_login_at(client, HTTPS_URL))[1]
+    token = csrf_of(client, session_id)
+    headers = {
+        "Sec-Fetch-Site": "same-origin",
+        "Origin": LOCAL_URL,
+        "Content-Type": "application/json",
+        "Cookie": f"{LOCAL_COOKIE}={session_id}",
+        "X-Antifaz-CSRF": token,
+    }
+
+    response = client.post(f"{LOCAL_URL}/panel/logout", content=b"{}", headers=headers)
+    client.cookies.clear()
+
+    assert response.status_code == 401
+    assert "set-cookie" not in response.headers
+    assert not alive(client, session_id)
+
+
+def test_after_logout_a_new_login_has_a_new_id_and_token_and_the_old_token_is_dead(
+    client: TestClient,
+) -> None:
+    old_id, old_token = logged_in(client)
+    assert post_logout(client, old_id, old_token).status_code == 200
+
+    new_id, new_token = logged_in(client)
+
+    assert (new_id, new_token) != (old_id, old_token)
+    assert new_id != old_id and new_token != old_token
+    stale = post_logout(client, new_id, old_token)
+    assert stale.status_code == 403
+    assert alive(client, new_id)
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH", "POST"])
+def test_other_methods_on_the_panel_need_the_token_too(client: TestClient, method: str) -> None:
+    session_id, token = logged_in(client)
+
+    without = client.request(
+        method, "/panel", content=b"{}", headers=action_headers(client, session_id, None)
+    )
+    with_it = client.request(
+        method, "/panel", content=b"{}", headers=action_headers(client, session_id, token)
+    )
+
+    assert without.status_code == 403
+    assert with_it.status_code == 405
+    for response in (without, with_it):
+        _assert_security_headers(response.headers)
+        assert "access-control-allow-origin" not in response.headers
+
+
+def test_options_is_not_safe_and_never_answers_cors(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+    preflight = {
+        "Origin": "https://evil.example",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "x-antifaz-csrf, content-type",
+    }
+
+    for path in ("/panel", "/panel/logout", "/panel/login"):
+        blocked = client.options(path, headers=preflight)
+        everything = client.options(path, headers=action_headers(client, session_id, token))
+
+        assert blocked.status_code == 403, path
+        assert everything.status_code == 405, path
+        for response in (blocked, everything):
+            assert not [k for k in response.headers if k.startswith("access-control-")], path
+            _assert_security_headers(response.headers)
+
+
+def test_head_is_safe_401_without_a_session_and_405_with_one(client: TestClient) -> None:
+    session_id = log_in(client)
+
+    without = client.head("/panel")
+    with_one = client.head("/panel", headers={"Cookie": f"{SECURE_COOKIE}={session_id}"})
+    logout = client.head("/panel/logout", headers={"Cookie": f"{SECURE_COOKIE}={session_id}"})
+
+    assert without.status_code == 401
+    assert with_one.status_code == 405
+    assert logout.status_code == 405
+    assert alive(client, session_id)
+
+
+def test_a_cross_origin_request_never_refreshes_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The door refuses layer 3 BEFORE looking the session up: no last use is refreshed."""
+    from antifaz.web import sessions
+
+    looked_up: list[str] = []
+    real_get = sessions.MemorySessionStore.get
+
+    def spy(self: Any, session_id: str, scheme: Any) -> Any:
+        looked_up.append(scheme)
+        return real_get(self, session_id, scheme)
+
+    monkeypatch.setattr(sessions.MemorySessionStore, "get", spy)
+    for client in clients(HTTPS_URL):
+        session_id, token = logged_in(client)
+        looked_up.clear()
+        headers = action_headers(client, session_id, token, Origin="https://evil.example")
+
+        assert post_logout(client, session_id, token, headers).status_code == 403
+        assert looked_up == []
+
+
+def test_no_route_but_the_login_skips_the_csrf_token() -> None:
+    """Every registered /panel route that is not GET or HEAD: either exactly the login, or it
+    needs all three layers (a valid session with everything but the token gets 403)."""
+    from fastapi.routing import iter_route_contexts
+
+    from antifaz.api.gate import is_panel_path
+    from antifaz.web.door import CSRF_TOKEN_EXEMPT, PUBLIC_ROUTES, SAFE_METHODS
+
+    assert {("/panel/login", "POST")} == CSRF_TOKEN_EXEMPT
+    assert {"GET", "HEAD"} == SAFE_METHODS
+    assert {r for r in PUBLIC_ROUTES if r[1] not in SAFE_METHODS} == CSRF_TOKEN_EXEMPT
+    for client in clients(HTTPS_URL):
+        app: FastAPI = client.app  # type: ignore[assignment]
+        pairs = {
+            (context.path, method)
+            for context in iter_route_contexts(app.routes)
+            if context.path and is_panel_path(context.path)
+            for method in context.methods or set()
+        }
+        changing = {pair for pair in pairs if pair[1] not in SAFE_METHODS}
+        assert ("/panel/logout", "POST") in changing  # the check is not empty
+        for path, method in sorted(changing - CSRF_TOKEN_EXEMPT):
+            session_id = log_in(client)
+
+            response = client.request(
+                method, path, content=b"{}", headers=action_headers(client, session_id, None)
+            )
+            client.cookies.clear()
+
+            assert response.status_code == 403, (path, method)
+            assert response.json()["error"]["code"] == "csrf_rejected"
+            assert alive(client, session_id), (path, method)
+
+
+def test_every_logout_answer_carries_the_security_headers(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+    answers = [
+        post_logout(client, None, token),  # 401
+        post_logout(client, session_id, "wrong"),  # 403
+        post_logout(
+            client, session_id, token, action_headers(client, session_id, token, Origin="null")
+        ),
+        post_logout(client, session_id, token),  # 200
+        post_logout(client, session_id, token),  # 401 again
+    ]
+
+    assert [r.status_code for r in answers] == [401, 403, 403, 200, 401]
+    for response in answers:
+        _assert_security_headers(response.headers)

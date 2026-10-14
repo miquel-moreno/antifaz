@@ -1,4 +1,4 @@
-"""The panel's session store and login limiter have no locks (issue 53, ADR-0018, PR 11b-2a).
+"""The panel's session store and login limiter have no locks (issue 53, ADR-0018, PR 11b-2).
 
 They are correct only because every panel route is `async def` on the one event loop and
 nothing awaits in the middle of their read-modify-write. These tests keep it that way:
@@ -10,6 +10,7 @@ nothing awaits in the middle of their read-modify-write. These tests keep it tha
 3. In the login, no await, async for or async with comes after the limiter check (by line):
    from `limiter.allowed(...)` to the response, checking, recording a failure and creating the
    session happen without the coroutine ever being suspended.
+4. The logout (11b-2b) has no await at all: it closes the session and answers in one go.
 """
 
 import ast
@@ -146,3 +147,24 @@ def test_the_critical_section_check_catches_an_inserted_await(inserted: str) -> 
     assert _awaits_after_the_limiter(ast.parse(source)) != []
     clean = source.replace(inserted, "")
     assert _awaits_after_the_limiter(ast.parse(clean)) == []
+
+
+# --- The logout (11b-2b) --------------------------------------------------------------------
+
+
+def _async_nodes_in(tree: ast.Module, function: str) -> list[int]:
+    (node,) = [
+        n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == function
+    ]
+    return [n.lineno for n in ast.walk(node) if isinstance(n, _ASYNC_NODES)]
+
+
+def test_the_logout_never_awaits() -> None:
+    """Closing the session and answering happen in one go: no await, async for or async with."""
+    assert _async_nodes_in(_tree("routes.py"), "logout") == []
+
+
+def test_the_logout_check_catches_an_await() -> None:
+    bad = ast.parse("async def logout(request):\n    await request.body()\n    return 1\n")
+
+    assert _async_nodes_in(bad, "logout") == [2]
