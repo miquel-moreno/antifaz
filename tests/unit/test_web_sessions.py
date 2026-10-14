@@ -5,6 +5,7 @@ scheme it was made over (a lookup over the other one closes it), every close sta
 watch() tells one session's subscriber, and the CSRF token owes nothing to the session id.
 """
 
+import asyncio
 import base64
 import dataclasses
 import hashlib
@@ -321,6 +322,7 @@ def test_the_schemes_and_close_reasons_are_exactly_these() -> None:
         "expired",
         "evicted",
         "scheme_mismatch",
+        "gone",
     }
 
 
@@ -381,8 +383,9 @@ def test_scheme_and_reason_have_no_default() -> None:
     for cls in (MemorySessionStore, SessionStore):
         create = inspect.signature(cls.create).parameters["scheme"]
         get = inspect.signature(cls.get).parameters["scheme"]
+        peek = inspect.signature(cls.peek).parameters["scheme"]
         delete = inspect.signature(cls.delete).parameters["reason"]
-        for parameter in (create, get, delete):
+        for parameter in (create, get, peek, delete):
             assert parameter.default is inspect.Parameter.empty, (cls, parameter)
 
 
@@ -573,3 +576,215 @@ def test_a_failing_cut_never_breaks_the_close(
     assert cut.reasons == ["logout"]
     assert "session close subscriber failed: RuntimeError" in caplog.text
     assert session.fingerprint not in caplog.text
+
+
+# --- Review fixes (11b-2b) ------------------------------------------------------------------
+
+# A. watch() on a session that is already closed, unknown or expired.
+
+
+def test_the_close_reasons_include_gone() -> None:
+    assert "gone" in typing.get_args(CloseReason.__value__)
+
+
+def test_watch_on_an_unknown_key_cuts_at_once_with_gone(store: MemorySessionStore) -> None:
+    before = len(store._callbacks)
+    cut = Cut()
+
+    unsubscribe = watch(store, "0" * 64, cut)
+
+    assert cut.reasons == ["gone"]
+    assert len(store._callbacks) == before
+    unsubscribe()  # a no-op, and harmless
+    assert cut.reasons == ["gone"]
+
+
+def test_watch_on_a_session_closed_before_cuts_with_gone(store: MemorySessionStore) -> None:
+    session_id, session = store.create("https")
+    store.delete(session_id, "logout")
+    before = len(store._callbacks)
+    cut = Cut()
+
+    watch(store, session.fingerprint, cut)
+
+    assert cut.reasons == ["gone"]
+    assert len(store._callbacks) == before
+
+
+def test_watch_on_a_session_expired_but_not_looked_up_cuts_with_expired(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    _, session = store.create("https")
+    clock.advance(IDLE_SECONDS)
+    before = len(store._callbacks)
+    cut = Cut()
+
+    watch(store, session.fingerprint, cut)
+
+    assert cut.reasons == ["expired"]  # the check itself closed it, and the watcher heard it
+    assert len(store._callbacks) == before
+    assert len(store) == 0
+
+
+def test_a_thousand_watches_on_unknown_keys_leave_no_callback(store: MemorySessionStore) -> None:
+    cut = Cut()
+    for i in range(1000):
+        watch(store, f"{i:064x}", cut)
+
+    assert store._callbacks == []
+    assert cut.reasons == ["gone"] * 1000
+
+
+def test_watch_on_a_live_session_stays_subscribed(store: MemorySessionStore) -> None:
+    _, session = store.create("https")
+    cut = Cut()
+
+    watch(store, session.fingerprint, cut)
+
+    assert cut.reasons == []
+    assert len(store._callbacks) == 1
+
+
+# B. Deleting an expired session closes it as expired, never with the reason given.
+
+
+@pytest.mark.parametrize("reason", ["replaced", "logout"])
+def test_delete_of_an_expired_session_closes_it_as_expired(
+    store: MemorySessionStore, clock: Clock, reason: CloseReason
+) -> None:
+    subscriber = Subscriber()
+    store.on_close(subscriber)
+    session_id, session = store.create("https")
+    cut = Cut()
+    watch(store, session.fingerprint, cut)
+    clock.advance(IDLE_SECONDS)
+
+    assert not store.delete(session_id, reason)  # it was no longer a live session
+    assert subscriber.closed == [(session.fingerprint, "expired")]
+    assert cut.reasons == ["expired"]
+    assert len(store) == 0
+
+
+def test_delete_of_a_live_session_uses_the_reason_given(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    session_id, session = store.create("https")
+    cut = Cut()
+    watch(store, session.fingerprint, cut)
+    clock.advance(IDLE_SECONDS - 1)
+
+    assert store.delete(session_id, "replaced")
+    assert cut.reasons == ["replaced"]
+
+
+# C. Looking a session up and counting a use are two steps: peek() and touch().
+
+
+def test_peek_finds_without_counting_a_use(store: MemorySessionStore, clock: Clock) -> None:
+    session_id, session = store.create("https")
+    clock.advance(600)
+
+    found = store.peek(session_id, "https")
+
+    assert same(found, session)
+    assert found is not None and found.last_used == 1000.0
+    assert store._sessions[session.fingerprint].last_used == 1000.0
+
+
+def test_peek_alone_lets_the_session_expire(store: MemorySessionStore, clock: Clock) -> None:
+    session_id, _ = store.create("https")
+    for _ in range(3):
+        clock.advance(IDLE_SECONDS / 2)
+        store.peek(session_id, "https")
+
+    assert store.peek(session_id, "https") is None
+
+
+def test_peek_over_the_other_scheme_closes_the_session(store: MemorySessionStore) -> None:
+    subscriber = Subscriber()
+    store.on_close(subscriber)
+    session_id, session = store.create("https")
+
+    assert store.peek(session_id, "http-local") is None
+    assert subscriber.closed == [(session.fingerprint, "scheme_mismatch")]
+    assert len(store) == 0
+
+
+def test_touch_counts_a_use_of_a_live_session(store: MemorySessionStore, clock: Clock) -> None:
+    session_id, session = store.create("https")
+    clock.advance(600)
+
+    touched = store.touch(session.fingerprint)
+
+    assert touched is not None and touched.last_used == 1600.0
+    clock.advance(IDLE_SECONDS - 1)
+    assert same(store.peek(session_id, "https"), session)  # the idle limit moved
+
+
+def test_touch_never_revives_an_expired_or_unknown_session(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    subscriber = Subscriber()
+    store.on_close(subscriber)
+    _, session = store.create("https")
+    clock.advance(IDLE_SECONDS)
+
+    assert store.touch(session.fingerprint) is None
+    assert store.touch("0" * 64) is None
+    assert subscriber.closed == [(session.fingerprint, "expired")]
+    assert len(store) == 0
+
+
+def test_get_is_peek_then_touch(store: MemorySessionStore, clock: Clock) -> None:
+    session_id, _ = store.create("https")
+    clock.advance(600)
+
+    found = store.get(session_id, "https")
+
+    assert found is not None and found.last_used == 1600.0
+
+
+# D. A BaseException in a subscriber: everyone is still told, then it is raised again.
+
+
+def test_a_cancelled_subscriber_still_lets_the_others_hear_and_is_raised_at_the_end(
+    store: MemorySessionStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    session_id, session = store.create("https")
+    before, after = Subscriber(), Subscriber()
+
+    def cancelled(key: str, reason: CloseReason) -> None:
+        raise asyncio.CancelledError()
+
+    store.on_close(before)
+    store.on_close(cancelled)
+    store.on_close(broken)
+    store.on_close(after)
+
+    with pytest.raises(asyncio.CancelledError):
+        store.delete(session_id, "logout")
+
+    assert before.closed == after.closed == [(session.fingerprint, "logout")]
+    assert len(store) == 0
+    assert store.get(session_id, "https") is None
+    assert "session close subscriber failed: RuntimeError" in caplog.text
+    assert session.fingerprint not in caplog.text
+
+
+def test_only_the_first_base_exception_is_raised(store: MemorySessionStore) -> None:
+    session_id, _ = store.create("https")
+    told = Subscriber()
+
+    def interrupted(key: str, reason: CloseReason) -> None:
+        raise KeyboardInterrupt()
+
+    def cancelled(key: str, reason: CloseReason) -> None:
+        raise asyncio.CancelledError()
+
+    store.on_close(interrupted)
+    store.on_close(cancelled)
+    store.on_close(told)
+
+    with pytest.raises(KeyboardInterrupt):
+        store.delete(session_id, "logout")
+    assert len(told.closed) == 1

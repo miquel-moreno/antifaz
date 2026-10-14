@@ -6,6 +6,11 @@ time, the last use and the CSRF token: a copy of the store does not hand out a u
 session lasts 8 hours at most and 30 minutes without use. Expiry is checked when a session is
 looked up (no timers, no thread).
 
+- Looking up and counting a use are two steps: peek() finds a live session of the right scheme
+  without touching it, and touch() counts the use. The door touches only after every check of
+  the request passed, and only for requests of the panel's own page (door.py), so a refused
+  request or a page of another localhost port never keeps a session alive. get() is both.
+
 - The scheme: "https" or "http-local" (http://localhost). A session is only valid over the scheme
   it was made over. The cookie names already keep the two apart; this covers an id copied by hand
   from one cookie to the other. Presented over the other scheme, the session is CLOSED (reason
@@ -15,9 +20,14 @@ looked up (no timers, no thread).
 
 Whoever holds a live view of a session (the SSE stream of "En directo", in 11e) subscribes with
 watch() (or on_close() for every session) and is told, with the reason, when that session is
-closed: logout, replaced (a new login), expired, evicted or scheme_mismatch. A subscriber that
-fails is logged (a fixed message and the error's type only) and the others are still told:
-closing a session never fails because of one.
+closed: logout, replaced (a new login), expired, evicted or scheme_mismatch. watch() on a session
+that is not there any more (closed, or never was) is told at once with "gone".
+
+Subscribers: every one is told, whatever the others do. One that raises an Exception is logged
+(a fixed message and the error's type only) and closing goes on: it never fails because of one.
+One that raises a BaseException that is not an Exception (asyncio.CancelledError,
+KeyboardInterrupt...) does not stop the others either: the session is already gone, every
+subscriber is told, and then the FIRST such error is raised again from the call that closed it.
 
 The store is bounded: when it is full, the OLDEST session (by creation) is evicted, its
 subscribers told, and the new one is ALWAYS created. A full store never refuses a login.
@@ -28,9 +38,9 @@ and nothing awaits in the middle of a call, so the panel routes that use it must
 block: the SSE side only signals (asyncio.Event.set or loop.call_soon) and returns.
 
 Forbidden: keeping the raw session id in any attribute. Logging an id, a fingerprint or a CSRF
-token. Calling is_active() or watch() with a value the client sent (they take a fingerprint,
-which only the server computes: a client value would skip the id-to-fingerprint step). Deriving
-the CSRF token from the session id.
+token. Calling is_active(), touch() or watch() with a value the client sent (they take a
+fingerprint, which only the server computes: a client value would skip the id-to-fingerprint
+step). Deriving the CSRF token from the session id.
 """
 
 import dataclasses
@@ -43,7 +53,8 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 type SessionScheme = Literal["https", "http-local"]
-type CloseReason = Literal["logout", "replaced", "expired", "evicted", "scheme_mismatch"]
+# gone: only for watch(), when the session was already closed (or never existed).
+type CloseReason = Literal["logout", "replaced", "expired", "evicted", "scheme_mismatch", "gone"]
 type CloseCallback = Callable[[str, CloseReason], None]
 
 SCHEMES: frozenset[str] = frozenset({"https", "http-local"})
@@ -84,13 +95,23 @@ class SessionStore(Protocol):
         """A new session bound to `scheme`: (the id for the cookie, what the server keeps)."""
         ...
 
-    def get(self, session_id: str, scheme: SessionScheme) -> Session | None:
-        """The live session for this id over `scheme`, its last use refreshed. None if unknown
+    def peek(self, session_id: str, scheme: SessionScheme) -> Session | None:
+        """The live session for this id over `scheme`, WITHOUT counting a use. None if unknown
         or expired; also None if it was made over the other scheme, and then it is closed."""
         ...
 
+    def touch(self, key: str) -> Session | None:
+        """Count a use of the live session with this fingerprint; None if it is not live.
+        Forbidden: calling it with a client-supplied value."""
+        ...
+
+    def get(self, session_id: str, scheme: SessionScheme) -> Session | None:
+        """peek() and, if found, touch(): the live session with its last use refreshed."""
+        ...
+
     def delete(self, session_id: str, reason: CloseReason) -> bool:
-        """Close the session now and tell the subscribers. True if it existed."""
+        """Close the live session now with `reason` and tell the subscribers; True if it was
+        live. An expired one is closed as "expired" instead, and that returns False."""
         ...
 
     def is_active(self, key: str) -> bool:
@@ -138,22 +159,32 @@ class MemorySessionStore:
         self._sessions[session.fingerprint] = session
         return session_id, session
 
-    def get(self, session_id: str, scheme: SessionScheme) -> Session | None:
-        now = self._clock()  # once: the check and the new last use see the same instant
+    def peek(self, session_id: str, scheme: SessionScheme) -> Session | None:
         key = fingerprint(session_id)
-        session = self._live(key, now)
+        session = self._live(key, self._clock())
         if session is None:
             return None
         if session.scheme != scheme:
             self._close(key, "scheme_mismatch")
             return None
+        return session
+
+    def touch(self, key: str) -> Session | None:
+        now = self._clock()  # once: the check and the new last use see the same instant
+        session = self._live(key, now)
+        if session is None:
+            return None
         session = dataclasses.replace(session, last_used=now)
         self._sessions[key] = session
         return session
 
+    def get(self, session_id: str, scheme: SessionScheme) -> Session | None:
+        session = self.peek(session_id, scheme)
+        return None if session is None else self.touch(session.fingerprint)
+
     def delete(self, session_id: str, reason: CloseReason) -> bool:
         key = fingerprint(session_id)
-        if key not in self._sessions:
+        if self._live(key, self._clock()) is None:  # an expired one is closed as "expired"
             return False
         self._close(key, reason)
         return True
@@ -184,14 +215,25 @@ class MemorySessionStore:
             self._close(key, "expired")
 
     def _close(self, key: str, reason: CloseReason) -> None:
-        """Forget the session, then tell every subscriber. Never raises."""
+        """Forget the session, then tell EVERY subscriber. An Exception from one is logged (type
+        only); the first BaseException that is not one is raised again once all were told."""
         del self._sessions[key]
+        pending: BaseException | None = None
         for callback in list(self._callbacks):
             try:
                 callback(key, reason)
             except Exception as error:
                 # Only the type: an exception's text could carry the fingerprint.
                 logger.error("session close subscriber failed: %s", type(error).__name__)
+            except BaseException as error:  # CancelledError, KeyboardInterrupt...: after all
+                if pending is None:
+                    pending = error
+        if pending is not None:
+            raise pending
+
+
+def _nothing() -> None:
+    """The unsubscribe of a watch that ended before it started."""
 
 
 def watch(store: SessionStore, key: str, cut: Callable[[CloseReason], None]) -> Callable[[], None]:
@@ -200,13 +242,28 @@ def watch(store: SessionStore, key: str, cut: Callable[[CloseReason], None]) -> 
     A thin layer over on_close(): other sessions closing are ignored, and the subscription ends
     by itself after the one call (a session closes only once). Returns unsubscribe, for a stream
     that ends first. `cut` runs inside the close: it must only signal and return, never block.
+
+    It subscribes first and then checks that the session is live, so no close can slip between
+    the two. If that check finds it expired, it closes it and `cut` hears "expired". If the
+    session is not there at all (already closed, or never was), `cut("gone")` is called at once,
+    nothing stays subscribed and the unsubscribe returned does nothing.
+
     Forbidden: passing a value the client sent as `key` (only the server computes fingerprints).
     """
 
+    told = False
+
     def on_close(closed: str, reason: CloseReason) -> None:
+        nonlocal told
         if closed == key:
+            told = True
             unsubscribe()
             cut(reason)
 
     unsubscribe = store.on_close(on_close)
-    return unsubscribe
+    if store.is_active(key):
+        return unsubscribe
+    if not told:  # not expired by the check just now: it was not there at all
+        unsubscribe()
+        cut("gone")
+    return _nothing
