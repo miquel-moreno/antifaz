@@ -18,19 +18,25 @@ key does not open the panel. In this order:
    b. A live session (step 5), else 401.
    c. Layer 2: the session's CSRF token in exactly one X-Antifaz-CSRF header, else the same
       403 csrf_rejected as in (a). Layer 1, SameSite=Strict, is on the cookie.
-4. The public routes, exact (path, method): GET /panel/login, and POST /panel/login, the only
-   route exempt from (b) and (c) (CSRF_TOKEN_EXEMPT): it has no session yet.
+4. The public routes, exact (path, method), served without a session: GET /panel/login and
+   the routes of CSRF_TOKEN_EXEMPT, the only ones that skip (b) and (c). That list holds only
+   POST /panel/login (it has no session yet), and PUBLIC_ROUTES is built from it, so no other
+   route that is not safe can ever skip the token.
 5. Anything else needs a live session of the request's scheme, read from the cookie of that
    scheme only (cookies.py) and bound to it in the store (a session made over the other scheme
-   is closed, sessions.py). Without one, GET /panel answers 303 to the fixed relative
-   "/panel/login" and everything else 401.
+   is closed, sessions.py). It is looked up WITHOUT counting a use (peek). Without one, GET
+   /panel answers 303 to the fixed relative "/panel/login" and everything else 401.
+6. Only once every check of the request passed, and only for a request of the panel's own
+   page (Sec-Fetch-Site same-origin, none or absent: csrf.counts_as_use), the session's last
+   use is refreshed (touch). A refused request, or a page of another localhost port (same-site,
+   which carries the cookie), never keeps a session alive.
 
 The router then runs with a PanelContext in scope["state"], so a route never parses the
 cookie or the scheme again.
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because every panel route is `async def` on the one event loop and nothing awaits between a
-read and its write (tests/unit/test_web_concurrency.py).
+read and its write. Here, nothing awaits from peek() to touch() (test_web_concurrency.py).
 
 There is never a CORS header: an OPTIONS preflight from another origin gets 403.
 
@@ -52,19 +58,21 @@ from antifaz.http_errors import (
 )
 from antifaz.routing import route_path
 from antifaz.web.cookies import read_session_cookie, session_scheme
-from antifaz.web.csrf import has_csrf_token, is_json, is_same_origin
+from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
 from antifaz.web.headers import with_security_headers
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.sessions import Session, SessionStore
 
-# Served without a session. Exact pairs: "/panel/login/" or HEAD need a session.
-PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
 # The methods that change nothing: no CSRF check. Everything else gets all the layers.
 SAFE_METHODS = frozenset({"GET", "HEAD"})
-# Not safe, yet without the token layer (it keeps layer 3 and JSON). Only the login, ever.
+# Not safe, yet without the session and token layers (it keeps layer 3 and JSON). Only the
+# login, ever: a test walks every registered route to keep it so.
 CSRF_TOKEN_EXEMPT = frozenset({("/panel/login", "POST")})
+# Served without a session: the login page, and the exempt routes. Exact pairs: "/panel/login/"
+# or HEAD need a session.
+PUBLIC_ROUTES = frozenset({("/panel/login", "GET")}) | CSRF_TOKEN_EXEMPT
 LOGIN_PATH = "/panel/login"
 CONTEXT_KEY = "antifaz.panel"
 
@@ -141,20 +149,25 @@ class PanelDoor:
             await error_response(CsrfRejectedError())(scope, receive, send)
             return
         context = PanelContext(scheme, host, read_session_cookie(headers, scheme))
-        route = (path, method)
-        public = route in PUBLIC_ROUTES and (safe or route in CSRF_TOKEN_EXEMPT)
-        if not public:
+        if (path, method) not in PUBLIC_ROUTES:
+            # From peek() to touch(), plain code: the answer is sent only afterwards.
+            sessions = self._state.sessions
             session = None
             if context.session_id is not None:
-                session = self._state.sessions.get(context.session_id, session_scheme(scheme))
+                session = sessions.peek(context.session_id, session_scheme(scheme))
+            refused: Response | None = None
             if session is None:
-                await self._no_session(path, method)(scope, receive, send)
+                refused = self._no_session(path, method)
+            elif not safe and not has_csrf_token(headers, session.csrf_token):
+                refused = error_response(CsrfRejectedError())
+            else:
+                # Every check passed: only now, and only for the panel's own page, it is a use.
+                if counts_as_use(headers):
+                    session = sessions.touch(session.fingerprint) or session
+                context = PanelContext(scheme, host, context.session_id, session)
+            if refused is not None:
+                await refused(scope, receive, send)
                 return
-            needs_token = not safe and route not in CSRF_TOKEN_EXEMPT
-            if needs_token and not has_csrf_token(headers, session.csrf_token):
-                await error_response(CsrfRejectedError())(scope, receive, send)
-                return
-            context = PanelContext(scheme, host, context.session_id, session)
         scope.setdefault("state", {})[CONTEXT_KEY] = context
         await self.app(scope, receive, send)
 

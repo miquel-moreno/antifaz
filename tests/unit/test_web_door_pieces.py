@@ -37,7 +37,7 @@ from antifaz.web.cookies import (
     session_cookie,
     session_scheme,
 )
-from antifaz.web.csrf import has_csrf_token, is_json, is_same_origin
+from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
 from antifaz.web.headers import CONTENT_SECURITY_POLICY, SECURITY_HEADERS, with_security_headers
 from antifaz.web.pages import CSRF_META, HTTPS_ONLY_PAGE, LOGIN_PAGE, panel_page
 from antifaz.web.sessions import MAX_AGE_SECONDS
@@ -415,6 +415,43 @@ def test_a_header_of_another_name_is_no_token() -> None:
 @pytest.mark.parametrize("expected", ["", "\u00f1" * 10])
 def test_an_empty_or_non_ascii_expected_token_never_matches(expected: str) -> None:
     assert not has_csrf_token(_token_headers(expected.encode("utf-8")), expected)
+    # With a header that passes its own checks, the expected value alone must refuse it.
+    assert not has_csrf_token(_token_headers(b"any-ascii-token"), expected)
+
+
+@pytest.mark.parametrize("expected", ["", "t\u00f1", "\u00f1" * 43])
+def test_an_ascii_header_against_an_empty_or_non_ascii_expected_is_false(expected: str) -> None:
+    assert not has_csrf_token(_token_headers(TOKEN.encode()), expected)
+    assert not has_csrf_token(_token_headers(b"t?"), expected)
+
+
+# --- counts_as_use: which requests may refresh a session's last use ------------------------
+
+
+@pytest.mark.parametrize(
+    "values", [[], [b"same-origin"], [b"none"]], ids=["absent", "same-origin", "none"]
+)
+def test_the_panel_page_or_no_browser_counts_as_use(values: list[bytes]) -> None:
+    headers = [(b"host", b"localhost"), *((b"sec-fetch-site", v) for v in values)]
+
+    assert counts_as_use(headers)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [b"same-site"],  # another localhost port: it carries the cookie
+        [b"cross-site"],
+        [b"Same-Origin"],
+        [b""],
+        [b"same-origin", b"same-origin"],
+        [b"same-origin", b"cross-site"],
+    ],
+)
+def test_anything_else_does_not_count_as_use(values: list[bytes]) -> None:
+    headers = [(b"Sec-Fetch-Site", v) for v in values]
+
+    assert not counts_as_use(headers)
 
 
 def test_the_token_is_compared_in_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:

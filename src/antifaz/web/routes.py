@@ -25,7 +25,9 @@ CSRF again.
   leaves), and the answer is {"ok": true} with exactly one Set-Cookie, the expired cookie of the
   request's scheme, and `Clear-Site-Data: "cache"` (never "cookies": on localhost it would wipe
   the cookies of every app on every port). The body is not read. Without a session, the door
-  answers 401 and no cookie is touched.
+  answers 401 and no cookie is touched. Two logouts of the same session at the same time can
+  both answer 200 with the expired cookie: the door let both through before either closed it.
+  That is idempotent and harmless (the session is closed once, its subscribers told once).
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and

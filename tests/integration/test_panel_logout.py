@@ -345,3 +345,122 @@ def test_a_failing_subscriber_never_breaks_the_logout(
     for text in [caplog.text, *(str(r.__dict__) for r in caplog.records)]:
         assert key not in text
         assert session_id not in text
+
+
+# --- Review fixes: what counts as a use of the session ---------------------------------------
+
+
+def _last_used(kept: type[_Kept], session_id: str) -> float:
+    return kept.store._sessions[fingerprint(session_id)].last_used
+
+
+def _get_panel(app: FastAPI, session_id: str, fetch_site: str | None) -> int:
+    headers = [(b"cookie", f"{LOCAL_COOKIE}={session_id}".encode())]
+    if fetch_site is not None:
+        headers.append((b"sec-fetch-site", fetch_site.encode()))
+    return _status(_raw(app, "GET", "/panel", headers, b""))
+
+
+def test_a_wrong_csrf_token_does_not_count_as_a_use(kept: type[_Kept]) -> None:
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    kept.clock.now += 600
+
+    sent = _logout(app, session_id, "W" * 43)
+
+    assert _status(sent) == 403
+    assert _last_used(kept, session_id) == 1000.0
+
+
+def test_a_logout_from_another_origin_does_not_count_as_a_use(kept: type[_Kept]) -> None:
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    kept.clock.now += 600
+    headers = [
+        (b"origin", b"http://localhost:3000"),
+        (b"sec-fetch-site", b"same-site"),
+        (b"content-type", b"application/json"),
+        (b"cookie", f"{LOCAL_COOKIE}={session_id}".encode()),
+        (b"x-antifaz-csrf", _token_of(kept, session_id).encode()),
+    ]
+
+    assert _status(_raw(app, "POST", "/panel/logout", headers, b"{}")) == 403
+    assert _last_used(kept, session_id) == 1000.0
+
+
+@pytest.mark.parametrize("fetch_site", ["same-site", "cross-site"])
+def test_pages_of_another_site_or_port_never_keep_the_session_alive(
+    kept: type[_Kept], fetch_site: str
+) -> None:
+    """Another localhost port is the same site: its GET carries the cookie. It is answered, but
+    it does not count as a use, so the session still ends after 30 minutes without real use."""
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    for _ in range(5):
+        kept.clock.now += IDLE_SECONDS / 6
+        assert _get_panel(app, session_id, fetch_site) == 200
+        assert _last_used(kept, session_id) == 1000.0
+    kept.clock.now += IDLE_SECONDS / 6
+
+    assert _get_panel(app, session_id, fetch_site) == 303
+    assert _get_panel(app, session_id, "same-origin") == 303  # expired for everyone
+
+
+@pytest.mark.parametrize("fetch_site", ["same-origin", "none", None])
+def test_a_request_of_the_panel_or_without_a_browser_counts_as_a_use(
+    kept: type[_Kept], fetch_site: str | None
+) -> None:
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    for _ in range(5):
+        kept.clock.now += IDLE_SECONDS / 2
+        assert _get_panel(app, session_id, fetch_site) == 200
+        assert _last_used(kept, session_id) == kept.clock.now
+
+
+def test_a_head_of_another_port_does_not_count_either(kept: type[_Kept]) -> None:
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    kept.clock.now += 600
+    headers = [
+        (b"cookie", f"{LOCAL_COOKIE}={session_id}".encode()),
+        (b"sec-fetch-site", b"same-site"),
+    ]
+
+    assert _status(_raw(app, "HEAD", "/panel", headers, b"")) == 405
+    assert _last_used(kept, session_id) == 1000.0
+
+
+def test_a_right_logout_closes_without_needing_a_refresh(kept: type[_Kept]) -> None:
+    app = create_app(panel_settings())
+    session_id = _login(app)
+    kept.clock.now += IDLE_SECONDS - 1
+
+    assert _status(_logout(app, session_id, _token_of(kept, session_id))) == 200
+    assert len(kept.store) == 0
+
+
+def test_a_login_over_an_expired_cookie_closes_it_as_expired(kept: type[_Kept]) -> None:
+    EVENTS.clear()
+    app = create_app(panel_settings())
+    old = _login(app)
+    watch(kept.store, fingerprint(old), _cut(EVENTS))
+    kept.clock.now += IDLE_SECONDS  # expired, but nobody looked it up yet
+
+    _login(app, cookie=old)
+
+    assert [e for e in EVENTS if e[0] == "cut"] == [("cut", "expired")]
+
+
+def test_an_https_id_presented_over_localhost_closes_it_as_scheme_mismatch(
+    kept: type[_Kept],
+) -> None:
+    """The id of an HTTPS session, copied by hand into antifaz_session over http://localhost."""
+    EVENTS.clear()
+    app = create_app(panel_settings())
+    session_id, session = kept.store.create("https")
+    watch(kept.store, session.fingerprint, _cut(EVENTS))
+
+    assert _get_panel(app, session_id, "same-origin") == 303
+    assert [e for e in EVENTS if e[0] == "cut"] == [("cut", "scheme_mismatch")]
+    assert kept.store.peek(session_id, "https") is None  # dead over HTTPS too

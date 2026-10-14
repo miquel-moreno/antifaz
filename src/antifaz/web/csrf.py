@@ -12,6 +12,9 @@
 
 The login has no session yet: it is the only route without layer 2 (door.CSRF_TOKEN_EXEMPT).
 
+counts_as_use() is not a CSRF check: it says whether a request that passed the door comes from
+the panel's own page (or from no browser at all), so that it may refresh the session's last use.
+
 Forbidden: comparing without the scheme or the port. Folding case or decoding the Origin.
 Comparing the token with `==`. Logging a token.
 """
@@ -37,6 +40,18 @@ def has_csrf_token(headers: Iterable[tuple[bytes, bytes]], expected: str) -> boo
     if not expected or not expected.isascii():
         return False  # never a session's token; fail closed rather than raise
     return hmac.compare_digest(values[0], expected.encode("ascii"))
+
+
+# Sec-Fetch-Site values of a request that may count as a use of the session: the panel's own
+# page, or the user typing the address or using a bookmark. Absent: not a browser (curl).
+_OWN_USE = frozenset({b"same-origin", b"none"})
+
+
+def counts_as_use(headers: Iterable[tuple[bytes, bytes]]) -> bool:
+    """No Sec-Fetch-Site, or exactly one that is same-origin or none. A page of another
+    localhost port (same-site, which SameSite lets carry the cookie) never counts."""
+    fetch_site = _values(headers, b"sec-fetch-site")
+    return not fetch_site or (len(fetch_site) == 1 and fetch_site[0] in _OWN_USE)
 
 
 def is_same_origin(headers: Iterable[tuple[bytes, bytes]], scheme: str, host: str | None) -> bool:

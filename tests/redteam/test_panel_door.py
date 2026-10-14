@@ -1131,27 +1131,34 @@ def test_head_is_safe_401_without_a_session_and_405_with_one(client: TestClient)
     assert alive(client, session_id)
 
 
-def test_a_cross_origin_request_never_refreshes_the_session(
+def test_a_cross_origin_request_never_looks_up_or_refreshes_the_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The door refuses layer 3 BEFORE looking the session up: no last use is refreshed."""
+    """The door refuses layer 3 BEFORE looking the session up, and a refused token is never a
+    use: the store's peek/touch/get are spied on."""
     from antifaz.web import sessions
 
-    looked_up: list[str] = []
-    real_get = sessions.MemorySessionStore.get
+    calls: list[str] = []
+    for name in ("peek", "touch", "get"):
+        real = getattr(sessions.MemorySessionStore, name)
 
-    def spy(self: Any, session_id: str, scheme: Any) -> Any:
-        looked_up.append(scheme)
-        return real_get(self, session_id, scheme)
+        def spy(self: Any, *args: Any, _real: Any = real, _name: str = name) -> Any:
+            calls.append(_name)
+            return _real(self, *args)
 
-    monkeypatch.setattr(sessions.MemorySessionStore, "get", spy)
+        monkeypatch.setattr(sessions.MemorySessionStore, name, spy)
     for client in clients(HTTPS_URL):
         session_id, token = logged_in(client)
-        looked_up.clear()
-        headers = action_headers(client, session_id, token, Origin="https://evil.example")
+        calls.clear()
+        other_origin = action_headers(client, session_id, token, Origin="https://evil.example")
 
-        assert post_logout(client, session_id, token, headers).status_code == 403
-        assert looked_up == []
+        assert post_logout(client, session_id, token, other_origin).status_code == 403
+        assert calls == []
+        assert post_logout(client, session_id, "W" * len(token)).status_code == 403
+        assert calls == ["peek"]  # looked up, never counted as a use
+        calls.clear()
+        assert post_logout(client, session_id, token).status_code == 200
+        assert calls == ["peek", "touch"]
 
 
 def test_no_route_but_the_login_skips_the_csrf_token() -> None:
@@ -1203,3 +1210,61 @@ def test_every_logout_answer_carries_the_security_headers(client: TestClient) ->
     assert [r.status_code for r in answers] == [401, 403, 403, 200, 401]
     for response in answers:
         _assert_security_headers(response.headers)
+
+
+# --- Review fixes: method override ----------------------------------------------------------
+
+OVERRIDE_HEADERS = ["X-HTTP-Method-Override", "X-Method-Override", "X-HTTP-Method"]
+
+
+@pytest.mark.parametrize("header", OVERRIDE_HEADERS)
+def test_a_method_override_header_never_turns_a_get_into_a_logout(
+    client: TestClient, header: str
+) -> None:
+    """A GET (no CSRF checks) that asks to be treated as POST is still a GET: 405."""
+    session_id, token = logged_in(client)
+    headers = {**action_headers(client, session_id, token), header: "POST"}
+
+    response = client.get("/panel/logout", headers=headers)
+
+    assert response.status_code == 405
+    assert "set-cookie" not in response.headers
+    assert alive(client, session_id)
+
+
+@pytest.mark.parametrize("header", OVERRIDE_HEADERS)
+def test_a_method_override_header_never_skips_the_csrf_token(
+    client: TestClient, header: str
+) -> None:
+    """A POST without the token that asks to be treated as GET is still refused."""
+    session_id = log_in(client)
+    for path in ("/panel/logout", "/panel"):
+        headers = {**action_headers(client, session_id, None), header: "GET"}
+
+        response = client.post(path, content=b"{}", headers=headers)
+
+        assert response.status_code == 403, path
+        assert alive(client, session_id)
+
+
+def test_a_method_parameter_in_the_query_or_body_changes_nothing(client: TestClient) -> None:
+    session_id, token = logged_in(client)
+    no_token = action_headers(client, session_id, None)
+    form = action_headers(
+        client, session_id, token, **{"Content-Type": "application/x-www-form-urlencoded"}
+    )
+
+    answers = [
+        client.post("/panel/logout?_method=GET", content=b"{}", headers=no_token),
+        client.post("/panel/logout", content=b'{"_method": "GET"}', headers=no_token),
+        client.post("/panel/logout", content=b"_method=GET", headers=form),
+        client.get("/panel/logout?_method=POST", headers=action_headers(client, session_id, token)),
+    ]
+
+    assert [r.status_code for r in answers] == [403, 403, 403, 405]
+    assert alive(client, session_id)
+    # And with every layer right, the override does not stop a real logout either.
+    headers = {**action_headers(client, session_id, token), "X-HTTP-Method-Override": "GET"}
+    assert (
+        client.post("/panel/logout?_method=GET", content=b"{}", headers=headers).status_code == 200
+    )
