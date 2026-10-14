@@ -35,7 +35,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.requests import ClientDisconnect
 
-from antifaz.api.errors import (
+from antifaz.http_errors import (
     CsrfRejectedError,
     PanelLoginFailedError,
     PanelUnauthorizedError,

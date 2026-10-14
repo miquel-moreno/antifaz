@@ -14,7 +14,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from antifaz.api.errors import (
+from antifaz.api.errors import register_error_handlers
+from antifaz.api.gate import GateMiddleware, is_panel_path
+from antifaz.http_errors import (
     AppError,
     CsrfRejectedError,
     PanelInternalError,
@@ -23,9 +25,7 @@ from antifaz.api.errors import (
     PanelUnauthorizedError,
     TooManyAttemptsError,
     error_response,
-    register_error_handlers,
 )
-from antifaz.api.gate import GateMiddleware, is_panel_path
 from antifaz.web.cookies import (
     LOCAL_COOKIE,
     SECURE_COOKIE,

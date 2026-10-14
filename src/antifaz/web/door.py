@@ -28,11 +28,11 @@ of an untrusted peer. Building the redirect from the Host header. Logging a cook
 
 from dataclasses import dataclass, field
 
-from fastapi.responses import HTMLResponse, Response
+from starlette.responses import HTMLResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from antifaz.api.errors import PanelInternalError, PanelUnauthorizedError, error_response
-from antifaz.api.gate import route_path
+from antifaz.http_errors import PanelInternalError, PanelUnauthorizedError, error_response
+from antifaz.routing import route_path
 from antifaz.web.cookies import read_session_cookie
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
 from antifaz.web.headers import with_security_headers
