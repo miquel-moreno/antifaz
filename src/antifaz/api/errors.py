@@ -1,4 +1,8 @@
-"""Errors and their HTTP responses. No response ever includes what the client sent."""
+"""Errors and their HTTP responses. No response ever includes what the client sent.
+
+AppError, error_body() and error_response() live in antifaz.http_errors, with the panel's own
+errors, so that the panel never loads this module (pydantic) nor the settings.
+"""
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -7,19 +11,9 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from antifaz.errors import AntifazBlocked
+from antifaz.http_errors import AppError, error_body, error_response
 
 MAX_LOCATIONS = 10
-
-
-class AppError(Exception):
-    """Base error. Subclasses set a status code and a stable error code."""
-
-    status_code = 400
-    code = "app_error"
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
 
 
 class UnauthorizedError(AppError):
@@ -153,10 +147,6 @@ class UpstreamEchoedKeyError(BadUpstreamResponseError):
         AppError.__init__(self, "the provider's answer contained a key and was dropped")
 
 
-def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
-    return {"error": {"code": code, "message": message}}
-
-
 class ErrorDetail(BaseModel):
     code: str
     message: str
@@ -198,7 +188,7 @@ PROXY_ERRORS = error_responses(400, 401, 403, 413, 415, 502, 503, 504)
 async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):  # pragma: no cover - registered only for AppError
         raise exc
-    return JSONResponse(status_code=exc.status_code, content=error_body(exc.code, exc.message))
+    return error_response(exc)
 
 
 def _safe_location(loc: tuple[object, ...]) -> str:

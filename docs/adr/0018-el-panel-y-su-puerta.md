@@ -27,7 +27,7 @@ Además, «Prueba un texto» es la única pantalla que recibe datos personales a
 
 ### Solo HTTPS o localhost
 
-- La cookie de sesión lleva `Secure`, así que el panel solo funciona por HTTPS o en `localhost`. Por HTTP desde otra dirección, el panel responde con una página fija que explica cómo ponerlo detrás de HTTPS, y no deja iniciar sesión.
+- El panel solo funciona por HTTPS o en `localhost`. Por HTTP desde otra dirección, el panel responde con una página fija que explica cómo ponerlo detrás de HTTPS, y no deja iniciar sesión. (Corregido en el addendum del 2026-10-13: la cookie lleva `Secure` solo por HTTPS.)
 - Antifaz no sirve TLS. Detrás de un proxy inverso, el esquema se lee de `X-Forwarded-Proto` **solo si la conexión llega de un proxy de confianza** configurado en `ANTIFAZ_TRUSTED_PROXIES` (IP o rangos CIDR; vacío por defecto). Si llega de cualquier otra IP, la cabecera se ignora. La pasarela no cambia: `proxy_headers` de uvicorn sigue apagado y esta lectura vive solo en la puerta del panel.
 - **IP del cliente.** Si la conexión llega de un proxy de confianza, se recorre `X-Forwarded-For` **de derecha a izquierda** y se toma la primera IP que **no** es de un proxy de confianza. Nunca se toma la primera de la lista: esa la escribe el cliente y puede ser falsa. Si todas son de confianza, o la cabecera está vacía o mal formada, se usa la IP de la conexión. Si la conexión no llega de un proxy de confianza, `X-Forwarded-For` se ignora. Un test cubre una IP falsa a la izquierda, varios proxies encadenados, valores mal formados y la cabecera repetida.
 - "localhost" se decide por el `Host` ya validado (`localhost`, `127.0.0.1` o `[::1]`), no por la IP de origen: dentro de Docker, una petición que llega por el puerto publicado no viene de `127.0.0.1`. Esta regla protege de un error de configuración honesto (abrir el panel por HTTP en la red local). No es una barrera contra un atacante: esa barrera es el token.
@@ -42,9 +42,9 @@ Además, «Prueba un texto» es la única pantalla que recibe datos personales a
 
 ### Sesiones con cierre real
 
-- Al entrar se crea un identificador nuevo de 256 bits (`secrets.token_urlsafe(32)`). El navegador lo recibe en la cookie `__Host-antifaz_session` con `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/` y `Max-Age` de 8 horas.
+- Al entrar se crea un identificador nuevo de 256 bits (`secrets.token_urlsafe(32)`). El navegador lo recibe en la cookie de sesión con `HttpOnly`, `SameSite=Strict` y `Max-Age` de 8 horas. El nombre, `Secure` y `Path` dependen del esquema: ver el addendum del 2026-10-13.
 - **En el servidor se guarda la huella del identificador, no el identificador**, con su hora de creación, su último uso y su token CSRF. Caducidad: 8 horas como máximo y 30 minutos sin uso.
-- **Cierre de sesión real**: `POST /panel/logout` borra la sesión del servidor (la cookie robada deja de servir en ese momento), hace caducar **solo la cookie del panel** (misma cookie con `Max-Age=0`) y envía `Clear-Site-Data: "cache"`. No se usa `"cookies"`: borraría las cookies de todo `localhost`, que no se separan por puerto, y cerraría las sesiones de otras aplicaciones del usuario.
+- **Cierre de sesión real**: `POST /panel/logout` borra la sesión del servidor (la cookie robada deja de servir en ese momento), hace caducar **solo la cookie del panel del esquema de la petición** (misma cookie con `Max-Age=0`; ver el addendum del 2026-10-13) y envía `Clear-Site-Data: "cache"`. No se usa `"cookies"`: borraría las cookies de todo `localhost`, que no se separan por puerto, y cerraría las sesiones de otras aplicaciones del usuario.
 - **Al cerrar o caducar una sesión se cortan sus conexiones de «En directo».** Cada conexión SSE queda ligada a su sesión; el cierre de sesión las cierra en el momento y la caducidad se comprueba en cada envío. Un test de red-team abre el SSE, cierra la sesión y comprueba que no llega nada más y que la conexión termina.
 - Las sesiones viven en memoria detrás de una interfaz (`SessionStore`). Al reiniciar se cierran todas. Hoy `antifaz serve` arranca **un solo proceso**; si alguien arranca varios, cada uno tiene sus sesiones y el panel avisa en «Estado». Cuando llegue PostgreSQL (ítem 8), la interfaz permite guardarlas allí.
 
@@ -98,6 +98,38 @@ Para cumplir la CSP, el prototipo se adapta: nada de `<script>` ni `<style>` en 
 
 El GIF de la v0.2 y las capturas del panel real se graban con Playwright contra un proveedor falso y **solo con datos sintéticos**, sacados de un archivo de textos de ejemplo del repo. Un test comprueba que el script de grabación no usa otros textos.
 
+## Addendum (2026-10-13, aprobado por Miquel Moreno): la cookie según el esquema
+
+La decisión de arriba ponía siempre `__Host-antifaz_session` con `Secure`. Al probarlo con navegadores reales, WebKit no guarda ninguna cookie `Secure` que llega por `http://localhost`, así que el panel no funcionaría en `http://localhost:8000/panel` con ese motor. Este addendum fija dos cookies, una por esquema, y corrige tres apartados.
+
+**Prueba (Playwright 1.63.0, 2026-10-09).** Atributos `HttpOnly; SameSite=Strict; Path=/`. Pregunta: ¿el navegador devuelve la cookie en la siguiente petición?
+
+| Navegador | Dirección | (a) `__Host-` + `Secure` | (b) `antifaz_session` + `Secure` | (c) `antifaz_session` sin `Secure` |
+|---|---|---|---|---|
+| Chromium 153.0.8010.12 | `http://localhost` y `http://127.0.0.1` | Sí | Sí | Sí |
+| Firefox 155.0 | `http://localhost` y `http://127.0.0.1` | Sí | Sí | Sí |
+| WebKit 26.6 (build de Windows, no Safari) | `http://localhost` y `http://127.0.0.1` | No | No | Sí |
+
+Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya aceptan (a) y WebKit rechaza cualquier cookie `Secure` por HTTP.
+
+**Decisión.**
+
+- **HTTPS** (directo, o `X-Forwarded-Proto` de un proxy de confianza, y solo de él): cookie `__Host-antifaz_session` con `Secure; HttpOnly; SameSite=Strict; Path=/` y `Max-Age=28800`.
+- **`http://localhost`, `127.0.0.1` o `[::1]`**: cookie `antifaz_session` **sin** `Secure`, con `HttpOnly; SameSite=Strict; Path=/panel` y `Max-Age=28800`.
+- **Nunca `Domain`.**
+- **El servidor solo acepta el nombre del esquema de la petición.** Una cookie sin `Secure` también viaja por HTTPS, así que una cookie puesta por `http://localhost` nunca vale en una sesión HTTPS, ni al revés.
+- **La cabecera `Cookie` se lee a mano**: se juntan todas las líneas `Cookie` (HTTP/2 puede partirlas), el nombre se compara exacto y con mayúsculas, y si el nombre del esquema aparece **más de una vez**, no hay sesión (decisión de Miquel). Puede pasar de verdad: dos instancias de Antifaz en puertos distintos de `localhost` se pisan la sesión, porque las cookies no se separan por puerto; y otra aplicación local con una cookie del mismo nombre puede impedir entrar hasta que se borre esa cookie.
+
+**Límite conocido.** En `localhost` las cookies no se separan por puerto, y `SameSite` tampoco separa puertos (`localhost:3000` es el mismo sitio que `localhost:8000`). Lo que protege es la capa 3 del CSRF (`Sec-Fetch-Site: same-origin` y `Origin` con el puerto) y el token CSRF de la sesión. `Path=/panel` reduce lo que ve otra aplicación del mismo `localhost`.
+
+**Pendiente.** Comprobar Safari de verdad en 11f, en un runner macOS de GitHub. Sustituye a la frase de «Consecuencias» que decía que se comprobaría en el primer PR de la puerta.
+
+**Corrige:**
+
+- «Solo HTTPS o localhost»: la cookie no lleva siempre `Secure`; solo por HTTPS.
+- «Sesiones con cierre real»: el nombre y la ruta de la cookie dependen del esquema.
+- «Cierre de sesión»: se hace caducar solo la cookie del esquema de la petición.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
@@ -117,6 +149,6 @@ El GIF de la v0.2 y las capturas del panel real se graban con Playwright contra 
 - La puerta tiene una rama nueva y es la pieza más delicada del issue. Lleva tests de red-team: XSS por «Prueba un texto», CSRF con formulario `text/plain` y con `fetch` de otro origen, clickjacking, trucos de ruta, cookie manipulada o de una sesión cerrada, SSE que sigue abierto tras cerrar sesión, `X-Forwarded-For` falsificado, fuerza bruta en el login, demasiadas conexiones SSE, cuerpos enormes y DNS rebinding.
 - La invariante 15 se prueba de punta a punta: se pasa un DNI centinela por el proxy y por «Prueba un texto», y después se piden todas las páginas del panel y se leen eventos SSE. El centinela no aparece en ninguna, ni en los logs.
 - Las sesiones y el contador se reinician con cada arranque y van por proceso hasta los ítems 8 y 9.
-- El panel necesita HTTPS o `localhost`. **Sin verificar todavía:** si Safari acepta cookies `Secure` en `http://localhost`. Se comprueba en el primer PR de la puerta; si no las acepta, se documenta.
+- El panel necesita HTTPS o `localhost`. Lo que hacen los navegadores con las cookies en `http://localhost` está en el addendum del 2026-10-13; **Safari de verdad** se comprueba en 11f, en un runner macOS de GitHub.
 - Las comprobaciones con Playwright inyectan axe en la página, y la CSP podría bloquearlo. Por eso las infracciones de CSP se miden en una sesión del navegador sin esa inyección, y axe en otra.
 - Se añade Jinja2 a la imagen y a la lista de licencias revisadas (`check_licenses.py`).

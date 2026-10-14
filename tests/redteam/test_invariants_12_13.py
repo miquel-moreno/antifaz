@@ -2,6 +2,9 @@
 
 12: every registered route (with HEAD, OPTIONS, aliases and a trailing slash) needs the key,
     except an explicit allowlist; every proxy route runs the egress guard on the bytes it sends.
+    With ANTIFAZ_ADMIN_TOKEN (ADR-0018), every route is in exactly one door: the gateway's (the
+    key) or the panel's (public login routes, or a session); the key never opens the panel and
+    a panel session never opens the gateway.
 13: no key (Antifaz's or the provider's) ever appears in logs, error bodies or responses.
 """
 
@@ -19,11 +22,20 @@ from pydantic import SecretStr
 
 from antifaz import Span, guard
 from antifaz.api.app import create_app
-from antifaz.api.gate import PUBLIC_PATHS
+from antifaz.api.gate import PUBLIC_PATHS, is_panel_path
 from antifaz.detect.scan import scan
 from antifaz.errors import EgressBlocked
 from antifaz.vault import Vault
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream, misses_repeats, raiser
+from tests.integration.panel_client import (
+    ADMIN_TOKEN,
+    HTTPS_URL,
+    LOCAL_COOKIE,
+    LOCAL_URL,
+    SECURE_COOKIE,
+    clients,
+    log_in,
+)
 from tests.redteam.conftest import DNI, GATEWAY_BODY, both_echo, gateway_settings
 
 AUTH = {"Authorization": f"Bearer {GATEWAY_KEY}"}
@@ -208,6 +220,89 @@ def test_local_routes_never_call_a_provider(
 
         assert response.status_code == 200, path
     assert upstream_any.requests == []
+
+
+# --- Invariant 12 with the panel (ADR-0018, PR 11b-2a) --------------------------------------
+
+# The panel's routes, by door. Exact (path, method) pairs: a new panel route must be put in one
+# of these on purpose.
+PANEL_PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
+PANEL_SESSION_ROUTES = frozenset({("/panel", "GET")})
+
+
+def _all_pairs(client: TestClient) -> set[tuple[str, str]]:
+    app: FastAPI = client.app  # type: ignore[assignment]
+    return {
+        (context.path, method)
+        for context in _contexts(app)
+        if isinstance(context.original_route, APIRoute) and context.path
+        for method in context.methods or set()
+    }
+
+
+def test_with_the_panel_every_route_is_in_exactly_one_door() -> None:
+    from antifaz.web.door import PUBLIC_ROUTES
+
+    for client in clients(HTTPS_URL):
+        pairs = {pair for pair in _all_pairs(client) if pair[0] not in PUBLIC_PATHS}
+        classes = (
+            BODY_PROXY_ROUTES,
+            QUERY_PROXY_ROUTES,
+            LOCAL_ROUTES,
+            PANEL_PUBLIC_ROUTES,
+            PANEL_SESSION_ROUTES,
+        )
+
+        assert set().union(*classes) == pairs
+        assert sum(len(c) for c in classes) == len(pairs)
+        panel = {pair for pair in pairs if is_panel_path(pair[0])}
+        assert panel == PANEL_PUBLIC_ROUTES | PANEL_SESSION_ROUTES
+        assert frozenset(PUBLIC_ROUTES) == PANEL_PUBLIC_ROUTES  # the door's own list
+
+
+def _panel_aliases(path: str) -> list[str]:
+    return [path, path + "/", path + "?x=1", path + "%2F"]
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_panel_session_routes_with_the_api_key_and_no_session_never_answer(method: str) -> None:
+    auth = {**AUTH, "x-api-key": GATEWAY_KEY}
+    for client in clients(HTTPS_URL):
+        for path, _ in sorted(PANEL_SESSION_ROUTES):
+            for alias in _panel_aliases(path):
+                response = client.request(method, alias, headers=auth)
+
+                assert not response.is_success, (method, alias)
+                assert "set-cookie" not in response.headers
+
+
+def test_the_public_login_with_only_the_api_key_never_logs_in() -> None:
+    for client in clients(HTTPS_URL):
+        response = client.post("/panel/login", json={"token": GATEWAY_KEY}, headers=AUTH)
+
+        assert response.status_code in (401, 403)
+        assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_gateway_routes_with_a_valid_panel_cookie_and_no_key_are_401(method: str) -> None:
+    for client in clients(HTTPS_URL):
+        secure_id = log_in(client)
+        local = client.post(
+            f"{LOCAL_URL}/panel/login",
+            json={"token": ADMIN_TOKEN},
+            headers={"Sec-Fetch-Site": "same-origin", "Origin": LOCAL_URL},
+        )
+        client.cookies.clear()
+        local_id = local.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+        cookie = f"{SECURE_COOKIE}={secure_id}; {LOCAL_COOKIE}={local_id}"
+        for path in _routes():
+            if path in PUBLIC_PATHS:
+                continue
+            for base in (HTTPS_URL, LOCAL_URL):
+                response = client.request(method, base + path, headers={"Cookie": cookie})
+
+                assert response.status_code == 401, (method, base, path)
 
 
 # --- Invariant 13 ---------------------------------------------------------------------------
