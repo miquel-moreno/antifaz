@@ -409,8 +409,8 @@ def _derivations(value: str) -> set[str]:
         hashlib.sha256(raw).digest(),
         hashlib.sha512(raw).digest(),
         hashlib.blake2b(raw).digest(),
-        hashlib.md5(raw).digest(),  # noqa: S324 - only to prove the token is not this
-        hashlib.sha1(raw).digest(),  # noqa: S324 - only to prove the token is not this
+        # No MD5 or SHA-1 here: CodeQL flags hashing the id with them even in a test, and no
+        # encoding of their 16- or 20-byte digests has the 43 characters of the token anyway.
         hmac.new(raw, b"csrf", hashlib.sha256).digest(),
     ]
     out = {value, value[::-1], value.upper(), value.lower()}
