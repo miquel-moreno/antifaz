@@ -5,6 +5,9 @@
 - http://localhost, 127.0.0.1 or [::1]: `antifaz_session` WITHOUT Secure (WebKit drops any
   Secure cookie over plain HTTP), with `HttpOnly; SameSite=Strict; Path=/panel`.
 - Both last 8 hours (Max-Age) and never carry Domain.
+- Logout expires the cookie of the request's scheme only (expired_cookie): the same name and
+  attributes, an empty value and Max-Age=0. The session itself is bound to its scheme too
+  (session_scheme(), sessions.py).
 
 The server reads ONLY the name of the request's scheme. A cookie without Secure also travels over
 HTTPS, so a cookie set by http://localhost must never count in an HTTPS session (and the other
@@ -19,7 +22,7 @@ Forbidden: logging a cookie value. Accepting the other scheme's name.
 import re
 from collections.abc import Iterable
 
-from antifaz.web.sessions import MAX_AGE_SECONDS
+from antifaz.web.sessions import MAX_AGE_SECONDS, SessionScheme
 
 SECURE_COOKIE = "__Host-antifaz_session"
 LOCAL_COOKIE = "antifaz_session"
@@ -33,13 +36,25 @@ def cookie_name(scheme: str) -> str:
     return SECURE_COOKIE if scheme == "https" else LOCAL_COOKIE
 
 
+def session_scheme(scheme: str) -> SessionScheme:
+    """The scheme a session is bound to: "https" only over HTTPS, else "http-local"."""
+    return "https" if scheme == "https" else "http-local"
+
+
+def _attributes(scheme: str) -> str:
+    if scheme == "https":
+        return "Path=/; Secure; HttpOnly; SameSite=Strict"
+    return "Path=/panel; HttpOnly; SameSite=Strict"
+
+
 def session_cookie(scheme: str, session_id: str) -> str:
     """The Set-Cookie value that hands `session_id` to the browser over `scheme`."""
-    if scheme == "https":
-        attributes = "Path=/; Secure; HttpOnly; SameSite=Strict"
-    else:
-        attributes = "Path=/panel; HttpOnly; SameSite=Strict"
-    return f"{cookie_name(scheme)}={session_id}; Max-Age={MAX_AGE_SECONDS}; {attributes}"
+    return f"{cookie_name(scheme)}={session_id}; Max-Age={MAX_AGE_SECONDS}; {_attributes(scheme)}"
+
+
+def expired_cookie(scheme: str) -> str:
+    """The Set-Cookie value that makes the browser drop the session cookie of `scheme`."""
+    return f"{cookie_name(scheme)}=; Max-Age=0; {_attributes(scheme)}"
 
 
 def read_session_cookie(headers: Iterable[tuple[bytes, bytes]], scheme: str) -> str | None:

@@ -12,8 +12,8 @@
   4. Exactly {"token": "<at most 256 characters>"} (no repeated keys), and its SHA-256
      compared with the token's fingerprint by hmac.compare_digest. Anything wrong (body, size,
      token) is one byte-identical 401, and it counts.
-  5. A session cookie that came in is closed (no session fixation), a new session is made and
-     the cookie of the request's scheme is set.
+  5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
+     session bound to the request's scheme is made and the cookie of that scheme is set.
 - GET /panel: a placeholder for the interface of 11c, with the session's CSRF token in a meta.
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
@@ -41,7 +41,7 @@ from antifaz.http_errors import (
     PanelUnauthorizedError,
     TooManyAttemptsError,
 )
-from antifaz.web.cookies import session_cookie
+from antifaz.web.cookies import session_cookie, session_scheme
 from antifaz.web.csrf import is_json, is_same_origin
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
@@ -118,8 +118,8 @@ def build_router(state: PanelState) -> APIRouter:
             state.limiter.record_failure(address)
             raise PanelLoginFailedError()
         if context.session_id is not None:
-            state.sessions.delete(context.session_id)
-        session_id, _ = state.sessions.create()
+            state.sessions.delete(context.session_id, "replaced")
+        session_id, _ = state.sessions.create(session_scheme(context.scheme))
         return JSONResponse(
             {"ok": True}, headers={"Set-Cookie": session_cookie(context.scheme, session_id)}
         )

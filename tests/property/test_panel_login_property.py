@@ -5,8 +5,8 @@
   and returns nothing when the cookie of the scheme comes more than once.
 - The Origin check accepts exactly the origin "scheme://host".
 - Through the whole app: a session route never answers 2xx without exactly one valid cookie of
-  the request's scheme; a cookie is only ever set by a successful login; and every /panel*
-  answer carries the ADR's security headers.
+  the request's scheme holding a session made over that scheme; a cookie is only ever set by a
+  successful login; and every /panel* answer carries the ADR's security headers.
 """
 
 import json
@@ -82,6 +82,8 @@ def test_the_origin_check_accepts_exactly_scheme_and_host(
 
 # --- The whole door -------------------------------------------------------------------------
 
+# The session routes this test can open: it sends no X-Antifaz-CSRF, so POST /panel/logout
+# (which needs it) is the witness of tests/property/test_panel_logout_property.py instead.
 SESSION_ROUTES = {("/panel", "GET")}
 SUCCESSFUL_LOGIN = ("/panel/login", "POST", "right", True)
 
@@ -159,8 +161,8 @@ def test_the_door_never_lets_in_without_a_session_and_always_sends_the_headers(
         assert response.status_code == 200
     mine = [value for name, value in cookies if name == cookie_name(scheme)]
     if (path, method) in SESSION_ROUTES:
-        # 2xx exactly with one cookie of the request's scheme NAME holding a live session id.
-        # The id itself is not tied to a scheme (one store): what the scheme decides is which
-        # cookie name is read, so a live id under the other scheme's name never counts.
-        live = len(mine) == 1 and mine[0] in ("valid-https", "valid-http")
+        # 2xx exactly with one cookie of the request's scheme NAME holding a live session id
+        # made over that same scheme (11b-2b): the cookie name picks what is read, and the
+        # store refuses (and closes) a session made over the other scheme.
+        live = len(mine) == 1 and mine[0] == f"valid-{scheme}"
         assert response.is_success == live

@@ -4,7 +4,9 @@
 - cookies.py: the session cookie BY SCHEME (ADR-0018, addendum of 2026-10-13).
 - headers.py: the exact security headers of every /panel* answer.
 - pages.py: the three fixed HTML pages, which the CSP allows (no inline script or style).
-- csrf.py: layer 3 of the login (Sec-Fetch-Site and Origin) and the JSON content type.
+- csrf.py: layer 3 (Sec-Fetch-Site and Origin), the JSON content type and, since 11b-2b,
+  layer 2 (the X-Antifaz-CSRF token).
+- cookies.py since 11b-2b: the expired cookie of each scheme and the scheme of a session.
 - AppError headers: Retry-After on a 429, from the handler and from the gate.
 """
 
@@ -30,10 +32,12 @@ from antifaz.web.cookies import (
     LOCAL_COOKIE,
     SECURE_COOKIE,
     cookie_name,
+    expired_cookie,
     read_session_cookie,
     session_cookie,
+    session_scheme,
 )
-from antifaz.web.csrf import is_json, is_same_origin
+from antifaz.web.csrf import has_csrf_token, is_json, is_same_origin
 from antifaz.web.headers import CONTENT_SECURITY_POLICY, SECURITY_HEADERS, with_security_headers
 from antifaz.web.pages import CSRF_META, HTTPS_ONLY_PAGE, LOGIN_PAGE, panel_page
 from antifaz.web.sessions import MAX_AGE_SECONDS
@@ -89,6 +93,38 @@ def test_the_localhost_cookie_has_no_secure_and_only_the_panel_path() -> None:
     )
     assert "secure" not in header.lower() and "domain" not in header.lower()
     assert MAX_AGE_SECONDS == 28800
+
+
+def test_the_expired_https_cookie_has_the_same_name_and_attributes() -> None:
+    assert expired_cookie("https") == (
+        "__Host-antifaz_session=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict"
+    )
+
+
+def test_the_expired_localhost_cookie_has_the_same_name_and_attributes() -> None:
+    assert (
+        expired_cookie("http")
+        == "antifaz_session=; Max-Age=0; Path=/panel; HttpOnly; SameSite=Strict"
+    )
+
+
+@pytest.mark.parametrize("scheme", ["https", "http"])
+def test_the_expired_cookie_differs_from_the_live_one_only_in_value_and_age(scheme: str) -> None:
+    live = session_cookie(scheme, SESSION_ID).split("; ")
+    expired = expired_cookie(scheme).split("; ")
+
+    assert live[0] == f"{cookie_name(scheme)}={SESSION_ID}"
+    assert expired[0] == f"{cookie_name(scheme)}="
+    assert (live[1], expired[1]) == (f"Max-Age={MAX_AGE_SECONDS}", "Max-Age=0")
+    assert live[2:] == expired[2:]
+    assert "domain" not in expired_cookie(scheme).lower()
+
+
+@pytest.mark.parametrize(
+    ("scheme", "expected"), [("https", "https"), ("http", "http-local"), ("", "http-local")]
+)
+def test_a_session_is_bound_to_https_only_over_https(scheme: str, expected: str) -> None:
+    assert session_scheme(scheme) == expected
 
 
 @pytest.mark.parametrize("scheme", ["https", "http"])
@@ -333,6 +369,70 @@ def test_json_content_types_pass(value: str) -> None:
 def test_other_content_types_do_not(value: str | list[str]) -> None:
     assert not is_json(_headers(content_type=value))
     assert not is_json(_headers())
+
+
+# --- CSRF layer 2: the session's token ----------------------------------------------------
+
+TOKEN = "t0k3n-of-the-session-for-tests-only_abcdefghijk"
+
+
+def _token_headers(*values: bytes) -> list[tuple[bytes, bytes]]:
+    return [(b"host", b"localhost"), *((b"X-Antifaz-CSRF", value) for value in values)]
+
+
+def test_the_right_token_passes() -> None:
+    assert has_csrf_token(_token_headers(TOKEN.encode()), TOKEN)
+    assert has_csrf_token([(b"x-antifaz-csrf", TOKEN.encode())], TOKEN)  # any case of the name
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        (),  # missing
+        (b"",),  # empty
+        (TOKEN.encode(), TOKEN.encode()),  # duplicated, even both right
+        (TOKEN.encode(), b"other"),
+        (b"other-session-token-abcdefghijklmnopqrstuvwxyz0123",),  # another session's
+        (TOKEN[:-1].encode(),),  # one shorter
+        ((TOKEN + "x").encode(),),  # one longer
+        (TOKEN.upper().encode(),),  # case changed
+        (TOKEN.encode() + b" ",),  # trailing space
+        (b" " + TOKEN.encode(),),
+        ("t0k3n-\u00f1".encode(),),  # not ASCII
+        (TOKEN[:-1].encode() + b"\xff",),  # not ASCII, same length
+    ],
+)
+def test_anything_but_exactly_one_right_token_fails(values: tuple[bytes, ...]) -> None:
+    assert not has_csrf_token(_token_headers(*values), TOKEN)
+
+
+def test_a_header_of_another_name_is_no_token() -> None:
+    headers = [(b"x-csrf-token", TOKEN.encode()), (b"x-antifaz-csrf-token", TOKEN.encode())]
+
+    assert not has_csrf_token(headers, TOKEN)
+
+
+@pytest.mark.parametrize("expected", ["", "\u00f1" * 10])
+def test_an_empty_or_non_ascii_expected_token_never_matches(expected: str) -> None:
+    assert not has_csrf_token(_token_headers(expected.encode("utf-8")), expected)
+
+
+def test_the_token_is_compared_in_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hmac
+
+    from antifaz.web import csrf
+
+    calls: list[tuple[bytes, bytes]] = []
+    real = hmac.compare_digest
+
+    def spy(a: bytes, b: bytes) -> bool:
+        calls.append((a, b))
+        return real(a, b)
+
+    monkeypatch.setattr(csrf.hmac, "compare_digest", spy)
+
+    assert has_csrf_token(_token_headers(TOKEN.encode()), TOKEN)
+    assert calls == [(TOKEN.encode(), TOKEN.encode())]
 
 
 # --- AppError headers -----------------------------------------------------------------------

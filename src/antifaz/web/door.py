@@ -11,9 +11,10 @@ key does not open the panel. In this order:
    proxy (forwarded.effective_scheme); "localhost" is decided by the Host header. Plain HTTP
    from any other host gets a fixed 403 page and goes no further (no login, no cookie).
 3. The public routes, exact (path, method): GET and POST /panel/login.
-4. Anything else needs a live session, read from the cookie of the request's scheme only
-   (cookies.py). Without one, GET /panel answers 303 to the fixed relative "/panel/login" and
-   every other path 401.
+4. Anything else needs a live session of the request's scheme, read from the cookie of that
+   scheme only (cookies.py) and bound to it in the store (a session made over the other scheme
+   is closed, sessions.py). Without one, GET /panel answers 303 to the fixed relative
+   "/panel/login" and every other path 401.
 
 The router then runs with a PanelContext in scope["state"], so a route never parses the
 cookie or the scheme again.
@@ -33,7 +34,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from antifaz.http_errors import PanelInternalError, PanelUnauthorizedError, error_response
 from antifaz.routing import route_path
-from antifaz.web.cookies import read_session_cookie
+from antifaz.web.cookies import read_session_cookie, session_scheme
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
 from antifaz.web.headers import with_security_headers
 from antifaz.web.login_limit import FailureLimiter
@@ -112,7 +113,9 @@ class PanelDoor:
             return
         context = PanelContext(scheme, host, read_session_cookie(scope["headers"], scheme))
         if (path, scope["method"]) not in PUBLIC_ROUTES:
-            session = self._state.sessions.get(context.session_id) if context.session_id else None
+            session = None
+            if context.session_id is not None:
+                session = self._state.sessions.get(context.session_id, session_scheme(scheme))
             if session is None:
                 await self._no_session(path, scope["method"])(scope, receive, send)
                 return
