@@ -124,7 +124,7 @@ def test_a_session_is_valid_exactly_while_young_and_recently_used(
 ) -> None:
     clock = Clock()
     store = MemorySessionStore(clock=clock)
-    session_id, session = store.create()
+    session_id, session = store.create("https")
     created = last_used = clock.now
     alive = True
     for advance, use in steps:
@@ -133,7 +133,7 @@ def test_a_session_is_valid_exactly_while_young_and_recently_used(
             alive and clock.now - created < MAX_AGE_SECONDS and clock.now - last_used < IDLE_SECONDS
         )
         if use:
-            found = store.get(session_id)
+            found = store.get(session_id, "https")
             assert (found is not None and found.fingerprint == session.fingerprint) == expected
             if expected:
                 last_used = clock.now

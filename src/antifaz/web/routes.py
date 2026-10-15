@@ -1,8 +1,13 @@
-"""The panel's routes for 11b-2a (ADR-0018): getting in. Every route is `async def`.
+"""The panel's routes (ADR-0018): getting in (11b-2a) and out (11b-2b). Every one is `async def`.
+
+The door (door.py) has already checked CSRF for every method that is not GET or HEAD: layer 3
+and JSON for all of them, and the session's token for all but the login. A route never checks
+CSRF again.
 
 - GET /panel/login: the login page (public).
-- POST /panel/login: the admin token as JSON (public, CSRF layer 3). In this order:
-  1. Same origin and JSON (csrf.py), else 403; it does not count as a failure.
+- POST /panel/login: the admin token as JSON (public; the door checked layer 3 and JSON, and a
+  refusal there does not count as a failure). In this order:
+  1. (In the door) same origin and JSON, else 403.
   2. The body, read as a stream and never past 1 KiB, with or without Content-Length, within
      LOGIN_BODY_SECONDS (5 s). A client that disconnects or is too slow gets the same fixed
      401 and it does NOT count: nobody's token was tried, and a slow line must not lock the
@@ -12,15 +17,24 @@
   4. Exactly {"token": "<at most 256 characters>"} (no repeated keys), and its SHA-256
      compared with the token's fingerprint by hmac.compare_digest. Anything wrong (body, size,
      token) is one byte-identical 401, and it counts.
-  5. A session cookie that came in is closed (no session fixation), a new session is made and
-     the cookie of the request's scheme is set.
+  5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
+     session bound to the request's scheme is made and the cookie of that scheme is set.
 - GET /panel: a placeholder for the interface of 11c, with the session's CSRF token in a meta.
+- POST /panel/logout: the door let it through with a live session and its CSRF token. The
+  session is closed in the store (reason "logout"; its subscribers are told before the answer
+  leaves), and the answer is {"ok": true} with exactly one Set-Cookie, the expired cookie of the
+  request's scheme, and `Clear-Site-Data: "cache"` (never "cookies": on localhost it would wipe
+  the cookies of every app on every port). The body is not read. Without a session, the door
+  answers 401 and no cookie is touched. Two logouts of the same session at the same time can
+  both answer 200 with the expired cookie: the door let both through before either closed it.
+  That is idempotent and harmless (the session is closed once, its subscribers told once).
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
-in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code).
-tests/unit/test_web_concurrency.py checks both: every route is a coroutine function, and no
-await, async for or async with comes after `limiter.allowed(` in `login`.
+in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
+`logout` never awaits. tests/unit/test_web_concurrency.py checks it: every route is a coroutine
+function, no await, async for or async with comes after `limiter.allowed(` in `login`, and
+`logout` has none at all.
 
 Forbidden: logging or echoing the token, the body, the session id or the CSRF token. Comparing
 before checking the limit. Answering a failed login with anything that depends on why.
@@ -36,13 +50,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.requests import ClientDisconnect
 
 from antifaz.http_errors import (
-    CsrfRejectedError,
     PanelLoginFailedError,
     PanelUnauthorizedError,
     TooManyAttemptsError,
 )
-from antifaz.web.cookies import session_cookie
-from antifaz.web.csrf import is_json, is_same_origin
+from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
 from antifaz.web.pages import LOGIN_PAGE, panel_page
@@ -100,9 +112,6 @@ def build_router(state: PanelState) -> APIRouter:
     @router.post("/panel/login")
     async def login(request: Request) -> Response:
         context = panel_context(request.scope)
-        headers = request.scope["headers"]
-        if not (is_json(headers) and is_same_origin(headers, context.scheme, context.host)):
-            raise CsrfRejectedError()
         try:
             with anyio.fail_after(LOGIN_BODY_SECONDS):
                 body = await _read_capped(request)
@@ -118,8 +127,8 @@ def build_router(state: PanelState) -> APIRouter:
             state.limiter.record_failure(address)
             raise PanelLoginFailedError()
         if context.session_id is not None:
-            state.sessions.delete(context.session_id)
-        session_id, _ = state.sessions.create()
+            state.sessions.delete(context.session_id, "replaced")
+        session_id, _ = state.sessions.create(session_scheme(context.scheme))
         return JSONResponse(
             {"ok": True}, headers={"Set-Cookie": session_cookie(context.scheme, session_id)}
         )
@@ -130,5 +139,19 @@ def build_router(state: PanelState) -> APIRouter:
         if session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         return HTMLResponse(panel_page(session.csrf_token))
+
+    @router.post("/panel/logout")
+    async def logout(request: Request) -> Response:
+        context = panel_context(request.scope)
+        if context.session is None or context.session_id is None:  # pragma: no cover - the door
+            raise PanelUnauthorizedError()
+        state.sessions.delete(context.session_id, "logout")
+        return JSONResponse(
+            {"ok": True},
+            headers={
+                "Set-Cookie": expired_cookie(context.scheme),
+                "Clear-Site-Data": '"cache"',
+            },
+        )
 
     return router

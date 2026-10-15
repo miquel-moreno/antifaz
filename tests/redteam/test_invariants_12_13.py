@@ -222,12 +222,12 @@ def test_local_routes_never_call_a_provider(
     assert upstream_any.requests == []
 
 
-# --- Invariant 12 with the panel (ADR-0018, PR 11b-2a) --------------------------------------
+# --- Invariant 12 with the panel (ADR-0018, PRs 11b-2a and 11b-2b) ---------------------------
 
 # The panel's routes, by door. Exact (path, method) pairs: a new panel route must be put in one
 # of these on purpose.
 PANEL_PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
-PANEL_SESSION_ROUTES = frozenset({("/panel", "GET")})
+PANEL_SESSION_ROUTES = frozenset({("/panel", "GET"), ("/panel/logout", "POST")})
 
 
 def _all_pairs(client: TestClient) -> set[tuple[str, str]]:

@@ -1,4 +1,4 @@
-"""The panel's session store and login limiter have no locks (issue 53, ADR-0018, PR 11b-2a).
+"""The panel's session store and login limiter have no locks (issue 53, ADR-0018, PR 11b-2).
 
 They are correct only because every panel route is `async def` on the one event loop and
 nothing awaits in the middle of their read-modify-write. These tests keep it that way:
@@ -10,6 +10,9 @@ nothing awaits in the middle of their read-modify-write. These tests keep it tha
 3. In the login, no await, async for or async with comes after the limiter check (by line):
    from `limiter.allowed(...)` to the response, checking, recording a failure and creating the
    session happen without the coroutine ever being suspended.
+4. The logout (11b-2b) has no await at all: it closes the session and answers in one go.
+5. In the door, nothing awaits between looking the session up (peek) and counting the use
+   (touch): no other request can close it in between and see it revived.
 """
 
 import ast
@@ -146,3 +149,86 @@ def test_the_critical_section_check_catches_an_inserted_await(inserted: str) -> 
     assert _awaits_after_the_limiter(ast.parse(source)) != []
     clean = source.replace(inserted, "")
     assert _awaits_after_the_limiter(ast.parse(clean)) == []
+
+
+# --- The logout (11b-2b) --------------------------------------------------------------------
+
+
+def _async_nodes_in(tree: ast.Module, function: str) -> list[int]:
+    (node,) = [
+        n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == function
+    ]
+    return [n.lineno for n in ast.walk(node) if isinstance(n, _ASYNC_NODES)]
+
+
+def test_the_logout_never_awaits() -> None:
+    """Closing the session and answering happen in one go: no await, async for or async with."""
+    assert _async_nodes_in(_tree("routes.py"), "logout") == []
+
+
+def test_the_logout_check_catches_an_await() -> None:
+    bad = ast.parse("async def logout(request):\n    await request.body()\n    return 1\n")
+
+    assert _async_nodes_in(bad, "logout") == [2]
+
+
+# --- The door: from peek() to touch() -------------------------------------------------------
+
+
+def _awaits_between(tree: ast.Module, function: str, first: str, last: str) -> list[int]:
+    """Await-like nodes in `function` on lines from the first `.first(` to the last `.last(`."""
+    (node,) = [
+        n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == function
+    ]
+
+    def lines(attribute: str) -> list[int]:
+        return [
+            n.lineno
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == attribute
+        ]
+
+    starts, ends = lines(first), lines(last)
+    assert starts and ends, "no peek/touch found: the check would pass without checking anything"
+    low, high = min(starts), max(ends)
+    return [
+        n.lineno for n in ast.walk(node) if isinstance(n, _ASYNC_NODES) and low < n.lineno < high
+    ]
+
+
+def test_the_door_never_awaits_between_peek_and_touch() -> None:
+    assert _awaits_between(_tree("door.py"), "_handle", "peek", "touch") == []
+
+
+def _store_calls(tree: ast.Module) -> list[str]:
+    """Methods called on something named `sessions` (a local or an attribute)."""
+    out = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            target = n.func.value
+            name = target.id if isinstance(target, ast.Name) else getattr(target, "attr", "")
+            if name == "sessions":
+                out.append(n.func.attr)
+    return out
+
+
+def test_the_door_never_refreshes_a_session_with_get() -> None:
+    """get() counts a use before the checks; the door must peek, check, then touch."""
+    calls = _store_calls(_tree("door.py"))
+
+    assert "peek" in calls and "touch" in calls
+    assert "get" not in calls
+    assert "get" in _store_calls(ast.parse("x = self._state.sessions.get(i, s)"))
+
+
+def test_the_peek_touch_check_catches_an_await() -> None:
+    source = (
+        "async def _handle(scope):\n"
+        "    session = sessions.peek(i, s)\n"
+        "    await send(x)\n"
+        "    sessions.touch(session.fingerprint)\n"
+    )
+
+    assert _awaits_between(ast.parse(source), "_handle", "peek", "touch") == [3]
