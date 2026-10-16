@@ -242,3 +242,14 @@ def test_the_same_uv_version_everywhere() -> None:
     assert len(image) == 1
     assert len(audit) == 1
     assert image[0] == ci["env"]["UV_VERSION"] == audit[0]
+
+
+def test_uv_is_pinned_to_the_reviewed_version() -> None:
+    """uv is 0.13.0 in the image, CI and `make audit` (issue 54): a new uv is a reviewed change."""
+    image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)
+    ci = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    audit = re.findall(r"uvx --from uv==(\d+\.\d+\.\d+) uv audit", MAKEFILE)
+
+    assert image == ["0.13.0"]
+    assert ci["env"]["UV_VERSION"] == "0.13.0"
+    assert audit == ["0.13.0"]
