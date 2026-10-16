@@ -95,7 +95,7 @@ Mismo lenguaje que «Prueba un texto»: superficies blancas con la sombra suave 
 
 ## Comprobación final (paso 6)
 
-Hecha el **7 de octubre de 2026** con `make design-check` (`scripts/check_design.py`): Playwright 1.63.0 con Chromium sin ventana (Chrome for Testing 153.0.8010.12) y axe-core 4.12.1. El script sirve el repo en `127.0.0.1` (solo `design/`, `docs/images/` y, desde el PR 11c-1, `src/antifaz/web/static/`; nunca `.env`), abre las dos páginas y comprueba todo en el estado de reposo (las animaciones se llevan a su final antes de medir). Se puede repetir cuando se quiera; no forma parte de `make check`.
+Hecha el **7 de octubre de 2026** con `make design-check` (`scripts/check_design.py`): Playwright 1.63.0 con Chromium sin ventana (Chrome for Testing 153.0.8010.12) y axe-core 4.12.1. El script sirve el repo en `127.0.0.1` (solo `design/`, `docs/images/` y, desde el PR 11c-1, `src/antifaz/web/static/`; nunca `.env`. Desde la revisión de 11c-1 el servidor está en `scripts/design_server.py` y comprueba el archivo ya resuelto, así que `..` o `%2e%2e` no salen de esas carpetas), abre las dos páginas y comprueba todo en el estado de reposo (las animaciones se llevan a su final antes de medir). Se puede repetir cuando se quiera; no forma parte de `make check`.
 
 **Qué se ha comprobado**: anchos de 390, 768, 1024 y 1280 px, y 1280 px con «Móvil»; tema claro y oscuro (el del sistema, emulado); tres modos de movimiento: normal, «reducir movimiento» del sistema (emulado por Playwright) y el interruptor «Menos movimiento»; en cada combinación, las cinco vistas en los cinco estados. En total, **758 combinaciones** (750 del panel y 8 de `tokens-preview.html`), en unos 8,5 minutos.
 
