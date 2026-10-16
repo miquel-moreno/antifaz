@@ -472,6 +472,39 @@ Con la 0.1.1 tus dos herramientas son `docker compose logs antifaz` (por qué no
 | `init` dice "no terminal to ask the questions" (v0.2.0) | `docker run` sin `-it`. | Añade `-it`, o usa `--non-interactive`. |
 | Linux: "Permission denied" al leer `.env` (v0.2.0) | `init` se ejecutó sin `--user`, así que el archivo es del usuario del contenedor. | `sudo chown "$(id -u):$(id -g)" .env`, y la próxima vez usa `--user "$(id -u):$(id -g)"`. |
 | Windows: Antifaz no arranca aunque `.env` parece bien (con la v0.2.0, `doctor` dice "cannot read .env as UTF-8 text") | `.env` se guardó con otra codificación. En Windows PowerShell 5.1, `>` y `Out-File` escriben UTF-16 y `Set-Content` escribe ANSI. | Abre `.env` con el Bloc de notas, "Guardar como", codificación **UTF-8**. No crees `.env` con `>`, `Out-File` ni `Set-Content`. Usa `Copy-Item .env.example .env` (o `init` con la v0.2.0). |
+| `docker compose exec antifaz sh` dice "executable file not found" (v0.2.0) | Desde la v0.2.0 la imagen es distroless: no lleva shell, ni `apt`, ni `curl`. Es a propósito (menos herramientas para un atacante). | `docker compose exec antifaz antifaz doctor` y `docker compose exec antifaz antifaz verify` siguen funcionando. Para mirar dentro, mira «Mirar dentro del contenedor» justo debajo. |
+
+### Mirar dentro del contenedor (v0.2.0, imagen sin shell)
+
+La forma principal: un contenedor temporal con herramientas (`busybox`, fijado por digest) **pegado** al de Antifaz. Comparte sus procesos (`--pid`) y su red (`--network`), así que ves sus procesos y llegas a `127.0.0.1:8000` como si estuvieras dentro. Con `--rm` desaparece al salir, y no toca la imagen ni el contenedor de Antifaz.
+
+**Primero, sin ninguna capacidad.** Basta para ver los procesos y preguntar a la pasarela:
+
+```bash
+c=$(docker compose ps -q antifaz)
+docker run --rm -it --pid=container:$c --network=container:$c --cap-drop ALL --security-opt no-new-privileges --read-only busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+# Dentro:
+ps                                   # el proceso 1 es antifaz serve, como 10001
+wget -qO- http://127.0.0.1:8000/healthz
+```
+
+Así, `/proc/1/root` (los archivos de Antifaz) y `/proc/1/environ` (sus variables, con las claves) dicen "Permission denied". `--cap-drop ALL` también le quita al auxiliar la capacidad de escuchar el tráfico de la red que comparte (con las capacidades por defecto de Docker, un auxiliar como root podría capturar paquetes de esa red).
+
+**Solo si tienes que mirar archivos**, añade `SYS_PTRACE` y nada más:
+
+```bash
+docker run --rm -it --pid=container:$c --network=container:$c --cap-drop ALL --cap-add SYS_PTRACE --security-opt no-new-privileges --read-only busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+# Dentro:
+ls -a /proc/1/root/app               # los archivos de Antifaz
+```
+
+En PowerShell: `$c = docker compose ps -q antifaz` y después la misma línea con `$c`. El contenedor de Antifaz sigue sin ninguna capacidad; el permiso es solo del auxiliar.
+
+> **Cuidado con `SYS_PTRACE`.** Es la capacidad que deja leer el entorno de otro proceso (`/proc/1/environ`: **las claves**) y su **memoria** (`/proc/1/mem`: los datos personales de las peticiones en curso y la tabla de marcadores). En la variante de arriba no se abren solo porque el auxiliar no tiene ninguna otra capacidad (comprobado el 2026-10-16 con Docker Desktop 29.8: "Permission denied"); con las capacidades por defecto de Docker más `SYS_PTRACE`, los dos se abren (comprobado ese día), y un auxiliar con `--user 10001` lee el entorno incluso sin capacidades. Úsalo solo cuando haga falta, sal en cuanto termines, no hagas nunca volcados de memoria ni de archivos, y si algo de lo que viste se compartió (pantalla, ticket, chat), rota las claves.
+
+Ojo: quien tiene acceso a Docker en el servidor ya puede leer las claves sin nada de esto (por ejemplo `docker exec <contenedor> python -c …` lee el entorno, y `docker inspect` lo muestra). Es un límite de Docker, no de la imagen: ver el [modelo de amenazas](security/threat-model.md).
+
+Alternativa: `docker debug <contenedor>`, que abre una shell con herramientas en cualquier contenedor aunque no tenga shell ([documentación de Docker](https://docs.docker.com/reference/cli/docker/debug/)). Es una función de **Docker Desktop**, no del Docker Engine de un servidor Linux, y según Docker está disponible con licencia **Pro, Team o Business** ([anuncio de Docker Desktop 4.33](https://www.docker.com/blog/docker-desktop-4-33/)); la página de referencia no dice nada del plan, así que comprueba tu licencia antes de contar con ella.
 
 ## 9. Lo que todavía no está probado
 

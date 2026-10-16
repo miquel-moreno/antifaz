@@ -126,20 +126,28 @@ presidio-analyzer pide `numpy < 2.5` y el extra `ner` fija una versión más nue
 
 ## La imagen de Docker (issue 7, parte 7a)
 
-La imagen lleva Antifaz y sus dependencias de ejecución (las mismas que comprueba `scripts/check_licenses.py`, sin el extra `ner`) sobre la imagen oficial `python:3.12-slim` (Debian 13 "trixie"). Esa base trae los paquetes del sistema de Debian, y algunos son **GPL** (por ejemplo bash, coreutils o apt). Van **sin modificar**, como programas separados que Antifaz no enlaza ni incluye en su código: es la "agregación" que permite la GPL, igual que en cualquier imagen basada en Debian. El SBOM que genera la CI (CycloneDX, Syft) lista cada paquete con su versión exacta y su licencia.
+Desde el issue 54 ([ADR-0019](adr/0019-imagen-distroless.md)) la imagen lleva Antifaz y sus dependencias de ejecución (las mismas que comprueba `scripts/check_licenses.py`, sin el extra `ner`) y el CPython 3.12 de la imagen oficial `python:3.12-slim-trixie` (licencia PSF-2.0), sobre `gcr.io/distroless/cc-debian13` (Debian 13 "trixie"). **Ya no van bash, coreutils, apt, dpkg, perl, ncurses, readline ni gdbm**: la base distroless no los trae, y los módulos de CPython que enlazaban `libreadline8t64` y `libgdbm6t64` (las dos bibliotecas GPL-3+ que se anotaban aquí hasta ahora) se quitan de la imagen. El SBOM que genera la CI (CycloneDX, Syft) lista cada paquete con su versión exacta.
 
-Dos son **bibliotecas** GPL-3, no programas sueltos, y conviene nombrarlas:
+Los 14 paquetes de Debian que quedan (base del 2026-10-16), con la licencia de su archivo `copyright` de Debian:
 
-| Paquete de Debian | Versión (base del 2026-10-01) | Licencia | Quién la enlaza |
+| Paquete de Debian | Versión | Licencia | Qué es |
 |---|---|---|---|
-| `libreadline8t64` (GNU readline) | 8.2-6 | GPL-3+ | Solo el módulo `readline` de CPython (`lib-dynload/readline…so`), para la consola interactiva |
-| `libgdbm6t64` (GNU dbm) | 1.24-2 | GPL-3+ | Solo el módulo `_gdbm` de CPython (`dbm.gnu`) |
+| `libc6` | 2.41-12+deb13u4 | LGPL-2.1+ en su mayor parte (con partes BSD, ISC y otras; algunos programas auxiliares GPL) | La biblioteca de C; CPython y las ruedas la enlazan dinámicamente, como permite la LGPL |
+| `libgcc-s1`, `libgomp1`, `libstdc++6`, `gcc-14-base` | 14.2.0-19 | GPL-3+ con la *GCC Runtime Library Exception* | Librerías de ejecución de GCC. La excepción permite enlazarlas desde programas con cualquier licencia |
+| `libssl3t64` | 3.5.7-1~deb13u3 | Apache-2.0 | OpenSSL |
+| `zlib1g` | 1:1.3.dfsg+really1.3.1-1+b1 | Zlib | Compresión |
+| `libzstd1` | 1.5.7+dfsg-1 | BSD-3-Clause o GPL-2 (a elegir) | Compresión |
+| `ca-certificates` | 20250419 | MPL-2.0 (los certificados) y GPL-2+ (las herramientas del paquete) | Certificados raíz |
+| `base-files` | 13.8+deb13u7 | GPL-2+ | Archivos básicos del sistema (`/etc/os-release`…), sin programas |
+| `netbase` | 6.5 | GPL-2 | Tablas `/etc/protocols` y `/etc/services` |
+| `tzdata`, `tzdata-legacy` | 2026c-0+deb13u1 | Dominio público | Zonas horarias |
+| `media-types` | 13.0.0 | Propia de Debian (libre) | `/etc/mime.types` |
 
-Antifaz no importa ninguno de esos dos módulos: comprobado el 2026-10-01 importando la app y el healthcheck dentro de la imagen, sin `readline`, `_gdbm` ni `dbm` en `sys.modules`. Vienen con la imagen oficial de Python, sin modificar.
+Lo que lleva GPL sin excepción de enlace son archivos de datos (`base-files`, `netbase`) o partes de un paquete que Antifaz no enlaza: van **sin modificar**, como en cualquier imagen basada en Debian ("agregación"). Las bibliotecas que sí se enlazan son LGPL (glibc), GPL con la excepción de GCC o con licencias permisivas. Antifaz no incluye código GPL en el suyo.
 
-**Código fuente**: el de cada paquete de Debian, en la versión exacta, está en [snapshot.debian.org](https://snapshot.debian.org/) (buscando por nombre y versión, o por la fecha de la imagen base); las versiones exactas salen del SBOM de la CI o de `dpkg -l` dentro de la imagen.
+**Código fuente**: el de cada paquete de Debian, en la versión exacta, está en [snapshot.debian.org](https://snapshot.debian.org/) (buscando por nombre y versión, o por la fecha de la imagen base); las versiones exactas salen del SBOM de la CI o de los registros de `/var/lib/dpkg/status.d/` de la imagen (no hay `dpkg` dentro para listarlos).
 
-**Pendiente de decidir por Miquel**: si esta excepción de la regla (que habla de "la librería y la imagen") basta así anotada, o si se prefiere una base sin paquetes GPL (por ejemplo una distroless, sin readline ni gdbm), con más trabajo de mantenimiento.
+La duda que había quedado pendiente para Miquel (si bastaba anotar `libreadline8t64` y `libgdbm6t64` o se prefería una base sin esas bibliotecas GPL) queda resuelta con la imagen distroless, que no las lleva.
 
 ## Tipos de letra del panel
 

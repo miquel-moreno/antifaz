@@ -472,6 +472,39 @@ With 0.1.1, your two tools are `docker compose logs antifaz` (why it does not st
 | `init` says "no terminal to ask the questions" (v0.2.0) | `docker run` without `-it`. | Add `-it`, or use `--non-interactive`. |
 | Linux: "Permission denied" when you read `.env` (v0.2.0) | `init` ran without `--user`, so the file belongs to the container user. | `sudo chown "$(id -u):$(id -g)" .env`, and next time use `--user "$(id -u):$(id -g)"`. |
 | Windows: Antifaz does not start although `.env` looks right (with v0.2.0, `doctor` says "cannot read .env as UTF-8 text") | `.env` was saved in another encoding. In Windows PowerShell 5.1, `>` and `Out-File` write UTF-16 and `Set-Content` writes ANSI. | Open `.env` in Notepad, "Save as", encoding **UTF-8**. Do not create `.env` with `>`, `Out-File` or `Set-Content`. Use `Copy-Item .env.example .env` (or `init` with v0.2.0). |
+| `docker compose exec antifaz sh` says "executable file not found" (v0.2.0) | From v0.2.0 the image is distroless: it has no shell, no `apt` and no `curl`. This is on purpose (fewer tools for an attacker). | `docker compose exec antifaz antifaz doctor` and `docker compose exec antifaz antifaz verify` still work. To look inside, see "Look inside the container" just below. |
+
+### Look inside the container (v0.2.0, image without a shell)
+
+The main way: a temporary container with tools (`busybox`, pinned by digest) **attached** to the Antifaz one. It shares its processes (`--pid`) and its network (`--network`), so you see its processes and reach `127.0.0.1:8000` as if you were inside. With `--rm` it is gone when you leave, and it does not change the Antifaz image or container.
+
+**First, with no capability at all.** Enough to see the processes and ask the gateway:
+
+```bash
+c=$(docker compose ps -q antifaz)
+docker run --rm -it --pid=container:$c --network=container:$c --cap-drop ALL --security-opt no-new-privileges --read-only busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+# Inside:
+ps                                   # process 1 is antifaz serve, as 10001
+wget -qO- http://127.0.0.1:8000/healthz
+```
+
+Like this, `/proc/1/root` (the Antifaz files) and `/proc/1/environ` (its variables, with the keys) say "Permission denied". `--cap-drop ALL` also takes away the helper's ability to sniff the traffic of the network it shares (with Docker's default capabilities, a root helper could capture packets there).
+
+**Only if you must look at files**, add `SYS_PTRACE` and nothing else:
+
+```bash
+docker run --rm -it --pid=container:$c --network=container:$c --cap-drop ALL --cap-add SYS_PTRACE --security-opt no-new-privileges --read-only busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+# Inside:
+ls -a /proc/1/root/app               # the Antifaz files
+```
+
+In PowerShell: `$c = docker compose ps -q antifaz`, then the same line with `$c`. The Antifaz container still has no capabilities; the permission belongs to the helper only.
+
+> **Careful with `SYS_PTRACE`.** It is the capability that lets a process read another one's environment (`/proc/1/environ`: **the keys**) and its **memory** (`/proc/1/mem`: the personal data of requests in flight and the marker table). In the variant above they stay closed only because the helper has no other capability (checked on 2026-10-16 with Docker Desktop 29.8: "Permission denied"); with Docker's default capabilities plus `SYS_PTRACE` both open (checked that day), and a helper run with `--user 10001` reads the environment even without capabilities. Use it only when needed, leave as soon as you are done, never take memory or file dumps, and if anything you saw was shared (screen, ticket, chat), rotate the keys.
+
+Note: anyone with Docker access on the server can read the keys without any of this (for example `docker exec <container> python -c …` reads the environment, and `docker inspect` shows it). That is a limit of Docker, not of the image: see the [threat model](security/threat-model.md).
+
+Alternative: `docker debug <container>`, which opens a shell with tools in any container, even one without a shell ([Docker documentation](https://docs.docker.com/reference/cli/docker/debug/)). It is a **Docker Desktop** feature, not part of the Docker Engine on a Linux server, and Docker says it is available with a **Pro, Team or Business** license ([Docker Desktop 4.33 announcement](https://www.docker.com/blog/docker-desktop-4-33/)); the reference page says nothing about plans, so check your license before you rely on it.
 
 ## 9. What is not tested yet
 

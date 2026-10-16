@@ -4,4 +4,7 @@
 # Every ignore rule needs a reason and a date, and is reviewed when the base image changes.
 # No exceptions today. CVE-2026-82049 (CPython) was ignored from 2026-10-01 to 2026-10-12:
 # Grype no longer reports it for Python 3.12.15 (full report of PR #58).
+# Since issue 54 the runtime is distroless cc (Debian 13): Debian packages come from its
+# /var/lib/dpkg/status.d records, and the CI checks that the scanners still see them
+# (scripts/check_scan_sees.py) before this gate runs.
 ignore: []
