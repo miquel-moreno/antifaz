@@ -287,15 +287,66 @@ def _compose(name: str) -> dict[str, Any]:
 
 def test_the_internal_network_has_no_way_out() -> None:
     networks = _compose("docker-compose.no-egress.yml")["networks"]
-    assert networks[INTERNAL_NETWORK] == {"internal": True}
+    internal = networks[INTERNAL_NETWORK]
+    assert internal["internal"] is True
+    # A fixed subnet, so the relay's targets are fixed IPs inside it (no name lookups).
+    assert internal["ipam"] == {
+        "config": [
+            {"subnet": "${ANTIFAZ_E2E_SUBNET:?set by the e2e tests}",
+             "ip_range": "${ANTIFAZ_E2E_IP_RANGE:?set by the e2e tests}"}
+        ]
+    }  # fmt: skip
 
 
 def test_the_gateway_and_the_fake_provider_are_only_on_the_internal_network() -> None:
     gateway = _compose("docker-compose.no-egress.yml")["services"]["antifaz"]
     fake = _compose("docker-compose.e2e.yml")["services"]["fake-upstream"]
-    assert gateway["networks"] == [INTERNAL_NETWORK]
-    assert fake["networks"] == [INTERNAL_NETWORK]
+    assert gateway["networks"] == {
+        INTERNAL_NETWORK: {"ipv4_address": "${ANTIFAZ_E2E_GATEWAY_IP:?set by the e2e tests}"}
+    }
+    assert fake["networks"] == {
+        INTERNAL_NETWORK: {"ipv4_address": "${ANTIFAZ_E2E_FAKE_IP:?set by the e2e tests}"}
+    }
     assert "ports" not in fake
+
+
+def test_the_relay_routes_to_fixed_ips_inside_the_subnet() -> None:
+    base = _compose("docker-compose.no-egress.yml")["services"]["relay"]["environment"]
+    e2e = _compose("docker-compose.e2e.yml")["services"]["relay"]["environment"]
+    assert base["E2E_RELAY_SUBNET"] == "${ANTIFAZ_E2E_SUBNET:?set by the e2e tests}"
+    assert base["E2E_RELAY_ROUTES"] == "8000=${ANTIFAZ_E2E_GATEWAY_IP}:8000"
+    assert e2e["E2E_RELAY_ROUTES"] == (
+        "8000=${ANTIFAZ_E2E_GATEWAY_IP}:8000,9000=${ANTIFAZ_E2E_FAKE_IP}:9000"
+    )
+
+
+@pytest.mark.parametrize("which", ["stack", "init"])
+def test_the_internal_addresses_are_consistent(which: str) -> None:
+    import ipaddress
+
+    from tests.e2e.egress import internal_addresses
+
+    env = internal_addresses(which)
+    subnet = ipaddress.ip_network(env["ANTIFAZ_E2E_SUBNET"])
+    ip_range = ipaddress.ip_network(env["ANTIFAZ_E2E_IP_RANGE"])
+    fixed = [
+        ipaddress.ip_address(env[k]) for k in ("ANTIFAZ_E2E_GATEWAY_IP", "ANTIFAZ_E2E_FAKE_IP")
+    ]
+    assert ip_range.subnet_of(subnet)  # type: ignore[arg-type]
+    for address in fixed:
+        assert address in subnet and address not in ip_range  # dynamic IPs never collide
+
+
+def test_the_two_stacks_use_different_subnets() -> None:
+    """The init stack starts while the main one runs: their subnets must not overlap."""
+    import ipaddress
+
+    from tests.e2e.egress import internal_addresses
+
+    one, two = (
+        ipaddress.ip_network(internal_addresses(w)["ANTIFAZ_E2E_SUBNET"]) for w in ("stack", "init")
+    )
+    assert not one.overlaps(two)
 
 
 def test_the_relay_publishes_on_127_0_0_1_only_and_keeps_the_hardening() -> None:
@@ -310,6 +361,8 @@ def test_the_relay_publishes_on_127_0_0_1_only_and_keeps_the_hardening() -> None
     assert relay["read_only"] is True
     assert relay["cap_drop"] == ["ALL"]
     assert relay["security_opt"] == ["no-new-privileges:true"]
+    assert relay["cpus"] == 0.5
+    assert relay["pids_limit"] > 0 and relay["mem_limit"]
     assert sorted(relay["networks"]) == ["e2e-edge", INTERNAL_NETWORK]
 
 

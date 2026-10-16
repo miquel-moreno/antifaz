@@ -10,19 +10,24 @@
 #
 # The host reaches the stack through `relay` (tests/e2e/relay.py, standard library, in the
 # Antifaz image): it is on `e2e-internal` and on `e2e-edge`, a normal network where Compose
-# publishes its ports on 127.0.0.1 only, and it copies bytes from each port to one fixed target.
-# It never connects where a client asks, so it gives the gateway no way out.
+# publishes its ports on 127.0.0.1 only, and it copies bytes from each port to one fixed IP
+# inside the internal subnet (no name lookups; a target outside the subnet is refused). It
+# never connects where a client asks, so it gives the gateway no way out. The subnet and the
+# fixed addresses come from the tests (tests/e2e/egress.py, internal_addresses): one subnet per
+# stack, fixed addresses outside the range Docker hands out.
 services:
   antifaz:
     networks:
-      - e2e-internal
+      e2e-internal:
+        ipv4_address: ${ANTIFAZ_E2E_GATEWAY_IP:?set by the e2e tests}
 
   relay:
     image: antifaz:local
     pull_policy: never
     entrypoint: ["python", "/e2e/relay.py"]
     environment:
-      E2E_RELAY_ROUTES: "8000=antifaz:8000"
+      E2E_RELAY_ROUTES: "8000=${ANTIFAZ_E2E_GATEWAY_IP}:8000"
+      E2E_RELAY_SUBNET: ${ANTIFAZ_E2E_SUBNET:?set by the e2e tests}
     volumes:
       - ./tests/e2e/relay.py:/e2e/relay.py:ro
     ports:
@@ -39,6 +44,7 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 128m
+    cpus: 0.5
     pids_limit: 64
     healthcheck:
       test: ["CMD", "python", "/e2e/relay.py", "--check"]
@@ -52,4 +58,8 @@ services:
 networks:
   e2e-internal:
     internal: true
+    ipam:
+      config:
+        - subnet: ${ANTIFAZ_E2E_SUBNET:?set by the e2e tests}
+          ip_range: ${ANTIFAZ_E2E_IP_RANGE:?set by the e2e tests}
   e2e-edge: {}

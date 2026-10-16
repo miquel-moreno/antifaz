@@ -24,6 +24,7 @@ import pytest
 from tests.e2e.egress import (
     FAKE_UPSTREAM_HOST,
     FAKE_UPSTREAM_PORT,
+    internal_addresses,
     read_env,
     run_problems,
     upstream_problems,
@@ -162,6 +163,7 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         "ANTIFAZ_E2E_GATEWAY_PORT": str(gateway_port),
         "ANTIFAZ_E2E_FAKE_PORT": str(fake_port),
     }
+    environ |= internal_addresses("stack")
     stack = Stack(
         gateway=f"http://127.0.0.1:{gateway_port}",
         fake=f"http://127.0.0.1:{fake_port}",

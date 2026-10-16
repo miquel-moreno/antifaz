@@ -21,7 +21,7 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import IMAGE, NO_EGRESS_FILES, REPO, Stack, _free_port, docker
-from tests.e2e.egress import REAL_PROVIDERS
+from tests.e2e.egress import REAL_PROVIDERS, internal_addresses
 from tests.e2e.image_probes import REACH_OUT, UID_GID
 
 pytestmark = pytest.mark.e2e
@@ -161,6 +161,7 @@ def test_compose_starts_with_the_env_written_by_init(env_file: Path) -> None:
     environ = {k: v for k, v in os.environ.items() if not k.startswith("ANTIFAZ_")}
     environ |= {"ANTIFAZ_ENV_FILE": str(env_file), "ANTIFAZ_PORT": str(_free_port())}
     environ["ANTIFAZ_E2E_GATEWAY_PORT"] = str(port)
+    environ |= internal_addresses("init")
     files = [arg for path in NO_EGRESS_FILES for arg in ("-f", str(path))]
     base = ["docker", "compose", "-p", PROJECT, "--project-directory", str(REPO), *files]
     base += ["--env-file", str(env_file)]

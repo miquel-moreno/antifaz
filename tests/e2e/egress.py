@@ -19,6 +19,23 @@ FAKE_UPSTREAM_HOST = "fake-upstream"
 FAKE_UPSTREAM_PORT = 9000
 # The Compose network with no egress (its key in docker-compose.no-egress.yml).
 INTERNAL_NETWORK = "e2e-internal"
+# One fixed subnet per e2e stack (the init stack starts while the main one runs, so they must
+# not overlap), outside Docker's default pools (172.17-31.x, 192.168.x). The fixed addresses are
+# below the range Docker hands out to the other containers (the relay).
+_THIRD_OCTET = {"stack": 47, "init": 48}
+
+
+def internal_addresses(which: str) -> dict[str, str]:
+    """The Compose variables of the internal network for the "stack" or the "init" stack."""
+    prefix = f"10.213.{_THIRD_OCTET[which]}"
+    return {
+        "ANTIFAZ_E2E_SUBNET": f"{prefix}.0/24",
+        "ANTIFAZ_E2E_IP_RANGE": f"{prefix}.128/25",
+        "ANTIFAZ_E2E_GATEWAY_IP": f"{prefix}.10",
+        "ANTIFAZ_E2E_FAKE_IP": f"{prefix}.11",
+    }
+
+
 # What the canary tries to resolve and connect to (never a byte sent): it must fail.
 REAL_PROVIDERS = ("api.openai.com:443", "api.anthropic.com:443")
 UPSTREAM_VARS = ("ANTIFAZ_OPENAI_BASE_URL", "ANTIFAZ_ANTHROPIC_BASE_URL")
