@@ -1,6 +1,6 @@
 # ADR-0019 · La imagen de ejecución pasa a distroless
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada (aprobada por Miquel Moreno el 2026-10-16)
 - **Fecha:** 2026-10-16
 - **Concreta:** el issue 54 (PR B2) y la fila "Imagen" del modelo de amenazas; completa ADR-0017 (una sola orden en la imagen)
 
