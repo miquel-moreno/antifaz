@@ -75,6 +75,21 @@ def test_a_blind_scan_fails_with_a_clear_reason(
     assert check(sbom, report, **ARGS) == [problem]
 
 
+@pytest.mark.parametrize(
+    "match",
+    [
+        {"vulnerability": "x", "artifact": {"name": "zlib1g"}},
+        {"vulnerability": {"id": CVE}, "artifact": "zlib1g"},
+        {"vulnerability": None, "artifact": None},
+        "not a match",
+    ],
+    ids=["vulnerability-string", "artifact-string", "nulls", "match-string"],
+)
+def test_a_malformed_match_is_not_seen_and_raises_nothing(match: object) -> None:
+    report = {"matches": [match]}
+    assert check(GOOD_SBOM, report, **ARGS) == [f"the Grype report does not hold {CVE} in zlib1g"]
+
+
 def test_an_empty_scan_names_every_problem() -> None:
     assert len(check({}, {}, **ARGS)) == 3
 

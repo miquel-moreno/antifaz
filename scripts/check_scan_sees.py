@@ -45,14 +45,19 @@ def has_cpython(sbom: dict[str, Any], minor: str) -> bool:
     )
 
 
+def _field(match: object, name: str, key: str) -> object:
+    """match[name][key], or None if any level is not a JSON object (a malformed report)."""
+    inner = match.get(name) if isinstance(match, dict) else None
+    return inner.get(key) if isinstance(inner, dict) else None
+
+
 def has_vulnerability(report: dict[str, Any], vulnerability: str, package: str) -> bool:
     matches = report.get("matches", [])
     if not isinstance(matches, list):
         return False
     return any(
-        isinstance(m, dict)
-        and m.get("vulnerability", {}).get("id") == vulnerability
-        and m.get("artifact", {}).get("name") == package
+        _field(m, "vulnerability", "id") == vulnerability
+        and _field(m, "artifact", "name") == package
         for m in matches
     )
 
