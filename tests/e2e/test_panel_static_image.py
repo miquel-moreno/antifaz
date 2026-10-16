@@ -13,7 +13,6 @@ import json
 import os
 import re
 import secrets
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,16 +61,14 @@ def test_the_image_serves_a_static_file_with_its_bytes_and_cache(stack: Stack) -
     environ = os.environ | {KEY_VAR: secrets.token_hex(32), ADMIN_VAR: secrets.token_hex(32)}
     # The README's hardening with --network none: the requests are made from inside.
     command = [
-        "docker", "run", "-d", "--name", name, "-e", KEY_VAR, "-e", ADMIN_VAR,
+        "run", "-d", "--name", name, "-e", KEY_VAR, "-e", ADMIN_VAR,
         "-e", "ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1", "--network", "none",
         "--read-only", "--tmpfs", "/tmp:size=16m,mode=1777,noexec,nosuid,nodev",  # noqa: S108
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         IMAGE,
     ]  # fmt: skip
     try:
-        started = subprocess.run(
-            command, capture_output=True, text=True, env=environ, timeout=120, check=False
-        )
+        started = docker(*command, env=dict(environ))
         assert started.returncode == 0, started.stderr
         login = _wait_login(name)
         assert login is not None, docker("logs", name).stderr[-2000:]

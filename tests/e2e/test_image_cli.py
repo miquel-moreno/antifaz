@@ -99,15 +99,8 @@ INIT_ARGS += ["--anthropic-key-env", ANTHROPIC_VAR]
 
 def _run_init(folder: Path, keys: dict[str, str]) -> tuple[int, str]:
     mount = ["-v", f"{folder}:/work", "-w", "/work", *_user()]
-    result = subprocess.run(
-        ["docker", "run", "--rm", *INIT_OPTIONS, *mount, IMAGE, *INIT_ARGS],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-        env=os.environ | keys,
-        check=False,
+    result = docker(
+        "run", "--rm", *INIT_OPTIONS, *mount, IMAGE, *INIT_ARGS, env=dict(os.environ) | keys
     )
     return result.returncode, result.stdout + result.stderr
 

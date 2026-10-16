@@ -21,7 +21,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.e2e.egress import FAKE_UPSTREAM_HOST, FAKE_UPSTREAM_PORT, read_env, upstream_problems
+from tests.e2e.egress import (
+    FAKE_UPSTREAM_HOST,
+    FAKE_UPSTREAM_PORT,
+    read_env,
+    run_problems,
+    upstream_problems,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 PROJECT = "antifaz-e2e"
@@ -49,8 +55,13 @@ def docker(
     """Run the docker CLI (fixed argument list, never a shell) and capture its output.
 
     `env` is the docker CLI's own environment: with `-e NAME` docker takes the value from it,
-    so a throwaway key is never in an argument.
+    so a throwaway key is never in an argument. A command that starts a container is refused
+    before docker runs unless it has `--network none` and only allow-listed options
+    (tests/e2e/egress.py, `run_problems`): the run-time half of the static check.
     """
+    problems = run_problems(args)
+    if problems:
+        raise AssertionError("docker command refused: " + "; ".join(problems))
     return subprocess.run(
         ["docker", *args],
         capture_output=True,

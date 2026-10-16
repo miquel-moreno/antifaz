@@ -15,9 +15,10 @@ import yaml
 from tests.e2e.egress import (
     INTERNAL_NETWORK,
     UPSTREAM_VARS,
-    docker_runs_without_network,
+    docker_run_problems,
     module_lists,
     read_env,
+    run_problems,
     upstream_problems,
 )
 
@@ -141,7 +142,7 @@ def _known_lists() -> dict[str, Any]:
 @pytest.mark.parametrize("path", sorted(E2E.glob("*.py")), ids=lambda p: p.name)
 def test_every_docker_run_in_the_e2e_tests_has_no_network(path: Path) -> None:
     source = path.read_text(encoding="utf-8")
-    assert docker_runs_without_network(source, _known_lists()) == []
+    assert docker_run_problems(source, _known_lists()) == []
 
 
 @pytest.mark.parametrize(
@@ -150,16 +151,38 @@ def test_every_docker_run_in_the_e2e_tests_has_no_network(path: Path) -> None:
         'docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", "pip")',
         'docker("run", "--rm", "--network", "bridge", IMAGE)',
         'docker("run", "--rm", "--network", "host", IMAGE)',
+        'docker("run", "--rm", "--network", name, IMAGE)',
+        'docker("run", "--rm", "--network", "none", "--network", "bridge", IMAGE)',
+        'docker("run", "--rm", "--network=none", "--network=bridge", IMAGE)',
         'docker("run", "--rm", "--net", "none", IMAGE)',
         'docker("run", "--rm", IMAGE, "--help", "--network", "none")',
+        'docker("run", "--privileged", IMAGE, "--network", "none")',
+        'docker("run", "-P", IMAGE, "--network", "none")',
+        'docker("run", "--network", "none", "-p", "127.0.0.1:1:8000", IMAGE)',
+        'docker("run", "--network", "none", "--privileged", IMAGE)',
+        'docker("run", "--network", "none", "--cap-add", "NET_ADMIN", IMAGE)',
+        'docker("run", "--network", "none", "--some-new-flag", IMAGE)',
+        'docker("container", "run", "--rm", IMAGE)',
+        'docker("container", "create", IMAGE)',
+        'docker("create", IMAGE)',
         'command = ["docker", "run", "-d", "-p", "127.0.0.1:1:8000", IMAGE]',
         'command = ["run", "-d", "--name", name, IMAGE]',
+        'command = ["docker", "run", "--network", "none", *options, IMAGE]',
         'OPTS = ["--read-only"]\ndocker("run", "--rm", *OPTS, IMAGE)',
+        'docker("run", "--rm", *options, "--network", "none", IMAGE)',
         'subprocess.run(["docker", "compose", "-f", "x.yml", "run", "antifaz"])',
+        'stack.compose("run", "--rm", "antifaz")',
+        'compose("run", "antifaz", "doctor")',
+        'subprocess.run("docker run --rm antifaz:local", shell=True)',
+        "subprocess.run(command, shell=True)",
+        'os.system("docker run --rm antifaz:local")',
+        'SCRIPT = "docker create antifaz:local"',
+        'x = f"docker container run {IMAGE}"',
+        'x = "docker compose run antifaz"',
     ],
 )
-def test_the_check_finds_a_docker_run_with_a_network(source: str) -> None:
-    assert docker_runs_without_network(source) != []
+def test_the_check_finds_a_container_started_with_a_network(source: str) -> None:
+    assert docker_run_problems(source) != []
 
 
 @pytest.mark.parametrize(
@@ -167,29 +190,91 @@ def test_the_check_finds_a_docker_run_with_a_network(source: str) -> None:
     [
         'docker("run", "--rm", "--network", "none", IMAGE, "--help")',
         'docker("run", "--rm", "--network=none", IMAGE)',
+        'docker("run", "--rm", "--network", "none", IMAGE, "--network", "bridge")',  # the command's
         'HARDENED = ["--read-only"]\nHARDENED += ["--network", "none"]\n'
         'docker("run", "--rm", *HARDENED, IMAGE)',
+        # After --network none, a list this check cannot read is checked at run time by docker().
+        'docker("run", "--rm", "--network", "none", *options, IMAGE)',
         'command = ["docker", "run", "-d", "--network", "none", IMAGE]',
         'docker("exec", name, "python", "-c", "x")',
         'docker("image", "inspect", IMAGE)',
         "docker(*command)",
         'stack.compose("exec", "-T", "antifaz", "python")',
+        'compose("up", "-d", "--wait")',
+        "subprocess.run(command, shell=False)",
+        '"""A docstring may say `docker run --rm IMAGE`."""',
+        'def f():\n    """`docker run` the image."""',
     ],
 )
 def test_the_check_lets_a_run_without_network_and_other_commands_through(source: str) -> None:
-    assert docker_runs_without_network(source) == []
+    assert docker_run_problems(source) == []
 
 
 def test_the_check_resolves_lists_imported_from_another_module() -> None:
     source = 'docker("run", "--rm", *HARDENED, IMAGE)'
-    assert docker_runs_without_network(source) != []
-    assert docker_runs_without_network(source, _known_lists()) == []
+    assert docker_run_problems(source) != []
+    assert docker_run_problems(source, _known_lists()) == []
 
 
 def test_the_check_finds_the_run_this_pr_fixed() -> None:
     """test_compose.py before this change: `python -m pip` ran with the default network."""
     source = 'found = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", module)'
-    assert len(docker_runs_without_network(source)) == 1
+    assert len(docker_run_problems(source)) == 1
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("run", "--rm", "antifaz:local"),
+        ("run", "--rm", "--network", "bridge", "antifaz:local"),
+        ("run", "--network", "none", "--network", "host", "antifaz:local"),
+        ("run", "--network", "none", "-p", "127.0.0.1:1:8000", "antifaz:local"),
+        ("create", "antifaz:local"),
+        ("container", "run", "antifaz:local"),
+        ("compose", "-f", "x.yml", "run", "antifaz"),
+    ],
+)
+def test_the_docker_helper_refuses_a_run_with_a_network_before_calling_docker(
+    argv: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run-time half: the e2e `docker()` helper checks the real argument list."""
+    import subprocess
+
+    from tests.e2e import conftest
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("docker was called")
+
+    monkeypatch.setattr(subprocess, "run", never)
+    with pytest.raises(AssertionError, match="refused"):
+        conftest.docker(*argv)
+
+
+def test_the_docker_helper_lets_a_run_without_network_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    from tests.e2e import conftest
+
+    calls: list[object] = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    conftest.docker("run", "--rm", "--network", "none", "-e", "X", "antifaz:local", "--help")
+    conftest.docker("inspect", "x")
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["run", "--rm", "--network", "none", "antifaz:local"],
+        ["docker", "run", "--network=none", "-d", "--name", "x", "antifaz:local", "-p", "1"],
+        ["exec", "x", "python"],
+        ["compose", "up", "-d"],
+    ],
+)
+def test_run_problems_accepts_real_argument_lists(argv: list[str]) -> None:
+    assert run_problems(argv) == []
 
 
 # --- Only the relay has a way out in the e2e Compose files ------------------------------------

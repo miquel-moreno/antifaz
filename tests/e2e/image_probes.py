@@ -399,8 +399,10 @@ def python_in(
     timeout: float = 120,
 ) -> subprocess.CompletedProcess[str]:
     """`docker run` the image's python with `-c script args...` (never a shell)."""
-    run = ["run", "--rm", *HARDENED, *options, "--entrypoint", "python", image, "-c", script]
-    return docker(*run, *args, env=env, timeout=timeout)
+    return docker(
+        "run", "--rm", *HARDENED, *options, "--entrypoint", "python", image, "-c", script, *args,
+        env=env, timeout=timeout,
+    )  # fmt: skip
 
 
 def python_in_image(
