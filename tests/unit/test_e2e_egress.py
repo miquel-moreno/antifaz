@@ -1,13 +1,28 @@
-"""The e2e stack refuses to start unless both providers point at the fake one (tests/e2e/egress.py).
+"""The e2e tests can never reach a real provider (tests/e2e/egress.py).
 
 The guard reads the throwaway env file the e2e fixture writes: if a provider base URL could
 reach a real provider (missing, another host, https, a user part that hides the real host...),
-the session stops before Compose starts.
+the session stops before Compose starts. And, statically: every `docker run` in tests/e2e uses
+`--network none`, and in the Compose files only the relay is on a network with a way out.
 """
 
-import pytest
+from pathlib import Path
+from typing import Any
 
-from tests.e2e.egress import UPSTREAM_VARS, read_env, upstream_problems
+import pytest
+import yaml
+
+from tests.e2e.egress import (
+    INTERNAL_NETWORK,
+    UPSTREAM_VARS,
+    docker_runs_without_network,
+    module_lists,
+    read_env,
+    upstream_problems,
+)
+
+REPO = Path(__file__).resolve().parents[2]
+E2E = REPO / "tests" / "e2e"
 
 FAKE_OPENAI = "http://fake-upstream:9000/v1"
 FAKE_ANTHROPIC = "http://fake-upstream:9000"
@@ -100,9 +115,113 @@ def test_the_guard_reads_the_file_the_e2e_fixture_writes() -> None:
     """The real fixture's lines: what conftest.py writes passes the guard."""
     from tests.e2e import conftest
 
-    assert (
-        upstream_problems(
-            read_env(conftest.env_text({"gateway": "a", "openai": "b", "anthropic": "c"}))
-        )
-        == []
-    )
+    text = conftest.env_text({"gateway": "a", "openai": "b", "anthropic": "c"})
+    assert upstream_problems(read_env(text)) == []
+
+
+# --- Every docker run in tests/e2e has no network ---------------------------------------------
+
+
+def _known_lists() -> dict[str, Any]:
+    return module_lists((E2E / "image_probes.py").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("path", sorted(E2E.glob("*.py")), ids=lambda p: p.name)
+def test_every_docker_run_in_the_e2e_tests_has_no_network(path: Path) -> None:
+    source = path.read_text(encoding="utf-8")
+    assert docker_runs_without_network(source, _known_lists()) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", "pip")',
+        'docker("run", "--rm", "--network", "bridge", IMAGE)',
+        'docker("run", "--rm", "--network", "host", IMAGE)',
+        'docker("run", "--rm", "--net", "none", IMAGE)',
+        'docker("run", "--rm", IMAGE, "--help", "--network", "none")',
+        'command = ["docker", "run", "-d", "-p", "127.0.0.1:1:8000", IMAGE]',
+        'command = ["run", "-d", "--name", name, IMAGE]',
+        'OPTS = ["--read-only"]\ndocker("run", "--rm", *OPTS, IMAGE)',
+        'subprocess.run(["docker", "compose", "-f", "x.yml", "run", "antifaz"])',
+    ],
+)
+def test_the_check_finds_a_docker_run_with_a_network(source: str) -> None:
+    assert docker_runs_without_network(source) != []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'docker("run", "--rm", "--network", "none", IMAGE, "--help")',
+        'docker("run", "--rm", "--network=none", IMAGE)',
+        'HARDENED = ["--read-only"]\nHARDENED += ["--network", "none"]\n'
+        'docker("run", "--rm", *HARDENED, IMAGE)',
+        'command = ["docker", "run", "-d", "--network", "none", IMAGE]',
+        'docker("exec", name, "python", "-c", "x")',
+        'docker("image", "inspect", IMAGE)',
+        "docker(*command)",
+        'stack.compose("exec", "-T", "antifaz", "python")',
+    ],
+)
+def test_the_check_lets_a_run_without_network_and_other_commands_through(source: str) -> None:
+    assert docker_runs_without_network(source) == []
+
+
+def test_the_check_resolves_lists_imported_from_another_module() -> None:
+    source = 'docker("run", "--rm", *HARDENED, IMAGE)'
+    assert docker_runs_without_network(source) != []
+    assert docker_runs_without_network(source, _known_lists()) == []
+
+
+def test_the_check_finds_the_run_this_pr_fixed() -> None:
+    """test_compose.py before this change: `python -m pip` ran with the default network."""
+    source = 'found = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", module)'
+    assert len(docker_runs_without_network(source)) == 1
+
+
+# --- Only the relay has a way out in the e2e Compose files ------------------------------------
+
+
+def _compose(name: str) -> dict[str, Any]:
+    data: dict[str, Any] = yaml.safe_load((E2E / name).read_text(encoding="utf-8"))
+    return data
+
+
+def test_the_internal_network_has_no_way_out() -> None:
+    networks = _compose("docker-compose.no-egress.yml")["networks"]
+    assert networks[INTERNAL_NETWORK] == {"internal": True}
+
+
+def test_the_gateway_and_the_fake_provider_are_only_on_the_internal_network() -> None:
+    gateway = _compose("docker-compose.no-egress.yml")["services"]["antifaz"]
+    fake = _compose("docker-compose.e2e.yml")["services"]["fake-upstream"]
+    assert gateway["networks"] == [INTERNAL_NETWORK]
+    assert fake["networks"] == [INTERNAL_NETWORK]
+    assert "ports" not in fake
+
+
+def test_the_relay_publishes_on_127_0_0_1_only_and_keeps_the_hardening() -> None:
+    relays = [
+        _compose(name)["services"]["relay"]
+        for name in ("docker-compose.no-egress.yml", "docker-compose.e2e.yml")
+    ]
+    ports = [port for relay in relays for port in relay["ports"]]
+    assert len(ports) == 2
+    assert all(port.startswith("127.0.0.1:") for port in ports)
+    relay = relays[0]
+    assert relay["read_only"] is True
+    assert relay["cap_drop"] == ["ALL"]
+    assert relay["security_opt"] == ["no-new-privileges:true"]
+    assert sorted(relay["networks"]) == ["e2e-edge", INTERNAL_NETWORK]
+
+
+def test_the_e2e_fixtures_use_the_no_egress_file() -> None:
+    from tests.e2e import conftest
+
+    no_egress = E2E / "docker-compose.no-egress.yml"
+    assert no_egress in conftest.NO_EGRESS_FILES
+    assert conftest.COMPOSE_FILES[: len(conftest.NO_EGRESS_FILES)] == conftest.NO_EGRESS_FILES
+    cli = (E2E / "test_image_cli.py").read_text(encoding="utf-8")
+    assert "BASE_FILES" not in cli
+    assert "NO_EGRESS_FILES" in cli
