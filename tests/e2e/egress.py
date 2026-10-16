@@ -129,18 +129,17 @@ def read_env(text: str) -> dict[str, str]:
 
 
 def _is_fake_upstream(url: str) -> bool:
-    parts = urlsplit(url)
-    try:
-        port = parts.port
-    except ValueError:
+    # Visible ASCII only: urlsplit silently drops tabs and newlines, so "fake-up\tstream" would
+    # read as the fake host. No query and no fragment ("#@api.openai.com" hides a host).
+    if not url or any(not 0x21 <= ord(char) <= 0x7E for char in url):
         return False
+    if "?" in url or "#" in url:
+        return False
+    parts = urlsplit(url)
+    # The whole authority, exactly: no user part, the port written as 9000 (not 09000).
     return (
-        url == url.strip()
-        and parts.scheme == "http"
-        and parts.username is None
-        and parts.password is None
-        and parts.hostname == FAKE_UPSTREAM_HOST
-        and port == FAKE_UPSTREAM_PORT
+        parts.scheme == "http"
+        and parts.netloc.lower() == f"{FAKE_UPSTREAM_HOST}:{FAKE_UPSTREAM_PORT}"
     )
 
 

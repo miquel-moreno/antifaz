@@ -73,6 +73,18 @@ def test_any_path_on_the_fake_provider_passes(url: str) -> None:
         "fake-upstream:9000",
         "http://fake-upstream:notaport",
         " http://fake-upstream:9000",
+        "http://fake-up\tstream:9000",  # urlsplit drops tabs: it would read fake-upstream
+        "http://fake-upstream:9000/v1\n",
+        "http://fake-upstream:9000/v\r1",
+        "http://fake-upstream:9000/v 1",
+        "http://fäke-upstream:9000",
+        "http://fake-upstream:9000#@api.openai.com",
+        "http://fake-upstream:9000/v1#x",
+        "http://fake-upstream:9000/v1?x=1",
+        "http://fake-upstream:9000?",
+        "http://fake-upstream:09000",
+        "http://fake-upstream:9000:9000",
+        "http://[::1]:9000",
     ],
 )
 def test_a_url_that_is_not_the_fake_provider_is_refused(url: str) -> None:
