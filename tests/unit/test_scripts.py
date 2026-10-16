@@ -1,6 +1,8 @@
-"""The CI helper scripts: license rule and privacy-coverage rule."""
+"""The CI helper scripts: license rule, privacy-coverage rule and the design-check server."""
 
+import http.client
 import subprocess
+from collections.abc import Iterator
 from importlib import metadata
 from pathlib import Path
 
@@ -136,6 +138,24 @@ def test_every_package_only_the_extras_bring_has_a_recorded_license() -> None:
     assert with_extras - without <= set(check_licenses.RECORDED_EXTRA)
 
 
+def test_the_extra_record_holds_only_packages_that_only_the_extras_bring() -> None:
+    """A package that also ships without the extras is checked from its installed metadata:
+    a stale record would hide what its metadata says now."""
+    with_extras = {name for name, _ in check_licenses.runtime_dependencies()}
+    without = {name for name, _ in check_licenses.runtime_dependencies(extras=False)}
+
+    assert set(check_licenses.RECORDED_EXTRA) <= with_extras - without
+
+
+def test_jinja2_ships_without_any_extra() -> None:
+    """The panel's templates (ADR-0018): Jinja2 and MarkupSafe are direct runtime packages."""
+    without = {name for name, _ in check_licenses.runtime_dependencies(extras=False)}
+
+    assert {"jinja2", "markupsafe"} <= without
+    assert classify(check_licenses.license_texts("jinja2")) is Verdict.OK
+    assert classify(check_licenses.license_texts("markupsafe")) is Verdict.OK
+
+
 def test_recorded_licenses_match_the_installed_metadata() -> None:
     """Where the extra is installed, what was recorded by hand must say the same."""
     checked = 0
@@ -201,3 +221,67 @@ def test_a_forbidden_license_in_the_bench_group_fails_the_check(
 
     assert check_licenses.main() == 1
     assert "es-core-news-sm" in capsys.readouterr().err
+
+
+# --- The local server of make design-check (scripts/design_server.py) -------------------------
+
+SENTINEL = b"sentinel-outside-the-allowed-folders"
+
+
+@pytest.fixture
+def design_server(tmp_path: Path) -> Iterator[tuple[str, int]]:
+    from scripts.design_server import serve
+
+    (tmp_path / "design").mkdir()
+    (tmp_path / "design" / "ok.txt").write_bytes(b"inside")
+    (tmp_path / "docs" / "images").mkdir(parents=True)
+    (tmp_path / "outside-secret.txt").write_bytes(SENTINEL)
+    (tmp_path / "designx").mkdir()
+    (tmp_path / "designx" / "outside-secret.txt").write_bytes(SENTINEL)
+    server, _ = serve(tmp_path, ("/design/", "/docs/images/"))
+    try:
+        yield "127.0.0.1", server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _raw(address: tuple[str, int], method: str, path: str) -> tuple[int, bytes]:
+    connection = http.client.HTTPConnection(*address, timeout=10)
+    try:
+        connection.putrequest(method, path, skip_accept_encoding=True)
+        connection.endheaders()
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+def test_the_design_server_serves_the_allowed_folders(design_server: tuple[str, int]) -> None:
+    assert _raw(design_server, "GET", "/design/ok.txt") == (200, b"inside")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/design/../outside-secret.txt",
+        "/design/%2e%2e/outside-secret.txt",
+        "/design/%2E%2E%2Foutside-secret.txt",
+        "/docs/images/..%2f..%2foutside-secret.txt",
+        "/design/..%5coutside-secret.txt",
+        "/design/..\\outside-secret.txt",
+        "/design/./../designx/outside-secret.txt",
+        "/designx/outside-secret.txt",
+        "/outside-secret.txt",
+        "//outside-secret.txt",
+        "/design/%252e%252e/outside-secret.txt",
+    ],
+)
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_the_design_server_never_leaves_the_allowed_folders(
+    design_server: tuple[str, int], path: str, method: str
+) -> None:
+    status, body = _raw(design_server, method, path)
+
+    assert status in (403, 404), (method, path, status)
+    assert SENTINEL not in body

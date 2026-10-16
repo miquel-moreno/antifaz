@@ -17,6 +17,8 @@ Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que
 | Paquete | Licencia | Para qué |
 |---|---|---|
 | anyio | MIT | Ya venía con Starlette y httpx; se declara porque el streaming (parte 5c) la usa directamente para cerrar la conexión con el proveedor aunque el cliente se vaya (`CancelScope(shield=True)`). |
+| jinja2 | BSD-3-Clause (sus metadatos: «BSD License») | Plantillas del panel (ADR-0018, PR 11c-1), con autoescape. Versión 3.1.6 en `uv.lock`. Antes solo llegaba con el extra `ner` (por torch); ahora es directa y se distribuye siempre, así que sale de `RECORDED_EXTRA` y se comprueba con sus metadatos instalados. |
+| markupsafe | BSD-3-Clause | Llega con jinja2 (el escape de las plantillas). Versión 3.0.3 en `uv.lock`. Igual que jinja2: ya no es solo del extra `ner`. |
 
 ## Solo para desarrollo: los SDK oficiales de los tests de contrato
 
@@ -72,7 +74,6 @@ axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, 
 | tqdm | 4.70.1 | MPL-2.0 AND MIT | gliner, transformers (ver copyleft débil) |
 | sympy, mpmath | 1.14.0, 1.3.0 | BSD | torch |
 | networkx | 3.7 | BSD-3-Clause | torch |
-| jinja2, markupsafe | 3.1.6, 3.0.3 | BSD | torch |
 | fsspec, filelock | 2026.9.0, 4.0.6 | BSD-3-Clause, MIT | torch, huggingface-hub |
 | setuptools | 84.0.0 | MIT | torch |
 | typer, rich, shellingham, markdown-it-py, mdurl, pygments, colorama | — | MIT, MIT, ISC, MIT, MIT, BSD-2-Clause, BSD | huggingface-hub (su línea de comandos) |
@@ -142,12 +143,12 @@ Antifaz no importa ninguno de esos dos módulos: comprobado el 2026-10-01 import
 
 ## Tipos de letra del panel
 
-El panel (v0.2) lleva sus dos tipos de letra dentro, en `design/fonts/`, para no pedir nada a terceros (nada de Google Fonts). Son los archivos `woff2` variables oficiales, **sin modificar**, con su licencia al lado. La SIL Open Font License 1.1 permite incluirlos y redistribuirlos con software, también comercial, siempre que vayan con su licencia y no se vendan solos. No son paquetes de Python, así que `scripts/check_licenses.py` no los ve: se anotan aquí a mano. Descargados y comprobados el 2026-10-06:
+El panel (v0.2) lleva sus dos tipos de letra dentro, en `src/antifaz/web/static/` (hasta el PR 11c-1, en `design/fonts/`), para no pedir nada a terceros (nada de Google Fonts). Son los archivos `woff2` variables oficiales, **sin modificar**, con su licencia al lado. La SIL Open Font License 1.1 permite incluirlos y redistribuirlos con software, también comercial, siempre que vayan con su licencia y no se vendan solos. No son paquetes de Python, así que `scripts/check_licenses.py` no los ve: se anotan aquí a mano. Van en la rueda y en la imagen, cada `woff2` con su texto OFL al lado (un test construye la rueda y lo comprueba, y otro mira la imagen en `make e2e`); el panel sirve las fuentes pero nunca los textos de licencia. Descargados y comprobados el 2026-10-06:
 
 | Tipo de letra | Versión | Licencia | Archivo | Fuente | SHA-256 del woff2 |
 |---|---|---|---|---|---|
-| Inter | 4.1 | OFL-1.1 (`design/fonts/Inter-OFL.txt`) | `design/fonts/InterVariable.woff2` (352 240 B) | [rsms/inter, release v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | `693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3` |
-| Geist Mono | 1.7.2 | OFL-1.1 (`design/fonts/GeistMono-OFL.txt`) | `design/fonts/GeistMono-Variable.woff2` (71 368 B; en el zip, `GeistMono[wght].woff2`) | [vercel/geist-font, release v1.7.2](https://github.com/vercel/geist-font/releases/tag/v1.7.2) | `fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab` |
+| Inter | 4.1 | OFL-1.1 (`src/antifaz/web/static/Inter-OFL.txt`) | `src/antifaz/web/static/InterVariable.woff2` (352 240 B) | [rsms/inter, release v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | `693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3` |
+| Geist Mono | 1.7.2 | OFL-1.1 (`src/antifaz/web/static/GeistMono-OFL.txt`) | `src/antifaz/web/static/GeistMono-Variable.woff2` (71 368 B; en el zip, `GeistMono[wght].woff2`) | [vercel/geist-font, release v1.7.2](https://github.com/vercel/geist-font/releases/tag/v1.7.2) | `fba8f577f38a2bbcbe818efa6348dd58f36303a10b8737c42fefad275be563ab` |
 
 Ninguna de las dos licencias declara un «Reserved Font Name». El resto de detalles (zips de origen y sus SHA-256) están en `design/README.md`.
 

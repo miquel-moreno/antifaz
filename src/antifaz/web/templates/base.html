@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+{% block meta %}{% endblock %}
+<title>{% block title %}{% endblock %} · Antifaz</title>
+<link rel="icon" href="{{ static['logo.svg'] }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ static['fonts.css'] }}">
+<link rel="stylesheet" href="{{ static['tokens.css'] }}">
+<link rel="stylesheet" href="{{ static['panel.css'] }}">
+</head>
+<body>
+<div class="ambient" aria-hidden="true"><span class="ambient-blob is-1"></span><span class="ambient-blob is-2"></span><span class="ambient-blob is-3"></span></div>
+<a class="skip" href="#main">Saltar al contenido</a>
+<div class="page">
+{% block body %}{% endblock %}
+</div>
+</body>
+</html>

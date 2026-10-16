@@ -23,7 +23,8 @@ import antifaz.web
 
 WEB = Path(antifaz.web.__file__).parent
 SOURCES = sorted(WEB.rglob("*.py"))
-# The door's pure pieces (11b-1 and 11b-2a): no framework, no third-party code.
+# The door's pure pieces (11b-1, 11b-2a and the static manifest of 11c-1): no framework, no
+# third-party code.
 PURE = (
     "forwarded.py",
     "sessions.py",
@@ -32,7 +33,12 @@ PURE = (
     "headers.py",
     "pages.py",
     "csrf.py",
+    "assets.py",
 )
+# The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
+# FastAPI, no other project module).
+TEMPLATING = "templating.py"
+TEMPLATING_THIRD_PARTY = {"jinja2"}
 SHARED_RULE = Path(antifaz.trusted_networks.__file__)
 # A pure piece may use another pure piece (each is checked here itself).
 ALLOWED_OWN_MODULES = {"antifaz.trusted_networks", *(f"antifaz.web.{n[:-3]}" for n in PURE)}
@@ -66,7 +72,7 @@ def _calls_to(tree: ast.Module, name: str) -> list[ast.Call]:
 
 def test_there_is_code_to_check() -> None:
     names = {path.name for path in SOURCES}
-    assert {"__init__.py", "door.py", "routes.py", *PURE} <= names
+    assert {"__init__.py", "door.py", "routes.py", TEMPLATING, *PURE} <= names
 
 
 def test_the_web_package_never_touches_a_secret_by_name() -> None:
@@ -106,6 +112,16 @@ def test_the_pure_pieces_import_only_the_standard_library() -> None:
                 assert path != SHARED_RULE
                 continue
             assert module.split(".")[0] in sys.stdlib_module_names, (path.name, module)
+
+
+def test_the_templates_import_only_jinja2_the_stdlib_and_the_pure_pieces() -> None:
+    modules = _imports(_tree(WEB / TEMPLATING))
+    assert any(module.split(".")[0] == "jinja2" for module in modules)  # not an empty pass
+    for module in modules:
+        if module in ALLOWED_OWN_MODULES or module.rsplit(".", 1)[0] in ALLOWED_OWN_MODULES:
+            continue
+        top = module.split(".")[0]
+        assert top in sys.stdlib_module_names or top in TEMPLATING_THIRD_PARTY, module
 
 
 def test_the_guard_itself_catches_what_it_forbids() -> None:

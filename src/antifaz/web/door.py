@@ -6,7 +6,9 @@ key does not open the panel. In this order:
 
 1. Every answer of /panel*, errors included, gets the security headers (headers.py). An
    unexpected error inside gets a fixed 500 JSON with them, if nothing was sent yet, and is
-   raised again so the server still logs it once.
+   raised again so the server still logs it once. Cache-Control is decided here, per answer:
+   `no-store` for everything, except a 200 of a public static file (step 4), which gets
+   `public, max-age=31536000, immutable`. Errors under /panel/static/ stay `no-store`.
 2. HTTPS or localhost: the scheme is scope["scheme"], or X-Forwarded-Proto from a trusted
    proxy (forwarded.effective_scheme); "localhost" is decided by the Host header. Plain HTTP
    from any other host gets a fixed 403 page and goes no further (no login, no cookie).
@@ -21,7 +23,11 @@ key does not open the panel. In this order:
 4. The public routes, exact (path, method), served without a session: GET /panel/login and
    the routes of CSRF_TOKEN_EXEMPT, the only ones that skip (b) and (c). That list holds only
    POST /panel/login (it has no session yet), and PUBLIC_ROUTES is built from it, so no other
-   route that is not safe can ever skip the token.
+   route that is not safe can ever skip the token. And the static files (11c-1): only GET, and
+   only a path that is exactly one of the manifest (assets.py), /panel/static/<name>.<hash>.ext.
+   Any other name under /panel/static/ (the plain name, a licence text, a trick) is not public
+   and follows step 5: 401 without a session, the route's 404 with one. A public static
+   request never looks the session up.
 5. Anything else needs a live session of the request's scheme, read from the cookie of that
    scheme only (cookies.py) and bound to it in the store (a session made over the other scheme
    is closed, sessions.py). It is looked up WITHOUT counting a use (peek). Without one, GET
@@ -57,10 +63,11 @@ from antifaz.http_errors import (
     error_response,
 )
 from antifaz.routing import route_path
+from antifaz.web.assets import Assets
 from antifaz.web.cookies import read_session_cookie, session_scheme
 from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
-from antifaz.web.headers import with_security_headers
+from antifaz.web.headers import IMMUTABLE, NO_STORE, with_security_headers
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.sessions import Session, SessionStore
@@ -71,7 +78,7 @@ SAFE_METHODS = frozenset({"GET", "HEAD"})
 # login, ever: a test walks every registered route to keep it so.
 CSRF_TOKEN_EXEMPT = frozenset({("/panel/login", "POST")})
 # Served without a session: the login page, and the exempt routes. Exact pairs: "/panel/login/"
-# or HEAD need a session.
+# or HEAD need a session. The static files have their own rule (is_public_static).
 PUBLIC_ROUTES = frozenset({("/panel/login", "GET")}) | CSRF_TOKEN_EXEMPT
 LOGIN_PATH = "/panel/login"
 CONTEXT_KEY = "antifaz.panel"
@@ -85,6 +92,7 @@ class PanelState:
     trusted_proxies: tuple[IPNetwork, ...]
     sessions: SessionStore
     limiter: FailureLimiter
+    assets: Assets  # the static files' manifest: its exact paths are the public ones
 
 
 @dataclass(frozen=True)
@@ -97,6 +105,11 @@ class PanelContext:
     session: Session | None = None  # set only on the routes that need a session
 
 
+def is_public_static(path: str, method: str, assets: Assets) -> bool:
+    """GET of exactly a manifest path: the only static request served without a session."""
+    return method == "GET" and path in assets.paths
+
+
 def panel_context(scope: Scope) -> PanelContext:
     """What the door decided. Without it (a route reached some other way), 401: fail closed."""
     context = scope.get("state", {}).get(CONTEXT_KEY)
@@ -106,16 +119,21 @@ def panel_context(scope: Scope) -> PanelContext:
 
 
 class _SecuredSend:
-    """`send` with the security headers on the response start; remembers if it started."""
+    """`send` with the security headers on the response start; remembers if it started.
+
+    The door sets `cacheable` once a request is a public static file: only then, and only for
+    a 200, Cache-Control is IMMUTABLE. Every other answer gets NO_STORE."""
 
     def __init__(self, send: Send) -> None:
         self._send = send
         self.started = False
+        self.cacheable = False
 
     async def __call__(self, message: Message) -> None:
         if message["type"] == "http.response.start":
             self.started = True
-            headers = with_security_headers(message.get("headers", []))
+            cache = IMMUTABLE if self.cacheable and message["status"] == 200 else NO_STORE
+            headers = with_security_headers(message.get("headers", []), cache)
             message = {**message, "headers": headers}
         await self._send(message)
 
@@ -134,7 +152,7 @@ class PanelDoor:
                 await error_response(PanelInternalError())(scope, receive, secured)
             raise  # the server logs it once; nothing more is sent (the response started)
 
-    async def _handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def _handle(self, scope: Scope, receive: Receive, send: _SecuredSend) -> None:
         path = route_path(scope)
         method = scope["method"]
         headers = scope["headers"]
@@ -149,7 +167,9 @@ class PanelDoor:
             await error_response(CsrfRejectedError())(scope, receive, send)
             return
         context = PanelContext(scheme, host, read_session_cookie(headers, scheme))
-        if (path, method) not in PUBLIC_ROUTES:
+        if is_public_static(path, method, self._state.assets):
+            send.cacheable = True  # a 200 of it may be kept; the session is never looked up
+        elif (path, method) not in PUBLIC_ROUTES:
             # From peek() to touch(), plain code: the answer is sent only afterwards.
             sessions = self._state.sessions
             session = None

@@ -47,9 +47,11 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
 
     antifaz.web is imported only here, so without the token nothing of the panel is loaded. The
     panel gets a PanelState and nothing else: the token's SHA-256, never the token or settings.
+    Its static files are read, checked and hashed here, once (AssetError stops the startup).
     """
     if settings.admin_token is None:
         return None
+    from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelDoor, PanelState
     from antifaz.web.forwarded import parse_networks
     from antifaz.web.login_limit import FailureLimiter
@@ -62,6 +64,7 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
         trusted_proxies=parse_networks(settings.trusted_proxies),
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
+        assets=load_assets(),
     )
     app.include_router(build_router(state))
     return functools.partial(PanelDoor, state=state)

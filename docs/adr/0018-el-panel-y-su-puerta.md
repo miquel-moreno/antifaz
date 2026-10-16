@@ -132,6 +132,13 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 
 **Nota (2026-10-14, PR 11b-2b).** La sesión guarda el esquema con el que se creó; si se presenta por el otro esquema, se rechaza y se borra (motivo `scheme_mismatch`). El nombre de la cookie ya separaba los esquemas; esto cubre que alguien copie el id a mano de uno a otro. El CSRF se comprueba en la puerta para todo lo que no es GET o HEAD; la única excepción a la capa del token es el login, que conserva origen + JSON.
 
+**Nota (2026-10-16, PR 11c-1).** Concreta cuatro puntos, sin cambiar la decisión:
+
+- **La ruta pública de los estáticos** es `GET` y solo `GET` de una ruta que es **exactamente** una del manifiesto (`/panel/static/<nombre>.<12 hex del SHA-256>.<ext>`, `web/assets.py`). Cualquier otro nombre bajo `/panel/static/` (sin hash, una licencia OFL, un truco de ruta) no es público y sigue la regla general: 401 sin sesión y 404 con ella. Los archivos se leen una vez al arrancar y se sirven desde memoria, por nombre exacto; solo `.css`, `.js`, `.woff2` y `.svg`, con su `Content-Type` fijo.
+- **`Cache-Control` se decide por respuesta, en la puerta**: `public, max-age=31536000, immutable` solo para un 200 de un archivo del manifiesto; `no-store` para todo lo demás, también los errores bajo `/panel/static/`.
+- **Los archivos de diseño tienen un solo sitio, el paquete** (decisión de Miquel): `tokens.css`, `fonts.css`, las fuentes y sus licencias OFL viven en `src/antifaz/web/static/`, y el prototipo los carga desde ahí. El logo sigue en `docs/images/logo.svg` y el paquete lleva una copia idéntica (con test) para el favicon.
+- **«Comprobar ahora» pasa a 11e.** En 11c, la tarjeta «Estado» dirá «Desde la terminal: `antifaz doctor --providers`»; el botón que hace la misma comprobación desde el panel llega con 11e.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.

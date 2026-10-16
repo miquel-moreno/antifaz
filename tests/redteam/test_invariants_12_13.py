@@ -228,6 +228,9 @@ def test_local_routes_never_call_a_provider(
 # of these on purpose.
 PANEL_PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
 PANEL_SESSION_ROUTES = frozenset({("/panel", "GET"), ("/panel/logout", "POST")})
+# 11c-1: public only for GET and only for the exact paths of the manifest (the door's rule);
+# any other name under it follows the general rule (a session).
+PANEL_STATIC_ROUTES = frozenset({("/panel/static/{name}", "GET")})
 
 
 def _all_pairs(client: TestClient) -> set[tuple[str, str]]:
@@ -251,13 +254,44 @@ def test_with_the_panel_every_route_is_in_exactly_one_door() -> None:
             LOCAL_ROUTES,
             PANEL_PUBLIC_ROUTES,
             PANEL_SESSION_ROUTES,
+            PANEL_STATIC_ROUTES,
         )
 
         assert set().union(*classes) == pairs
         assert sum(len(c) for c in classes) == len(pairs)
         panel = {pair for pair in pairs if is_panel_path(pair[0])}
-        assert panel == PANEL_PUBLIC_ROUTES | PANEL_SESSION_ROUTES
+        assert panel == PANEL_PUBLIC_ROUTES | PANEL_SESSION_ROUTES | PANEL_STATIC_ROUTES
         assert frozenset(PUBLIC_ROUTES) == PANEL_PUBLIC_ROUTES  # the door's own list
+
+
+def test_the_static_rule_opens_only_get_on_the_exact_manifest_paths() -> None:
+    from antifaz.web.assets import STATIC_PREFIX, load_assets
+    from antifaz.web.door import is_public_static
+
+    assets = load_assets()
+    assert STATIC_PREFIX == "/panel/static/"
+    for path in assets.paths:
+        assert is_public_static(path, "GET", assets)
+        for method in METHODS:
+            if method != "GET":
+                assert not is_public_static(path, method, assets), method
+        assert not is_public_static(path + "/", "GET", assets)
+        assert not is_public_static(path.upper(), "GET", assets)
+    for path in ("/panel/static/", "/panel/static/panel.css", "/panel/static/Inter-OFL.txt"):
+        assert not is_public_static(path, "GET", assets), path
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_static_names_outside_the_manifest_with_the_api_key_never_answer(method: str) -> None:
+    auth = {**AUTH, "x-api-key": GATEWAY_KEY}
+    names = ["panel.css", "Inter-OFL.txt", "InterVariable.woff2", "__init__.py", "x"]
+    for client in clients(HTTPS_URL):
+        for name in names:
+            for alias in _panel_aliases(f"/panel/static/{name}"):
+                response = client.request(method, alias, headers=auth)
+
+                assert not response.is_success, (method, alias)
+                assert "set-cookie" not in response.headers
 
 
 def _panel_aliases(path: str) -> list[str]:

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block meta %}<meta name="{{ csrf_meta }}" content="{{ csrf_token }}">
+{% endblock %}
+{% block title %}Panel{% endblock %}
+{% block body %}
+<div class="app-window"><div class="app-shell">
+<div class="app-sidebar"><nav class="app-sidebar-inner" aria-label="Panel">
+<div class="app-brand"><span class="app-wordmark">Antifaz</span></div>
+</nav></div>
+<div class="app-main">
+<main class="app-content" id="main" tabindex="-1">
+<div class="vh"><div>
+<h1>Panel de Antifaz</h1>
+<p>Has entrado. Las vistas del panel llegan con su interfaz (11c-2).</p>
+</div></div>
+</main>
+</div>
+</div></div>
+{% endblock %}

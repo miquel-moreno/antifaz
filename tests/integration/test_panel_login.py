@@ -14,8 +14,10 @@ import sys
 import pytest
 
 from antifaz.api.app import registered_paths
+from antifaz.web.assets import load_assets
 from antifaz.web.headers import SECURITY_HEADERS
-from antifaz.web.pages import HTTPS_ONLY_PAGE, LOGIN_PAGE
+from antifaz.web.pages import HTTPS_ONLY_PAGE
+from antifaz.web.templating import Pages
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream
 from tests.integration.panel_client import (
     HTTPS_URL,
@@ -32,6 +34,7 @@ from tests.integration.panel_client import (
 )
 from tests.redteam.conftest import both_echo, gateway_client, gateway_settings
 
+LOGIN_PAGE = Pages(load_assets()).login
 LOCAL_URLS = [LOCAL_URL, "http://127.0.0.1", "http://[::1]", "http://localhost:8000"]
 
 
@@ -224,7 +227,7 @@ def test_with_the_token_the_panel_routes_are_added() -> None:
     for client in clients(HTTPS_URL):
         paths = registered_paths(client.app)  # type: ignore[arg-type]
 
-        assert {"/panel", "/panel/login"} <= paths
+        assert {"/panel", "/panel/login", "/panel/static/{name}"} <= paths
 
 
 def test_without_the_token_antifaz_web_is_never_imported() -> None:
@@ -258,6 +261,7 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
     from fastapi.testclient import TestClient
 
     from antifaz.api.errors import register_error_handlers
+    from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelState
     from antifaz.web.login_limit import FailureLimiter
     from antifaz.web.routes import build_router
@@ -268,6 +272,7 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
         trusted_proxies=(),
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
+        assets=load_assets(),
     )
     app = FastAPI()
     register_error_handlers(app)

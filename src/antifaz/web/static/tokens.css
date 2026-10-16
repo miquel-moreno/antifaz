@@ -5,7 +5,7 @@
  * Direction (Miquel's brief for the panel redesign, issue #30): an Apple-like, near-monochrome
  * frosted-glass window floating over a very soft ambient light. Indigo only marks three things:
  * the main action, the [[MARKERS]] and the mask itself. Inter (optical sizing) + Geist Mono,
- * both bundled in design/fonts/ (OFL-1.1): nothing is requested from outside.
+ * both bundled next to this file (OFL-1.1): nothing is requested from outside.
  *
  * Values come from the :root of the reference (antifaz-panel-referencia.html). The few that
  * were changed to reach WCAG AA are marked "AA" below; the table with every pair, before and
@@ -131,8 +131,8 @@
 
   /* Type. Inter (variable, optical sizing: titles get its Display cut with
      font-optical-sizing: auto) and Geist Mono for markers, codes and the policy YAML.
-     Both SIL OFL 1.1, served from design/fonts/fonts.css; the fallbacks keep the panel usable
-     if the files do not load. */
+     Both SIL OFL 1.1, served from fonts.css (next to this file); the fallbacks keep the panel
+     usable if the files do not load. */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     system-ui, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", "Cascadia Mono", Menlo,

@@ -4,7 +4,11 @@ The door (door.py) has already checked CSRF for every method that is not GET or 
 and JSON for all of them, and the session's token for all but the login. A route never checks
 CSRF again.
 
-- GET /panel/login: the login page (public).
+- GET /panel/login: the login page (public), rendered from its template once, at startup.
+- GET /panel/static/{name} (11c-1): a static file of the manifest (assets.py), its bytes from
+  memory with its fixed Content-Type. Public only for the exact hashed names (the door's rule);
+  any other name reaches this route only with a session, and gets the same 404 as an unknown
+  route. The door sets Cache-Control (immutable only for a 200 here).
 - POST /panel/login: the admin token as JSON (public; the door checked layer 3 and JSON, and a
   refusal there does not count as a failure). In this order:
   1. (In the door) same origin and JSON, else 403.
@@ -19,7 +23,8 @@ CSRF again.
      token) is one byte-identical 401, and it counts.
   5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
      session bound to the request's scheme is made and the cookie of that scheme is set.
-- GET /panel: a placeholder for the interface of 11c, with the session's CSRF token in a meta.
+- GET /panel: a placeholder for the interface of 11c-2 (templates/panel.html), with the
+  session's CSRF token in a meta.
 - POST /panel/logout: the door let it through with a live session and its CSRF token. The
   session is closed in the store (reason "logout"; its subscribers are told before the answer
   leaves), and the answer is {"ok": true} with exactly one Set-Cookie, the expired cookie of the
@@ -51,13 +56,14 @@ from starlette.requests import ClientDisconnect
 
 from antifaz.http_errors import (
     PanelLoginFailedError,
+    PanelNotFoundError,
     PanelUnauthorizedError,
     TooManyAttemptsError,
 )
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
-from antifaz.web.pages import LOGIN_PAGE, panel_page
+from antifaz.web.templating import Pages
 
 MAX_LOGIN_BODY = 1024
 LOGIN_BODY_SECONDS = 5
@@ -102,12 +108,22 @@ def _fingerprint(token: str) -> bytes:
 
 
 def build_router(state: PanelState) -> APIRouter:
-    """The panel's routes over `state`: the only thing they get from the gateway."""
+    """The panel's routes over `state`: the only thing they get from the gateway. The pages are
+    rendered from the templates here, once (a broken template stops the startup)."""
     router = APIRouter(include_in_schema=False)
+    pages = Pages(state.assets)
 
     @router.get("/panel/login")
     async def login_page() -> HTMLResponse:
-        return HTMLResponse(LOGIN_PAGE)
+        return HTMLResponse(pages.login)
+
+    @router.get("/panel/static/{name}")
+    async def static_file(name: str) -> Response:
+        # An exact lookup in memory: the name is never joined to a folder.
+        asset = state.assets.get(name)
+        if asset is None:
+            raise PanelNotFoundError()
+        return Response(asset.body, headers={"Content-Type": asset.content_type})
 
     @router.post("/panel/login")
     async def login(request: Request) -> Response:
@@ -138,7 +154,7 @@ def build_router(state: PanelState) -> APIRouter:
         session = panel_context(request.scope).session
         if session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
-        return HTMLResponse(panel_page(session.csrf_token))
+        return HTMLResponse(pages.panel(session.csrf_token))
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

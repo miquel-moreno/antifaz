@@ -2,8 +2,10 @@
 
 - is_panel_path(): which paths are the panel's, on the decoded path.
 - cookies.py: the session cookie BY SCHEME (ADR-0018, addendum of 2026-10-13).
-- headers.py: the exact security headers of every /panel* answer.
-- pages.py: the three fixed HTML pages, which the CSP allows (no inline script or style).
+- headers.py: the exact security headers of every /panel* answer, and since 11c-1 the
+  Cache-Control the door picks for each answer (no-store, or immutable for a static file).
+- pages.py: the fixed «Solo HTTPS» page (the other pages are templates since 11c-1:
+  test_web_templating.py).
 - csrf.py: layer 3 (Sec-Fetch-Site and Origin), the JSON content type and, since 11b-2b,
   layer 2 (the X-Antifaz-CSRF token).
 - cookies.py since 11b-2b: the expired cookie of each scheme and the scheme of a session.
@@ -38,9 +40,16 @@ from antifaz.web.cookies import (
     session_scheme,
 )
 from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
-from antifaz.web.headers import CONTENT_SECURITY_POLICY, SECURITY_HEADERS, with_security_headers
-from antifaz.web.pages import CSRF_META, HTTPS_ONLY_PAGE, LOGIN_PAGE, panel_page
+from antifaz.web.headers import (
+    CONTENT_SECURITY_POLICY,
+    IMMUTABLE,
+    NO_STORE,
+    SECURITY_HEADERS,
+    with_security_headers,
+)
+from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.sessions import MAX_AGE_SECONDS
+from tests.html_rules import html_problems
 from tests.integration.fakes import GATEWAY_KEY
 
 SESSION_ID = "s" * 43
@@ -252,43 +261,30 @@ def test_with_security_headers_replaces_the_same_names_and_keeps_the_rest() -> N
     assert len(out) == len(SECURITY_HEADERS) + 1
 
 
+def test_the_cache_control_is_no_store_unless_the_door_says_immutable() -> None:
+    raw = [(b"cache-control", b"public, max-age=60"), (b"content-type", b"text/css")]
+
+    assert (b"cache-control", NO_STORE.encode()) in with_security_headers(raw)
+    immutable = with_security_headers(raw, cache_control=IMMUTABLE)
+    assert [v for k, v in immutable if k == b"cache-control"] == [IMMUTABLE.encode()]
+    assert NO_STORE == "no-store"
+    assert IMMUTABLE == "public, max-age=31536000, immutable"
+    other = {k: v for k, v in immutable if k != b"cache-control"}
+    assert other == {k: v for k, v in with_security_headers(raw) if k != b"cache-control"}
+
+
+def test_only_the_two_cache_values_exist() -> None:
+    with pytest.raises(ValueError):
+        with_security_headers([], cache_control="public, max-age=60")
+
+
 # --- pages ----------------------------------------------------------------------------------
 
-_INLINE = re.compile(r"<script|<style|\sstyle\s*=|\son[a-z]+\s*=", re.IGNORECASE)
 
-
-@pytest.mark.parametrize("page", [LOGIN_PAGE, HTTPS_ONLY_PAGE, panel_page("csrf-token-x")])
-def test_pages_hold_nothing_the_csp_would_block(page: str) -> None:
-    assert page.startswith("<!doctype html>")
-    assert '<html lang="es">' in page
-    assert '<meta charset="utf-8">' in page
-    assert not _INLINE.search(page)
-    assert "data:" not in page and "http://" not in page and "https://" not in page
-
-
-def test_the_login_page_says_the_interface_comes_later() -> None:
-    assert "11c" in LOGIN_PAGE
-    assert CSRF_META not in LOGIN_PAGE
-
-
-def test_the_https_page_explains_how_to_fix_it_and_offers_no_login() -> None:
-    assert "HTTPS" in HTTPS_ONLY_PAGE and "localhost" in HTTPS_ONLY_PAGE
-    assert "<form" not in HTTPS_ONLY_PAGE and "<input" not in HTTPS_ONLY_PAGE
-
-
-def test_the_panel_page_carries_the_csrf_token_in_its_meta_only() -> None:
-    page = panel_page("csrf-token-x")
-
-    assert f'<meta name="{CSRF_META}" content="csrf-token-x">' in page
-    assert page.count("csrf-token-x") == 1
-    assert CSRF_META == "antifaz-csrf"
-
-
-def test_the_panel_page_escapes_the_token() -> None:
-    page = panel_page('"><b>')
-
-    assert '"><b>' not in page
-    assert "&quot;&gt;&lt;b&gt;" in page
+def test_the_https_page_holds_nothing_the_csp_would_block() -> None:
+    assert HTTPS_ONLY_PAGE.startswith("<!doctype html>")
+    assert html_problems(HTTPS_ONLY_PAGE, frozenset()) == []
+    assert "data:" not in HTTPS_ONLY_PAGE and "http://" not in HTTPS_ONLY_PAGE
 
 
 # --- CSRF layer 3 and JSON ------------------------------------------------------------------

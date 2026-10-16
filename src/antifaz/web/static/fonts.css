@@ -2,7 +2,7 @@
  * The panel's two typefaces, bundled with Antifaz (no request to any third party).
  * Both are the official variable woff2 files, unmodified, under the SIL Open Font License 1.1
  * (Inter-OFL.txt, GeistMono-OFL.txt). Source, version and SHA-256: design/README.md and
- * docs/licencias.md.
+ * docs/licencias.md. They ship in the package (the panel serves them) with their licences.
  *
  * One file per family, not split by subset: the official files keep every OpenType feature
  * the design uses (Inter's cv05/cv08 and tabular figures, and its opsz axis), which the
