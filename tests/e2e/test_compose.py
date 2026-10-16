@@ -139,7 +139,10 @@ def test_the_image_has_no_dev_tools_nor_http_clients() -> None:
 
 def test_the_image_ships_no_pip() -> None:
     for module in ("pip", "ensurepip"):
-        found = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", module, "--version")
+        found = docker(
+            "run", "--rm", "--network", "none", "--entrypoint", "python", IMAGE,
+            "-m", module, "--version",
+        )  # fmt: skip
         assert found.returncode != 0, f"python -m {module} works in the image"
 
 

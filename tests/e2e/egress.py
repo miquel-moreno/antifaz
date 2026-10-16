@@ -14,6 +14,8 @@ FAKE_UPSTREAM_HOST = "fake-upstream"
 FAKE_UPSTREAM_PORT = 9000
 # The Compose network with no egress (its key in docker-compose.e2e.yml).
 INTERNAL_NETWORK = "e2e-internal"
+# What the canary tries to resolve and connect to (never a byte sent): it must fail.
+REAL_PROVIDERS = ("api.openai.com:443", "api.anthropic.com:443")
 UPSTREAM_VARS = ("ANTIFAZ_OPENAI_BASE_URL", "ANTIFAZ_ANTHROPIC_BASE_URL")
 
 

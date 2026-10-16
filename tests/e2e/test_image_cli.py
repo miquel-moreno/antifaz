@@ -20,8 +20,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.e2e.conftest import BASE_FILES, IMAGE, REPO, Stack, _free_port, docker
-from tests.e2e.image_probes import UID_GID
+from tests.e2e.conftest import IMAGE, NO_EGRESS_FILES, REPO, Stack, _free_port, docker
+from tests.e2e.egress import REAL_PROVIDERS
+from tests.e2e.image_probes import REACH_OUT, UID_GID
 
 pytestmark = pytest.mark.e2e
 
@@ -161,10 +162,13 @@ def test_init_in_the_container_never_prints_the_new_key(
 
 
 def test_compose_starts_with_the_env_written_by_init(env_file: Path) -> None:
+    # That .env points at the real providers (init's defaults): the gateway is only on the
+    # internal network, and the relay publishes it (docker-compose.no-egress.yml).
     port = _free_port()
     environ = {k: v for k, v in os.environ.items() if not k.startswith("ANTIFAZ_")}
-    environ |= {"ANTIFAZ_ENV_FILE": str(env_file), "ANTIFAZ_PORT": str(port)}
-    files = [arg for path in BASE_FILES for arg in ("-f", str(path))]
+    environ |= {"ANTIFAZ_ENV_FILE": str(env_file), "ANTIFAZ_PORT": str(_free_port())}
+    environ["ANTIFAZ_E2E_GATEWAY_PORT"] = str(port)
+    files = [arg for path in NO_EGRESS_FILES for arg in ("-f", str(path))]
     base = ["docker", "compose", "-p", PROJECT, "--project-directory", str(REPO), *files]
     base += ["--env-file", str(env_file)]
 
@@ -187,17 +191,33 @@ def test_compose_starts_with_the_env_written_by_init(env_file: Path) -> None:
         assert _wait_healthz(f"http://127.0.0.1:{port}") == 200
         refused = httpx.get(f"http://127.0.0.1:{port}/v1/models", timeout=10)
         assert refused.status_code == 401
+        reach = compose("exec", "-T", "antifaz", "python", "-c", REACH_OUT, *REAL_PROVIDERS)
+        assert reach.returncode == 0, reach.stderr[-2000:]
+        found = reach.stdout.split()
+        assert len(found) == 2 * len(REAL_PROVIDERS), reach.stdout
+        assert "connected" not in found, "the gateway reached the internet"
     finally:
         compose("down", "--volumes", "--remove-orphans")
 
 
+def _wait_healthy_inside(name: str, timeout: float = 90) -> int:
+    """The image's own healthcheck (`python -m antifaz.healthcheck`) run in the container."""
+    deadline = time.monotonic() + timeout
+    code = -1
+    while time.monotonic() < deadline:
+        code = docker("exec", name, "python", "-m", "antifaz.healthcheck").returncode
+        if code == 0:
+            return code
+        time.sleep(1)
+    return code
+
+
 def test_the_hardened_one_line_docker_run_starts_with_that_env(env_file: Path) -> None:
-    port = _free_port()
     name = f"antifaz-e2e-run-{secrets.token_hex(4)}"
-    # The same command as the README, with the local image and a free port.
+    # The same command as the README, with the local image and --network none instead of
+    # -p (that .env points at the real providers): /healthz is checked from inside.
     command = [
-        "run", "-d", "--name", name, "--env-file", str(env_file),
-        "-p", f"127.0.0.1:{port}:8000",
+        "run", "-d", "--name", name, "--env-file", str(env_file), "--network", "none",
         "--read-only", "--tmpfs", "/tmp:size=16m,mode=1777,noexec,nosuid,nodev",  # noqa: S108
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--memory", "512m", "--cpus", "1", "--pids-limit", "128",
@@ -206,7 +226,7 @@ def test_the_hardened_one_line_docker_run_starts_with_that_env(env_file: Path) -
     try:
         started = docker(*command)
         assert started.returncode == 0, started.stderr
-        assert _wait_healthz(f"http://127.0.0.1:{port}") == 200
+        assert _wait_healthy_inside(name) == 0
         user = docker("exec", name, "python", "-c", UID_GID)
         assert user.returncode == 0, user.stderr
         assert user.stdout.strip() == "10001 10001"

@@ -1,11 +1,12 @@
 """End-to-end stack (issue 7a): the real image under Docker Compose with a fake provider.
 
 `make e2e` builds the image with the repository's docker-compose.yml, compose.build.yml (the
-local build) and tests/e2e/docker-compose.e2e.yml, starts it with a throwaway env file (random
-keys made here, base URLs pointing at the fake provider) and stops and removes everything at
-the end. Your .env is never read: the env file is passed both as --env-file and as
-ANTIFAZ_ENV_FILE. Keys are never printed: assertions about them compare booleans with a fixed
-message.
+local build), tests/e2e/docker-compose.no-egress.yml (an internal network with no way out, and
+a relay that is the only door from the host) and tests/e2e/docker-compose.e2e.yml, starts it
+with a throwaway env file (random keys made here, base URLs pointing at the fake provider,
+checked before Compose starts) and stops and removes everything at the end. Your .env is never
+read: the env file is passed both as --env-file and as ANTIFAZ_ENV_FILE. Keys are never
+printed: assertions about them compare booleans with a fixed message.
 """
 
 import os
@@ -25,9 +26,11 @@ from tests.e2e.egress import FAKE_UPSTREAM_HOST, FAKE_UPSTREAM_PORT, read_env, u
 REPO = Path(__file__).resolve().parents[2]
 PROJECT = "antifaz-e2e"
 IMAGE = "antifaz:local"
-# The published-image file, the local build on top (antifaz:local) and the fake provider.
+# The published-image file, the local build on top (antifaz:local), the internal network with
+# the relay (no way out, tests/e2e/egress.py) and the fake provider.
 BASE_FILES = (REPO / "docker-compose.yml", REPO / "compose.build.yml")
-COMPOSE_FILES = (*BASE_FILES, REPO / "tests" / "e2e" / "docker-compose.e2e.yml")
+NO_EGRESS_FILES = (*BASE_FILES, REPO / "tests" / "e2e" / "docker-compose.no-egress.yml")
+COMPOSE_FILES = (*NO_EGRESS_FILES, REPO / "tests" / "e2e" / "docker-compose.e2e.yml")
 
 # Filled by the `image_size` test, printed at the end of the run.
 SUMMARY: list[str] = []
@@ -130,7 +133,9 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     if docker("version").returncode != 0:
         pytest.fail("Docker is not running: start Docker and run `make e2e` again")
     env_file = tmp_path_factory.mktemp("e2e") / "e2e.env"
-    gateway_port, fake_port = _free_port(), _free_port()
+    # The relay publishes the gateway and the fake provider; ANTIFAZ_PORT is only the port that
+    # docker-compose.yml declares, never bound on the internal network.
+    gateway_port, fake_port, declared_port = _free_port(), _free_port(), _free_port()
     keys = {name: secrets.token_hex(32) for name in ("gateway", "openai", "anthropic")}
     env_file.write_text(env_text(keys), encoding="utf-8", newline="\n")
     # Read back what Compose will get: no run starts unless both providers are the fake one.
@@ -142,7 +147,8 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     environ = {k: v for k, v in os.environ.items() if not k.startswith("ANTIFAZ_")}
     environ |= {
         "ANTIFAZ_ENV_FILE": str(env_file),
-        "ANTIFAZ_PORT": str(gateway_port),
+        "ANTIFAZ_PORT": str(declared_port),
+        "ANTIFAZ_E2E_GATEWAY_PORT": str(gateway_port),
         "ANTIFAZ_E2E_FAKE_PORT": str(fake_port),
     }
     stack = Stack(

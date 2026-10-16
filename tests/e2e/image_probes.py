@@ -342,6 +342,49 @@ app = create_app(Settings(_env_file=None))
 print(type(app).__name__, len(app.routes) > 0)
 """
 
+# For each host:port in argv, one line: "host dns-failed", "host connect-failed" or
+# "host connected". It only resolves the name and tries a TCP connection with a short timeout:
+# not a byte is sent, so no request ever reaches a provider.
+REACH_OUT = """
+import socket, sys
+for target in sys.argv[1:]:
+    host, port = target.rsplit(':', 1)
+    try:
+        infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+    except OSError:
+        print(host, 'dns-failed')
+        continue
+    result = 'connect-failed'
+    for family, kind, proto, _, address in infos:
+        try:
+            with socket.socket(family, kind, proto) as sock:
+                sock.settimeout(3)
+                sock.connect(address)
+            result = 'connected'
+            break
+        except OSError:
+            pass
+    print(host, result)
+"""
+
+# GET the 127.0.0.1 URL in argv[1] from inside a container started with --network none, and
+# print {"status", "headers", "body" (base64)} as JSON. No redirects are followed.
+FETCH_LOCAL = """
+import base64, json, sys, urllib.error, urllib.request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+opener = urllib.request.build_opener(NoRedirect)
+try:
+    answer = opener.open(sys.argv[1], timeout=5)
+except urllib.error.HTTPError as error:
+    answer = error
+body = answer.read()
+headers = {k.lower(): v for k, v in answer.headers.items()}
+print(json.dumps({'status': answer.status, 'headers': headers,
+                  'body': base64.b64encode(body).decode()}))
+"""
+
 # No network, read-only image, no capabilities: the probes need none of them.
 HARDENED = ["--network", "none", "--read-only", "--cap-drop", "ALL"]
 HARDENED += ["--security-opt", "no-new-privileges"]
