@@ -9,13 +9,18 @@ is not in the base were removed; these tests check that they are gone for good a
 compiled module left imports.
 """
 
+import os
+import secrets
+
 import pytest
 
 from tests.e2e.conftest import IMAGE, Stack, docker
 from tests.e2e.image_probes import (
     ABSENT_SHELLS,
+    CA_CERTIFICATES,
     DEBIAN_VERSION,
     IMPORT_LIB_DYNLOAD,
+    NO_USER_LOOKUP,
     NOT_MISSING,
     REMOVED_STDLIB,
     STATUS_D,
@@ -41,6 +46,22 @@ def test_the_image_is_debian_13_like_the_build_stage(stack: Stack) -> None:
     result = python_in_image(DEBIAN_VERSION)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith("13"), result.stdout
+
+
+def test_the_default_tls_context_trusts_the_ca_bundle(stack: Stack) -> None:
+    result = python_in_image(CA_CERTIFICATES)
+    assert result.returncode == 0, result.stderr[-500:]
+    assert int(result.stdout.strip()) > 0
+
+
+def test_nothing_looks_up_the_user_without_a_passwd_entry_at_startup(stack: Stack) -> None:
+    key = secrets.token_hex(32)
+    environ = {k: v for k, v in os.environ.items() if not k.startswith("ANTIFAZ_")}
+    environ["ANTIFAZ_API_KEY"] = key
+    result = python_in_image(NO_USER_LOOKUP, options=("-e", "ANTIFAZ_API_KEY"), env=environ)
+    assert key not in result.stdout + result.stderr, "the throwaway key appeared in the output"
+    assert result.returncode == 0, result.stderr[-1000:]
+    assert result.stdout.strip() == "", f"user lookups at startup: {result.stdout}"
 
 
 def test_the_dpkg_records_of_the_base_are_there_for_the_scanners(stack: Stack) -> None:

@@ -113,6 +113,13 @@ def test_the_python_stage_drops_installers_tools_and_modules_without_their_libra
         assert f" {module} " in joined, module
 
 
+def test_the_final_stage_declares_the_ca_bundle_it_relies_on() -> None:
+    # Distroless sets SSL_CERT_FILE itself today; declared here so a new base cannot drop it
+    # silently (ssl.create_default_context() would then trust nothing).
+    env = " ".join(re.findall(r"^ENV\s+(.+)$", _stage("runtime"), re.MULTILINE))
+    assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in env.split()
+
+
 def test_the_final_stage_runs_as_a_fixed_non_root_user() -> None:
     users = _instructions("USER")
     assert users and users[-1] == "10001:10001"

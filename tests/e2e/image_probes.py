@@ -293,6 +293,29 @@ for top, dirs, files in os.walk('/'):
             print(path)
 """
 
+# How many CA certificates the default TLS context trusts (SSL_CERT_FILE of the image).
+CA_CERTIFICATES = "import ssl; print(ssl.create_default_context().cert_store_stats()['x509_ca'])"
+
+# The user 10001 has no /etc/passwd entry: nothing at startup may look it up. Records every call
+# to pwd.getpwuid/getpwnam and getpass.getuser while the app builds (as `antifaz serve` does,
+# from ANTIFAZ_* variables, no .env file read) and the CLI, uvicorn and the healthcheck load.
+NO_USER_LOOKUP = """
+import getpass, pwd
+calls = []
+def spy(name):
+    def call(*args, **kwargs):
+        calls.append(name)
+        raise KeyError(name)
+    return call
+pwd.getpwuid, pwd.getpwnam = spy('pwd.getpwuid'), spy('pwd.getpwnam')
+getpass.getuser = spy('getpass.getuser')
+import uvicorn, antifaz.cli, antifaz.healthcheck
+from antifaz.api.app import create_app
+from antifaz.config import Settings
+create_app(Settings(_env_file=None))
+print(' '.join(calls))
+"""
+
 # The Debian release of the image.
 DEBIAN_VERSION = "print(open('/etc/debian_version', encoding='utf-8').read().strip())"
 

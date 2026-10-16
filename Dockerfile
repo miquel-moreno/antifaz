@@ -58,7 +58,10 @@ FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512
 #   packages that only wrap them (ctypes, sqlite3, curses). No installed package needs them:
 #   `make e2e` imports every module of the virtualenv (tests/e2e/test_image_imports.py). Each
 #   library would also need its dpkg record, or the scanners would not see it.
-# The rest links only libc, libm, libz, libssl/libcrypto and libzstd, which distroless cc has.
+# The rest links only libc, libm, libz and libssl/libcrypto (libzstd comes in through libcrypto,
+# not from CPython itself), all of which distroless cc has.
+# The `.cpython-312-x86_64-linux-gnu.so` suffix below is hard-coded: the image is built and
+# tested for linux/amd64 only (release.yml); another platform needs its own suffix here.
 RUN set -eu; \
     cd /usr/local/lib/python3.12; \
     rm -rf site-packages/pip site-packages/pip-*.dist-info \
@@ -92,9 +95,12 @@ COPY --from=python /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpython3
 COPY --from=python /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=build /app/.venv /app/.venv
 
-# LANG as in the official Python image (distroless sets none): UTF-8 everywhere.
+# LANG as in the official Python image (distroless sets none): UTF-8 everywhere. SSL_CERT_FILE
+# is what distroless sets today, declared here so a new base cannot drop it silently (the
+# default TLS context would trust nothing; make e2e counts the CA certificates).
 ENV PATH=/app/.venv/bin:$PATH \
     LANG=C.UTF-8 \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
