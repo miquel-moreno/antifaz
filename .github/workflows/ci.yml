@@ -181,10 +181,12 @@ jobs:
           output-file: grype-report.json
       # On distroless, Debian packages are visible only through /var/lib/dpkg/status.d and
       # CPython only through its binary: if the scanners lost them, the gate below would pass
-      # for the wrong reason. Canaries: zlib1g, its unfixed CVE-2026-85091 and CPython 3.12.x
-      # (issue 54, ADR-0019). Standard library only.
-      - name: Check that the scanners still see the system packages
-        run: python3 -m scripts.check_scan_sees --sbom antifaz-image.cdx.json --grype grype-report.json --package zlib1g --vulnerability CVE-2026-85091 --python 3.12
+      # for the wrong reason (issue 54, ADR-0019). The structure blocks: Grype sees Debian 13
+      # and matches deb packages, the SBOM lists libc6, libssl3t64 and zlib1g as Debian
+      # packages and CPython 3.12.x. The known CVE-2026-85091 in zlib1g only warns (Debian may
+      # fix or reclassify it). Standard library only.
+      - name: Check that the scanners still see the system packages (structure blocks, CVE warns)
+        run: python3 -m scripts.check_scan_sees --sbom antifaz-image.cdx.json --grype grype-report.json --distro debian --distro-version 13 --deb libc6 --deb libssl3t64 --deb zlib1g --python 3.12 --warn-vulnerability CVE-2026-85091 --warn-package zlib1g
       # Gate: fails on high or critical only when a fix exists (an upgrade can remove it).
       # .github/grype-gate.yaml lists the few ignored findings, each with its reason.
       - name: Vulnerability gate of the image (Grype, high or critical with a fix)

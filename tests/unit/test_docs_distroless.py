@@ -75,6 +75,26 @@ def test_the_threat_model_has_the_image_row_with_its_honest_limit() -> None:
     assert "docker exec" in row and "SYS_PTRACE" in row
 
 
+def test_the_docs_say_the_structure_blocks_and_the_cve_only_warns() -> None:
+    """Miquel's rule for scripts/check_scan_sees.py: no doc may still say the CVE fails the job."""
+    adr = ADR.read_text(encoding="utf-8")
+    tecnico = (REPO / "docs" / "TECNICO.md").read_text(encoding="utf-8")
+    for text in (adr, tecnico):
+        assert "ese paso fallará" not in text and "el paso fallará" not in text
+        assert re.search(r"solo (avisa|da un aviso)", text)
+        for package in ("libc6", "libssl3t64", "zlib1g"):
+            assert package in text
+        assert "scan_negative" in text
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "the structure blocks" in changelog and "only warns" in changelog
+
+
+def test_the_chainguard_reason_claims_no_price() -> None:
+    (line,) = [x for x in ADR.read_text(encoding="utf-8").splitlines() if "Chainguard" in x]
+    assert "pago" not in line
+    assert "3.15.0" in line and "2026-10-16" in line
+
+
 def test_the_adr_keeps_its_reasons_straight() -> None:
     text = ADR.read_text(encoding="utf-8")
     assert "otra libc" not in text  # Wolfi uses glibc too

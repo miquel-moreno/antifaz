@@ -306,11 +306,16 @@ def test_ci_fails_if_the_scanners_stop_seeing_the_system_packages() -> None:
     (sbom,) = [s for s in steps if str(s.get("uses", "")).startswith("anchore/sbom-action@")]
     assert sbom["with"]["output-file"] == "antifaz-image.cdx.json"
     (check,) = [s for s in steps if "scripts.check_scan_sees" in str(s.get("run", ""))]
+    # Miquel: the structure blocks (Debian 13, deb matches, libc6/libssl3t64/zlib1g, CPython),
+    # the known CVE only warns.
     assert check["run"].split() == [
         "python3", "-m", "scripts.check_scan_sees",
         "--sbom", "antifaz-image.cdx.json", "--grype", "grype-report.json",
-        "--package", "zlib1g", "--vulnerability", "CVE-2026-85091", "--python", "3.12",
+        "--distro", "debian", "--distro-version", "13",
+        "--deb", "libc6", "--deb", "libssl3t64", "--deb", "zlib1g", "--python", "3.12",
+        "--warn-vulnerability", "CVE-2026-85091", "--warn-package", "zlib1g",
     ]  # fmt: skip
+    assert "continue-on-error" not in check
     json_report = next(s for s in steps if s.get("id") == "grype-json")
     gate = next(s for s in _grype_steps() if s["with"].get("fail-build") is True)
     assert steps.index(sbom) < steps.index(json_report) < steps.index(check) < steps.index(gate)
