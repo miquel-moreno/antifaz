@@ -22,7 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versio
 - End-to-end tests of the one-minute install (`tests/e2e/test_image_cli.py`): `init --non-interactive` inside the image with keys passed by variable name, then Compose and the hardened one-line `docker run` start with that `.env`.
 
 ### Changed
-- **The runtime image is distroless** (issue 54, PR B2, ADR-0019 proposed):
+- **The runtime image is distroless** (issue 54, PR B2, ADR-0019 accepted):
   - The final stage is `gcr.io/distroless/cc-debian13:nonroot` (pinned by index digest) with no `RUN`: no shell (`sh`, `bash`, `dash`, `busybox`), no `apt`/`dpkg`, no coreutils and no curl.
   - CPython 3.12.15 is copied from the same `python:3.12-slim-trixie` digest that builds the virtualenv (`python3.12`, `libpython3.12.so.1.0`, the standard library); both bases are Debian 13.
   - A staging stage drops pip, setuptools, wheel, `ensurepip`, IDLE, tkinter/turtle, CPython's test modules and the compiled modules whose system library distroless does not ship (`_ctypes`, `_sqlite3`, `_lzma`, `_bz2`, `readline`, `_curses`, `_curses_panel`, `_dbm`, `_gdbm`, `_uuid`, `_crypt`, `_tkinter`, plus the `ctypes`, `sqlite3` and `curses` packages); no installed package needs them.
