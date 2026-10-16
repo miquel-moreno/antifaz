@@ -20,6 +20,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from tests.e2e.egress import FAKE_UPSTREAM_HOST, FAKE_UPSTREAM_PORT, read_env, upstream_problems
+
 REPO = Path(__file__).resolve().parents[2]
 PROJECT = "antifaz-e2e"
 IMAGE = "antifaz:local"
@@ -55,6 +57,24 @@ def docker(
         timeout=timeout,
         env=env,
         check=False,
+    )
+
+
+def env_text(keys: dict[str, str]) -> str:
+    """The throwaway env file of the stack (keys made by the fixture)."""
+    return "\n".join(
+        [
+            f"ANTIFAZ_API_KEY={keys['gateway']}",
+            f"ANTIFAZ_OPENAI_API_KEY={keys['openai']}",
+            f"ANTIFAZ_ANTHROPIC_API_KEY={keys['anthropic']}",
+            # The fake provider on the internal Compose network. Plain http on purpose: base
+            # URLs are admin configuration, and here they never leave the private network.
+            f"ANTIFAZ_OPENAI_BASE_URL=http://{FAKE_UPSTREAM_HOST}:{FAKE_UPSTREAM_PORT}/v1",
+            f"ANTIFAZ_ANTHROPIC_BASE_URL=http://{FAKE_UPSTREAM_HOST}:{FAKE_UPSTREAM_PORT}",
+            "ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,antifaz",
+            "ANTIFAZ_LOG_LEVEL=INFO",
+            "",
+        ]
     )
 
 
@@ -112,24 +132,12 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     env_file = tmp_path_factory.mktemp("e2e") / "e2e.env"
     gateway_port, fake_port = _free_port(), _free_port()
     keys = {name: secrets.token_hex(32) for name in ("gateway", "openai", "anthropic")}
-    env_file.write_text(
-        "\n".join(
-            [
-                f"ANTIFAZ_API_KEY={keys['gateway']}",
-                f"ANTIFAZ_OPENAI_API_KEY={keys['openai']}",
-                f"ANTIFAZ_ANTHROPIC_API_KEY={keys['anthropic']}",
-                # The fake provider on the Compose network. Plain http on purpose: base URLs
-                # are admin configuration, and here they never leave the private network.
-                "ANTIFAZ_OPENAI_BASE_URL=http://fake-upstream:9000/v1",
-                "ANTIFAZ_ANTHROPIC_BASE_URL=http://fake-upstream:9000",
-                "ANTIFAZ_ALLOWED_HOSTS=localhost,127.0.0.1,antifaz",
-                "ANTIFAZ_LOG_LEVEL=INFO",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-        newline="\n",
-    )
+    env_file.write_text(env_text(keys), encoding="utf-8", newline="\n")
+    # Read back what Compose will get: no run starts unless both providers are the fake one.
+    problems = upstream_problems(read_env(env_file.read_text(encoding="utf-8")))
+    if problems:
+        env_file.unlink(missing_ok=True)
+        pytest.exit("e2e refused to start: " + "; ".join(problems), returncode=3)
     # Nothing ANTIFAZ_* from your shell reaches Compose: only what this run sets.
     environ = {k: v for k, v in os.environ.items() if not k.startswith("ANTIFAZ_")}
     environ |= {
