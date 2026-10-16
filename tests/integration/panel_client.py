@@ -26,6 +26,9 @@ LAN_URL = "http://antifaz.example"  # plain HTTP off localhost: the panel refuse
 HOSTS = ["testserver", "localhost", "127.0.0.1", "[::1]", "antifaz.example"]
 SECURE_COOKIE = "__Host-antifaz_session"
 LOCAL_COOKIE = "antifaz_session"
+# Every /panel* answer carries each of these exactly once. Their values are SECURITY_HEADERS
+# (web/headers.py), Cache-Control "no-store" included, except a 200 of a static file of the
+# manifest, whose Cache-Control is IMMUTABLE (11c-1, tests/integration/test_panel_static.py).
 SECURITY_HEADER_NAMES = (
     "content-security-policy",
     "x-frame-options",

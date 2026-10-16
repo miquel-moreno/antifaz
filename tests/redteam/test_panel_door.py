@@ -33,8 +33,10 @@ from starlette.types import Message
 
 from antifaz.api.app import create_app
 from antifaz.web import routes
+from antifaz.web.assets import load_assets
 from antifaz.web.headers import SECURITY_HEADERS
-from antifaz.web.pages import HTTPS_ONLY_PAGE, LOGIN_PAGE
+from antifaz.web.pages import HTTPS_ONLY_PAGE
+from antifaz.web.templating import Pages
 from tests.integration.fakes import GATEWAY_KEY, FakeUpstream
 from tests.integration.panel_client import (
     ADMIN_TOKEN,
@@ -58,6 +60,7 @@ from tests.integration.panel_client import (
 )
 from tests.redteam.conftest import both_echo
 
+LOGIN_PAGE = Pages(load_assets()).login
 LOGIN_FAILED = b'{"error":{"code":"login_failed","message":"login failed"}}'
 
 
@@ -800,15 +803,18 @@ def _boom(*args: Any, **kwargs: Any) -> Any:
     raise RuntimeError("boom")
 
 
-@pytest.mark.parametrize("target", ["panel_page", "_token"])
+@pytest.mark.parametrize("target", ["Pages.panel", "_token"])
 def test_a_500_inside_the_panel_carries_the_panel_headers(
     monkeypatch: pytest.MonkeyPatch, target: str
 ) -> None:
     for client in clients(HTTPS_URL):
         cookie = {"Cookie": f"{SECURE_COOKIE}={log_in(client)}"}
-        monkeypatch.setattr(routes, target, _boom)
+        if target == "Pages.panel":
+            monkeypatch.setattr(Pages, "panel", _boom)
+        else:
+            monkeypatch.setattr(routes, target, _boom)
 
-        if target == "panel_page":
+        if target == "Pages.panel":
             response = client.get("/panel", headers=cookie)
         else:
             response = post_login(client)

@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 import antifaz.web
+from antifaz.web.assets import load_assets
 from antifaz.web.door import PanelState
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.routes import build_router
@@ -73,6 +74,7 @@ def test_every_registered_panel_endpoint_is_a_coroutine_function() -> None:
         trusted_proxies=(),
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
+        assets=load_assets(),
     )
     routes = build_router(state).routes
     assert routes
