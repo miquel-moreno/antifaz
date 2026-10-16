@@ -13,12 +13,21 @@ import asyncio
 import re
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from starlette.types import Message
 
 from antifaz.web.assets import load_assets
-from tests.integration.panel_client import LOCAL_COOKIE, LOCAL_URL, log_in, panel_client
+from antifaz.web.headers import IMMUTABLE
+from tests.integration.panel_client import (
+    HTTPS_URL,
+    LOCAL_COOKIE,
+    LOCAL_URL,
+    clients,
+    log_in,
+    panel_client,
+)
 
 ASSETS = load_assets()
 P = "/panel/static/"
@@ -164,3 +173,57 @@ def test_the_served_svgs_hold_nothing_that_runs(
     assert "<script" not in text and "javascript:" not in text and "foreignobject" not in text
     assert not re.search(r"\son[a-z]+\s*=", text)
     assert not re.search(r"href\s*=\s*[\"'](?!#)", text)
+
+
+# --- Conditional, partial and varied requests: always the whole file ------------------------
+
+CONDITIONAL = [
+    {"Range": "bytes=0-9"},
+    {"Range": "bytes=-1"},
+    {"If-None-Match": "*"},
+    {"If-None-Match": '"x"'},
+    {"If-Modified-Since": "Thu, 01 Jan 2099 00:00:00 GMT"},
+    {"If-Range": '"x"', "Range": "bytes=0-1"},
+    {"Accept-Encoding": "gzip, br, zstd"},
+    {"Accept-Encoding": "identity;q=0"},
+]
+
+
+@pytest.mark.parametrize("headers", CONDITIONAL)
+def test_conditional_and_partial_requests_get_the_whole_file(headers: dict[str, str]) -> None:
+    for client in clients(HTTPS_URL):
+        response = client.get(P + CSS, headers=headers)
+
+        assert response.status_code == 200
+        assert response.content == ASSETS.files[CSS].body
+        assert "content-range" not in response.headers
+        assert "content-encoding" not in response.headers
+        assert response.headers["cache-control"] == IMMUTABLE
+
+
+def _stable(response: httpx.Response) -> dict[str, str]:
+    """Every header but X-Request-ID, which is new for each request on purpose."""
+    return {k: v for k, v in response.headers.items() if k != "x-request-id"}
+
+
+def test_a_query_string_does_not_change_a_static_answer() -> None:
+    for client in clients(HTTPS_URL):
+        plain = client.get(P + CSS)
+        for query in ("?v=2", "?x=../../__init__.py", "?" + "a" * 2000, "?%00"):
+            response = client.get(P + CSS + query)
+
+            assert response.status_code == 200, query
+            assert response.content == plain.content
+            assert _stable(response) == _stable(plain)
+
+
+def test_the_static_answer_does_not_depend_on_the_host() -> None:
+    answers = []
+    for base in (HTTPS_URL, "https://localhost", "http://localhost", "http://127.0.0.1:8000"):
+        for client in clients(base):
+            answers.append(client.get(P + CSS))
+    first = answers[0]
+    for response in answers:
+        assert response.status_code == 200
+        assert response.content == first.content
+        assert _stable(response) == _stable(first)

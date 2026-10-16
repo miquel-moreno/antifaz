@@ -222,3 +222,37 @@ def test_a_static_request_never_looks_the_session_up(monkeypatch: pytest.MonkeyP
         assert calls == []
         assert client.get(NOT_IN_MANIFEST[0], headers=cookie).status_code == 404
         assert calls == ["peek", "touch"]  # not public: the general rule
+
+
+def test_a_500_inside_the_public_static_route_is_no_store_with_the_panel_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from antifaz.web.assets import Assets
+
+    def boom(self: Assets, name: str) -> None:
+        raise RuntimeError("boom")
+
+    for client in clients(HTTPS_URL):
+        monkeypatch.setattr(Assets, "get", boom)
+
+        response = client.get(URLS[0])
+
+        assert response.status_code == 500
+        assert response.json() == {"error": {"code": "internal_error", "message": "internal error"}}
+        assert "boom" not in response.text
+        _no_store(response)
+
+
+def test_a_bad_static_file_stops_the_app_with_the_admin_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from antifaz.api.app import create_app
+    from antifaz.web import assets
+    from tests.integration.panel_client import panel_settings
+
+    (tmp_path / "x.html").write_text("<p>not a static file</p>", encoding="utf-8")
+    monkeypatch.setattr(assets, "STATIC_DIR", tmp_path)
+    monkeypatch.setattr(assets, "SERVED", ("x.html",))
+
+    with pytest.raises(assets.AssetError):
+        create_app(panel_settings())

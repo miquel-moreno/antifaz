@@ -88,6 +88,7 @@ def test_the_prototype_pages_load_the_package_assets() -> None:
 # --- The manifest: what is served, under which name, with which type ------------------------
 
 ASSETS = load_assets()
+SVG = "<svg xmlns='http://www.w3.org/2000/svg'/>"
 CSS_URL = re.compile(r"url\(\s*([\"']?)([^\"')\s]*)\1\s*\)", re.IGNORECASE)
 
 
@@ -143,12 +144,12 @@ def test_the_hash_is_stable_and_follows_the_content(tmp_path: Path) -> None:
 def test_a_css_points_to_the_hashed_name_and_changes_when_that_file_changes(
     tmp_path: Path,
 ) -> None:
-    folder = _folder(tmp_path, {"g.svg": "<svg/>", "a.css": 'b{background:url("g.svg")}'})
+    folder = _folder(tmp_path, {"g.svg": SVG, "a.css": 'b{background:url("g.svg")}'})
     assets = load_assets(folder, ["g.svg", "a.css"])
     svg_name = assets.urls["g.svg"].removeprefix(STATIC_PREFIX)
 
     assert _body(assets, "a.css").decode() == f'b{{background:url("{svg_name}")}}'
-    (folder / "g.svg").write_text("<svg></svg>", encoding="utf-8")
+    (folder / "g.svg").write_text(SVG.replace("/>", "></svg>"), encoding="utf-8")
     assert load_assets(folder, ["g.svg", "a.css"]).urls["a.css"] != assets.urls["a.css"]
 
 
@@ -233,7 +234,7 @@ def test_every_served_css_url_points_into_the_manifest() -> None:
 def test_the_loader_refuses_a_css_that_reaches_outside_the_manifest(
     tmp_path: Path, css: str
 ) -> None:
-    folder = _folder(tmp_path, {"g.svg": "<svg/>", "b.css": "b{}", "a.css": css})
+    folder = _folder(tmp_path, {"g.svg": SVG, "b.css": "b{}", "a.css": css})
 
     with pytest.raises(AssetError):
         load_assets(folder, ["g.svg", "b.css", "a.css"])
@@ -351,3 +352,107 @@ def test_the_panel_css_leaves_out_what_only_the_prototype_needs() -> None:
         assert part not in css, part
     for kept in (".app-window", ".journey", ".marker", ".keys", ".prov", ".ident", "grain.svg"):
         assert kept in css, kept
+
+
+# --- Review of 11c-1: allow-lists instead of deny-lists, and no comments served --------------
+
+SVG_ATTACKS = [
+    # SMIL that turns a link into javascript: once the page runs it
+    r"<svg xmlns='http://www.w3.org/2000/svg'><a><set attributeName='href' "
+    r"to='&#106;avascript:alert(1)'/><rect width='1' height='1'/></a></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><style>@import url(https://example.invalid/x.css);"
+    r"</style></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><rect style='fill:url(https://example.invalid/a)'"
+    r"/></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><rect fill='url(https://example.invalid/x.svg#a)'"
+    r"/></svg>",
+    r"<!DOCTYPE svg [<!ENTITY x 'y'>]><svg xmlns='http://www.w3.org/2000/svg'>&x;</svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><rect><set attributeName='onmouseover' "
+    r"to='alert(1)'/></rect></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><iframe xmlns='http://www.w3.org/1999/xhtml' "
+    r"src='https://example.invalid/'/></svg>",
+    r"<svg/onload=alert(1)>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><animate attributeName='x' to='1'/></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><rect width='1' unknown='x'/></svg>",
+    r"<svg xmlns='http://www.w3.org/2000/svg'><use href='other.svg#a'/></svg>",
+    "not xml at all <",
+    r"<?xml-stylesheet href='https://example.invalid/x.css'?>"
+    r"<svg xmlns='http://www.w3.org/2000/svg'/>",
+]
+
+
+@pytest.mark.parametrize("svg", SVG_ATTACKS)
+def test_the_svg_allow_list_refuses_every_attack(tmp_path: Path, svg: str) -> None:
+    with pytest.raises(AssetError):
+        load_assets(_folder(tmp_path, {"x.svg": svg}), ["x.svg"])
+
+
+@pytest.mark.parametrize(
+    "svg",
+    [
+        "<svg xmlns='http://www.w3.org/2000/svg'><defs><symbol id='a'><path d='M0 0'/>"
+        "</symbol></defs><use href='#a'/></svg>",
+        "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink'>"
+        "<defs><path id='a' d='M0 0'/></defs><use xlink:href='#a'/></svg>",
+        "<svg xmlns='http://www.w3.org/2000/svg'><defs><linearGradient id='g'>"
+        "<stop offset='0' stop-color='#fff'/></linearGradient></defs>"
+        "<rect width='1' height='1' fill='url(#g)'/></svg>",
+        "<?xml version='1.0' encoding='UTF-8'?><svg xmlns='http://www.w3.org/2000/svg'/>",
+    ],
+)
+def test_the_svg_allow_list_accepts_fragment_links(tmp_path: Path, svg: str) -> None:
+    assets = load_assets(_folder(tmp_path, {"x.svg": svg}), ["x.svg"])
+
+    assert len(assets.files) == 1
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        r"a{background:u\72l(https://example.invalid/x.png)}",
+        r"@\69mport 'https://example.invalid/x.css';",
+        "a{background:image-set('https://example.invalid/x.png' 1x)}",
+        "a{background:-webkit-image-set('g.svg' 1x)}",
+        "@namespace svg url(g.svg);",
+        "@font-feature-values Inter{}",
+        "@page{margin:0}",
+        "@supports (display:grid){a{}}",
+    ],
+)
+def test_the_css_allow_list_refuses_every_attack(tmp_path: Path, css: str) -> None:
+    folder = _folder(tmp_path, {"g.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>", "a.css": css})
+
+    with pytest.raises(AssetError):
+        load_assets(folder, ["g.svg", "a.css"])
+
+
+def test_the_css_allow_list_accepts_the_at_rules_the_panel_uses(tmp_path: Path) -> None:
+    css = (
+        "@font-face{font-family:x;src:url(g.svg)}@media (min-width:1px){a{}}"
+        "@container app (width<1px){a{}}@keyframes k{from{opacity:0}to{opacity:1}}"
+    )
+    folder = _folder(tmp_path, {"g.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>", "a.css": css})
+
+    assert len(load_assets(folder, ["g.svg", "a.css"]).files) == 2
+
+
+def test_the_shipped_files_pass_the_allow_lists() -> None:
+    assert set(load_assets().urls) == set(SERVED)  # logo.svg, grain.svg and the three CSS
+
+
+def test_no_served_file_carries_a_comment_or_a_name() -> None:
+    for name, asset in ASSETS.files.items():
+        if name.endswith((".css", ".svg", ".js")):
+            text = asset.body.decode("utf-8")
+            assert "/*" not in text and "<!--" not in text, name
+            assert "miquel" not in text.lower(), name
+
+
+def test_comments_are_stripped_before_hashing(tmp_path: Path) -> None:
+    plain = load_assets(_folder(tmp_path, {"a.css": "a{color:red}"}), ["a.css"])
+    commented = load_assets(
+        _folder(tmp_path, {"a.css": "/* note */a{color:red}/* another\n line */"}), ["a.css"]
+    )
+
+    assert commented.urls == plain.urls
+    assert _body(commented, "a.css") == b"a{color:red}"

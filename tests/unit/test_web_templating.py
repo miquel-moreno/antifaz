@@ -66,8 +66,23 @@ def test_the_panel_page_carries_the_csrf_token_in_its_meta_only() -> None:
     assert CSRF_META == "antifaz-csrf"
 
 
-def test_the_login_page_is_rendered_once_and_has_no_csrf_meta() -> None:
-    assert PAGES.login == PAGES.login
+def test_the_login_page_is_rendered_once_and_has_no_csrf_meta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    real = jinja2.Template.render
+
+    def spy(self: jinja2.Template, *args: object, **kwargs: object) -> str:
+        calls.append(str(self.name))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(jinja2.Template, "render", spy)
+    pages = Pages(ASSETS)
+    assert sorted(calls) == ["login.html", "panel.html"]  # both once, at startup
+    calls.clear()
+
+    assert pages.login and pages.login is pages.login
+    assert calls == []  # serving the login page renders nothing
     assert CSRF_META not in PAGES.login
     assert "11c-2" in PAGES.login  # the real login screen comes with the next PR
 
