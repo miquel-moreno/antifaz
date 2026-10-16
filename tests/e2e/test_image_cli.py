@@ -21,6 +21,7 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import BASE_FILES, IMAGE, REPO, Stack, _free_port, docker
+from tests.e2e.image_probes import UID_GID
 
 pytestmark = pytest.mark.e2e
 
@@ -206,7 +207,8 @@ def test_the_hardened_one_line_docker_run_starts_with_that_env(env_file: Path) -
         started = docker(*command)
         assert started.returncode == 0, started.stderr
         assert _wait_healthz(f"http://127.0.0.1:{port}") == 200
-        user = docker("exec", name, "id", "-u").stdout.strip()
-        assert user == "10001"
+        user = docker("exec", name, "python", "-c", UID_GID)
+        assert user.returncode == 0, user.stderr
+        assert user.stdout.strip() == "10001 10001"
     finally:
         docker("rm", "-f", name)

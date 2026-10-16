@@ -70,8 +70,9 @@ contract:
 
 # The real image under Docker Compose with a fake provider (tests/e2e). Not part of `check`:
 # it needs Docker and takes a few minutes. Never reads your .env (throwaway keys per run).
+# -vv: the CI log names every test that ran (pyproject's addopts has -q, which cancels one -v).
 e2e:
-	uv run pytest tests/e2e --no-cov --e2e -p no:cacheprovider
+	uv run pytest tests/e2e -vv --no-cov --e2e -p no:cacheprovider
 
 # Only the git history, never the working tree (gitleaks dir or --no-git would read .env),
 # and always --redact so a finding never prints the secret.
