@@ -11,6 +11,8 @@ before Compose starts, the throwaway env file must point both providers at the f
 
 import ast
 import enum
+import ipaddress
+import json
 import re
 from collections.abc import Mapping, Sequence
 from urllib.parse import urlsplit
@@ -38,6 +40,62 @@ def internal_addresses(which: str) -> dict[str, str]:
 
 # What the canary tries to resolve and connect to (never a byte sent): it must fail.
 REAL_PROVIDERS = ("api.openai.com:443", "api.anthropic.com:443")
+# Literal IPs, so the canary does not depend on DNS failing inside the container.
+PUBLIC_IPS = ("1.1.1.1:443", "8.8.8.8:443", "[2606:4700:4700::1111]:443")
+# Ports tried on the host side (the gateways of the Docker networks): web and proxies.
+HOST_PORTS = (80, 443, 3128, 8080)
+
+
+# What the canary accepts (anything else fails, including `timeout`: with no route the kernel
+# refuses at once, so a timeout means a SYN left the container; and `refused`: something
+# answered). `no-address`: the container has no address of that family (no IPv6 at all).
+LITERAL_OK = frozenset({"unreachable", "no-address"})
+NAME_OK = LITERAL_OK | {"dns-failed"}
+
+
+def split_target(target: str) -> tuple[str, int]:
+    """ "host:port" or "[v6]:port" into (host without brackets, port)."""
+    host, _, port = target.rpartition(":")
+    return host.strip("[]"), int(port)
+
+
+def is_literal(target: str) -> bool:
+    """True when the target's host is an IP literal (no DNS involved)."""
+    try:
+        ipaddress.ip_address(split_target(target)[0])
+    except ValueError:
+        return False
+    return True
+
+
+def parse_reach(stdout: str) -> dict[str, tuple[str, str | None]]:
+    """The REACH_OUT probe's JSON lines: {target: (result, errno name or None)}."""
+    found: dict[str, tuple[str, str | None]] = {}
+    for line in stdout.splitlines():
+        if line.strip():
+            data = json.loads(line)
+            found[data["target"]] = (data["result"], data["errno"])
+    return found
+
+
+def canary_problems(
+    found: Mapping[str, tuple[str, str | None]], targets: Sequence[str]
+) -> list[str]:
+    """Each target the probe did not show as unreachable (allow-list, fail closed)."""
+    if not targets:
+        return ["no destinations to try"]
+    problems = []
+    for target in targets:
+        if target not in found:
+            problems.append(f"{target}: no result from the probe")
+            continue
+        result, errno = found[target]
+        allowed = LITERAL_OK if is_literal(target) else NAME_OK
+        if result not in allowed:
+            problems.append(f"{target}: {result} ({errno})")
+    return problems
+
+
 UPSTREAM_VARS = ("ANTIFAZ_OPENAI_BASE_URL", "ANTIFAZ_ANTHROPIC_BASE_URL")
 
 

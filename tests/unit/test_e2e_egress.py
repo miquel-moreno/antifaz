@@ -289,6 +289,9 @@ def test_the_internal_network_has_no_way_out() -> None:
     networks = _compose("docker-compose.no-egress.yml")["networks"]
     internal = networks[INTERNAL_NETWORK]
     assert internal["internal"] is True
+    # No address for the host on that bridge: the containers cannot reach the Docker host's
+    # own services (a proxy listening on 0.0.0.0 would be a way out).
+    assert internal["driver_opts"] == {"com.docker.network.bridge.inhibit_ipv4": "true"}
     # A fixed subnet, so the relay's targets are fixed IPs inside it (no name lookups).
     assert internal["ipam"] == {
         "config": [

@@ -58,6 +58,10 @@ services:
 networks:
   e2e-internal:
     internal: true
+    # The host gets no address on this bridge (Docker 28 or later), so the containers cannot
+    # reach the Docker host's own services either (a proxy on 0.0.0.0 would be a way out).
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
     ipam:
       config:
         - subnet: ${ANTIFAZ_E2E_SUBNET:?set by the e2e tests}

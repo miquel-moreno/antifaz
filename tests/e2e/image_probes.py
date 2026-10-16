@@ -342,29 +342,64 @@ app = create_app(Settings(_env_file=None))
 print(type(app).__name__, len(app.routes) > 0)
 """
 
-# For each host:port in argv, one line: "host dns-failed", "host connect-failed" or
-# "host connected". It only resolves the name and tries a TCP connection with a short timeout:
-# not a byte is sent, so no request ever reaches a provider.
+# For each "host:port" or "[v6]:port" in argv, one JSON line {"target", "result", "errno"}.
+# result: dns-failed, unreachable (ENETUNREACH/EHOSTUNREACH), no-address (EADDRNOTAVAIL,
+# EAFNOSUPPORT: no address of that family), refused, timeout (3 s), error (any other errno) or
+# connected. A literal IP is never looked up (AI_NUMERICHOST; IPv6 brackets stripped). Of all the
+# addresses of a name, the worst result is printed. It only tries a TCP connection and closes it:
+# not a byte is sent, so no request ever reaches a provider (judged by egress.canary_problems).
 REACH_OUT = """
-import socket, sys
-for target in sys.argv[1:]:
-    host, port = target.rsplit(':', 1)
+import errno, ipaddress, json, socket, sys
+CLASSES = {errno.ENETUNREACH: 'unreachable', errno.EHOSTUNREACH: 'unreachable',
+           errno.EADDRNOTAVAIL: 'no-address', errno.EAFNOSUPPORT: 'no-address',
+           errno.ECONNREFUSED: 'refused'}
+WORST_FIRST = ['connected', 'timeout', 'refused', 'error', 'unreachable', 'no-address']
+
+def failed(error):
+    return CLASSES.get(error.errno, 'error'), errno.errorcode.get(error.errno, str(error.errno))
+
+def attempt(family, kind, proto, address):
     try:
-        infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
-    except OSError:
-        print(host, 'dns-failed')
-        continue
-    result = 'connect-failed'
-    for family, kind, proto, _, address in infos:
+        sock = socket.socket(family, kind, proto)
+    except OSError as error:
+        return failed(error)
+    with sock:
+        sock.settimeout(3)
         try:
-            with socket.socket(family, kind, proto) as sock:
-                sock.settimeout(3)
-                sock.connect(address)
-            result = 'connected'
-            break
-        except OSError:
-            pass
-    print(host, result)
+            sock.connect(address)
+        except TimeoutError:
+            return 'timeout', None
+        except OSError as error:
+            return failed(error)
+    return 'connected', None
+
+for target in sys.argv[1:]:
+    host, _, port = target.rpartition(':')
+    host = host.strip('[]')
+    try:
+        ipaddress.ip_address(host)
+        flags = socket.AI_NUMERICHOST
+    except ValueError:
+        flags = 0
+    try:
+        infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM, flags=flags)
+    except socket.gaierror as error:
+        result, code = 'dns-failed', str(error.errno)
+    else:
+        seen = [attempt(f, k, p, a) for f, k, p, _, a in infos]
+        result, code = min(seen, key=lambda r: WORST_FIRST.index(r[0]))
+    print(json.dumps({'target': target, 'result': result, 'errno': code}))
+"""
+
+# The gateway's effective settings, as booleans only (never a value): for each provider base
+# URL, whether it is plain http, to fake-upstream, on port 9000.
+EFFECTIVE_UPSTREAMS = """
+from urllib.parse import urlsplit
+from antifaz.config import Settings
+settings = Settings()
+for url in (settings.openai_base_url, settings.anthropic_base_url):
+    parts = urlsplit(url)
+    print(parts.scheme == 'http', parts.hostname == 'fake-upstream', parts.port == 9000)
 """
 
 # GET the 127.0.0.1 URL in argv[1] from inside a container started with --network none, and

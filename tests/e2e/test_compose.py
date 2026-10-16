@@ -109,6 +109,8 @@ def test_the_container_is_hardened_as_compose_says(stack: Stack) -> None:
     assert host["CapDrop"] == ["ALL"]
     assert "no-new-privileges:true" in host["SecurityOpt"]
     assert host["Memory"] > 0 and host["NanoCpus"] > 0 and host["PidsLimit"] > 0
+    # PortBindings is the configuration docker-compose.yml declares (127.0.0.1 only). On the
+    # e2e internal network nothing is really published (test_no_egress.py checks that).
     bindings = host["PortBindings"]["8000/tcp"]
     assert [b["HostIp"] for b in bindings] == ["127.0.0.1"]
 

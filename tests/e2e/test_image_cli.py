@@ -21,8 +21,9 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import IMAGE, NO_EGRESS_FILES, REPO, Stack, _free_port, docker
-from tests.e2e.egress import REAL_PROVIDERS, internal_addresses
-from tests.e2e.image_probes import REACH_OUT, UID_GID
+from tests.e2e.egress import internal_addresses
+from tests.e2e.image_probes import UID_GID
+from tests.e2e.isolation import canary_targets, network_problems, run_canary
 
 pytestmark = pytest.mark.e2e
 
@@ -182,14 +183,12 @@ def test_compose_starts_with_the_env_written_by_init(env_file: Path) -> None:
     try:
         up = compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "120", timeout=300)
         assert up.returncode == 0, "docker compose up failed with the .env written by init"
+        gateway = compose("ps", "-q", "antifaz").stdout.strip()
+        assert network_problems(PROJECT, {"antifaz": gateway}) == []
+        assert run_canary(compose, "antifaz", canary_targets(PROJECT)) == []
         assert _wait_healthz(f"http://127.0.0.1:{port}") == 200
         refused = httpx.get(f"http://127.0.0.1:{port}/v1/models", timeout=10)
         assert refused.status_code == 401
-        reach = compose("exec", "-T", "antifaz", "python", "-c", REACH_OUT, *REAL_PROVIDERS)
-        assert reach.returncode == 0, reach.stderr[-2000:]
-        found = reach.stdout.split()
-        assert len(found) == 2 * len(REAL_PROVIDERS), reach.stdout
-        assert "connected" not in found, "the gateway reached the internet"
     finally:
         compose("down", "--volumes", "--remove-orphans")
 
