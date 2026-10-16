@@ -62,11 +62,8 @@ import io
 import json
 import struct
 import sys
-import threading
 import time
 from collections import Counter, defaultdict
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -77,9 +74,13 @@ from PIL import Image
 from playwright.sync_api import Browser, ConsoleMessage, Page, Request, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
+# The local server lives in scripts/design_server.py (standard library, tested in
+# tests/unit/test_scripts.py): imported as part of the repo's scripts package.
+sys.path.insert(0, str(ROOT))
+from scripts.design_server import serve  # noqa: E402
+
 PANEL = "design/prototype/antifaz-panel.html"
 TOKENS = "design/prototype/tokens-preview.html"
-ALLOWED_PREFIXES = ("/design/", "/docs/images/", "/src/antifaz/web/static/")
 
 WIDTHS = [(390, 844), (768, 1024), (1024, 768), (1280, 800)]
 THEMES = ["light", "dark"]
@@ -89,31 +90,6 @@ VIEWS = ["playground", "live", "keys", "policies", "status"]
 AXE_WIDTHS = [1280, 390]
 # Scroll containers that are meant to scroll sideways (the text is reachable, not cut).
 INTENDED_SCROLLERS = ("app-tablist", "yaml")
-
-
-class Handler(SimpleHTTPRequestHandler):
-    """Serves only the prototype folders, quietly."""
-
-    def do_GET(self) -> None:
-        if not self.path.startswith(ALLOWED_PREFIXES):
-            self.send_error(403)
-            return
-        super().do_GET()
-
-    def do_HEAD(self) -> None:
-        if not self.path.startswith(ALLOWED_PREFIXES):
-            self.send_error(403)
-            return
-        super().do_HEAD()
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-
-def serve() -> tuple[ThreadingHTTPServer, str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(ROOT)))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 
 # Runs in the page: everything that must hold at rest, in the current view and state.
