@@ -369,6 +369,17 @@ def test_the_relay_publishes_on_127_0_0_1_only_and_keeps_the_hardening() -> None
     assert sorted(relay["networks"]) == ["e2e-edge", INTERNAL_NETWORK]
 
 
+def test_the_ci_prints_the_docker_versions_before_the_e2e_tests() -> None:
+    """inhibit_ipv4 and the internal network's behaviour depend on the Docker version."""
+    ci = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    steps = ci["jobs"]["image"]["steps"]
+    names = [step.get("name") for step in steps]
+    versions = names.index("Docker versions")
+    assert versions < names.index("End-to-end tests")
+    assert steps[versions]["run"].split("\n")[:2] == ["docker version", "docker compose version"]
+    assert set(steps[versions]) == {"name", "run"}
+
+
 def test_the_e2e_fixtures_use_the_no_egress_file() -> None:
     from tests.e2e import conftest
 
