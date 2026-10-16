@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Antifaz · Panel (prototipo)</title>
 <link rel="icon" href="../../docs/images/logo.svg" type="image/svg+xml">
-<!-- Fonts bundled with Antifaz (design/fonts, OFL-1.1): no external requests. -->
-<link rel="stylesheet" href="../fonts/fonts.css">
-<link rel="stylesheet" href="../tokens.css">
+<!-- Fonts and tokens bundled with Antifaz (src/antifaz/web/static, the same files the panel
+     serves; fonts OFL-1.1): no external requests. -->
+<link rel="stylesheet" href="../../src/antifaz/web/static/fonts.css">
+<link rel="stylesheet" href="../../src/antifaz/web/static/tokens.css">
 <script>
 /* Entry: only the first time per session and never with reduced motion. Decided here, before the
    first paint, so the panel never flashes behind the doors. If the browser does not let the page
@@ -20,7 +21,7 @@
 /* Layout: a macOS-style window (translucent sidebar + main view) floating on a soft ambient
    glow. Near-monochrome; indigo only marks actions, focus, the [[MARKERS]] and the mask.
    The window is a size container, so "Móvil" and a real phone use the same rules.
-   Colours come only from design/tokens.css.
+   Colours come only from src/antifaz/web/static/tokens.css.
    Redesign, step 5: the shell (frosted window, sidebar, header, phone bar), the five views with
    their five states, the mask animation and the entry all use the new language. Motion uses the
    Web Animations API (no library) and moves only transform and opacity, plus the width of each
@@ -1463,7 +1464,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   txt.addEventListener("keydown",function(e){ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); } });
   if(/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent)) document.getElementById("pg-mod").textContent="⌘";
 
-  /* ---- Motion: Web Animations API, no library. Easing curves come from design/tokens.css. ---- */
+  /* ---- Motion: Web Animations API, no library. Easing curves come from tokens.css (src/antifaz/web/static). ---- */
   function token(n,fb){ return getComputedStyle(root).getPropertyValue(n).trim()||fb; }
   var EASE={out:token("--ease-out","cubic-bezier(.22,1,.36,1)"),pop:token("--ease-pop","cubic-bezier(.34,1.56,.64,1)"),
     sweep:token("--ease-sweep","cubic-bezier(.45,0,.55,1)"),inout:token("--ease-in-out","cubic-bezier(.65,0,.35,1)"),

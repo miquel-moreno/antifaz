@@ -18,11 +18,12 @@ pyproject.toml or uv.lock. Playwright needs its own Chromium once:
 `uv run --with playwright==1.63.0 playwright install chromium`.
 
 It serves the repository on 127.0.0.1 (a random free port) with a small http.server that only
-answers under /design/ and /docs/images/ (the prototype loads its fonts, tokens and favicon from
-there; nothing else of the repo, and never .env, is reachable), opens the two pages in headless
-Chromium and checks, for every width (390, 768, 1024, 1280 px and 1280 px with «Móvil»), theme
-(light, dark) and motion mode (normal, system «reduce», the «Menos movimiento» toggle), the five
-views in the five states:
+answers under /design/, /docs/images/ and /src/antifaz/web/static/ (the prototype loads its
+favicon from docs/images and its fonts and tokens from the package's static folder, the same
+files the panel serves; nothing else of the repo, and never .env, is reachable), opens the two
+pages in headless Chromium and checks, for every width (390, 768, 1024, 1280 px and 1280 px with
+«Móvil»), theme (light, dark) and motion mode (normal, system «reduce», the «Menos movimiento»
+toggle), the five views in the five states:
 
 - console: no errors or warnings, and no uncaught exceptions;
 - network: every request goes to the local server (or is data:/blob:): zero third parties;
@@ -78,7 +79,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Page, Request, sync_pla
 ROOT = Path(__file__).resolve().parent.parent
 PANEL = "design/prototype/antifaz-panel.html"
 TOKENS = "design/prototype/tokens-preview.html"
-ALLOWED_PREFIXES = ("/design/", "/docs/images/")
+ALLOWED_PREFIXES = ("/design/", "/docs/images/", "/src/antifaz/web/static/")
 
 WIDTHS = [(390, 844), (768, 1024), (1024, 768), (1280, 800)]
 THEMES = ["light", "dark"]

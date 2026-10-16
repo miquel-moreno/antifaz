@@ -95,7 +95,7 @@ Mismo lenguaje que «Prueba un texto»: superficies blancas con la sombra suave 
 
 ## Comprobación final (paso 6)
 
-Hecha el **7 de octubre de 2026** con `make design-check` (`scripts/check_design.py`): Playwright 1.63.0 con Chromium sin ventana (Chrome for Testing 153.0.8010.12) y axe-core 4.12.1. El script sirve el repo en `127.0.0.1` (solo `design/` y `docs/images/`; nunca `.env`), abre las dos páginas y comprueba todo en el estado de reposo (las animaciones se llevan a su final antes de medir). Se puede repetir cuando se quiera; no forma parte de `make check`.
+Hecha el **7 de octubre de 2026** con `make design-check` (`scripts/check_design.py`): Playwright 1.63.0 con Chromium sin ventana (Chrome for Testing 153.0.8010.12) y axe-core 4.12.1. El script sirve el repo en `127.0.0.1` (solo `design/`, `docs/images/` y, desde el PR 11c-1, `src/antifaz/web/static/`; nunca `.env`), abre las dos páginas y comprueba todo en el estado de reposo (las animaciones se llevan a su final antes de medir). Se puede repetir cuando se quiera; no forma parte de `make check`.
 
 **Qué se ha comprobado**: anchos de 390, 768, 1024 y 1280 px, y 1280 px con «Móvil»; tema claro y oscuro (el del sistema, emulado); tres modos de movimiento: normal, «reducir movimiento» del sistema (emulado por Playwright) y el interruptor «Menos movimiento»; en cada combinación, las cinco vistas en los cinco estados. En total, **758 combinaciones** (750 del panel y 8 de `tokens-preview.html`), en unos 8,5 minutos.
 
@@ -190,7 +190,9 @@ Desde la raíz del repo:
 python -m http.server 8765 --bind 127.0.0.1
 ```
 
-y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o <http://127.0.0.1:8765/design/prototype/tokens-preview.html> (los tokens). Hace falta el servidor porque las páginas cargan `design/tokens.css`, las fuentes de `design/fonts/` y el icono por ruta relativa. No se pide nada fuera de tu equipo.
+y abre <http://127.0.0.1:8765/design/prototype/antifaz-panel.html> (el panel) o <http://127.0.0.1:8765/design/prototype/tokens-preview.html> (los tokens). Hace falta el servidor porque las páginas cargan `tokens.css`, `fonts.css` y las fuentes de `src/antifaz/web/static/`, y el icono de `docs/images/logo.svg`, por ruta relativa. No se pide nada fuera de tu equipo.
+
+**Dónde viven los archivos de diseño** (PR 11c-1, decisión de Miquel). `tokens.css`, `fonts.css`, las dos fuentes y sus licencias OFL tienen **un solo sitio**: los estáticos del paquete, `src/antifaz/web/static/`. El panel real los sirve desde ahí y el prototipo los carga desde ahí, así que no hay copias que se separen. El logo sigue en `docs/images/logo.svg`; `src/antifaz/web/static/logo.svg` es una copia para el favicon del panel y un test comprueba que los dos son idénticos byte a byte.
 
 Para repetir la comprobación final: `make design-check` (ver «Comprobación final (paso 6)»; la primera vez, `uv run --with playwright==1.63.0 playwright install chromium`).
 
@@ -200,8 +202,8 @@ Para repetir la comprobación final: `make design-check` (ver «Comprobación fi
 |---|---|
 | `prototype/antifaz-panel.html` | La página: las cinco secciones del panel, los estados y el apartado del logo |
 | `prototype/tokens-preview.html` | Página de revisión de los tokens: colores de los dos temas lado a lado, tipografía, radios, sombras, estados y la tabla de contraste calculada en vivo. No es parte del panel |
-| `tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras, vidrio y movimiento, en claro y oscuro. Es la única fuente de colores |
-| `fonts/` | Inter y Geist Mono (woff2 oficiales, sin modificar), sus licencias OFL y `fonts.css` con los `@font-face` |
+| `../src/antifaz/web/static/tokens.css` | Colores, tipos de letra, tamaños, espacios, radios, sombras, vidrio y movimiento, en claro y oscuro. Es la única fuente de colores (vive en el paquete: ver «Cómo abrirlo») |
+| `../src/antifaz/web/static/` (fuentes) | Inter y Geist Mono (woff2 oficiales, sin modificar), sus licencias OFL y `fonts.css` con los `@font-face` |
 | `logo-mark.svg` | Solo el antifaz, en un color (`currentColor`: toma el color del texto donde se use). El logo con el cuadro está en `docs/images/logo.svg` |
 | `captures/` | Capturas de referencia hechas con Playwright: las cinco vistas en claro y oscuro, escritorio y móvil, y los otros estados de «Prueba un texto». Se repiten con `make design-captures` (ver `captures/README.md`) |
 
@@ -261,7 +263,7 @@ Con «reducir movimiento» no se anima nada: la animación se oculta y quedan la
 ## Tipos de letra
 
 - **Inter** para la interfaz y los títulos (variable, con eje de tamaño óptico: con `font-optical-sizing: auto` los títulos grandes usan su corte Display) y **Geist Mono** para marcadores, códigos y el YAML. Las dos tienen licencia **SIL Open Font License 1.1**.
-- **Van dentro del proyecto**, en `design/fonts/`, y se cargan con `design/fonts/fonts.css` (`font-display: swap`). Nada de Google Fonts: Antifaz no hace peticiones a terceros. Si no cargan, se usa la lista de fuentes del sistema de `--font-sans` y `--font-mono` (`tokens.css`).
+- **Van dentro del proyecto**, en `src/antifaz/web/static/` (hasta el PR 11c-1 estaban en `design/fonts/`), y se cargan con `fonts.css`, al lado (`font-display: swap`). Viajan en la rueda y en la imagen con sus licencias OFL al lado (un test lo comprueba). Nada de Google Fonts: Antifaz no hace peticiones a terceros. Si no cargan, se usa la lista de fuentes del sistema de `--font-sans` y `--font-mono` (`tokens.css`).
 - Ajustes de Inter en los tokens: `--font-features` (`"cv05", "cv08"`), `--tracking-body` (−0,011em), `--tracking-small` (0, para el texto de 11 a 13 px), `--font-numeric` (`tabular-nums`, también la clase `.tabular-nums`) y la escala de títulos `--text-title` (`clamp(30px, 4.4cqi, 50px)`, peso 650, −0,034em).
 - **Por qué los archivos oficiales enteros y no los recortes por alfabeto** (aprobado por Miquel al revisar el paso 1). Los recortes de Google Fonts / Fontsource (latín y latín extendido por separado, 238 KB) **quitan las variantes `cv05` y `cv08`** de Inter, que pide el diseño. Los archivos oficiales las tienen todas, también `tnum` y el eje `opsz`, y caben de sobra en el límite (414 KB los dos). Cubren latín, latín extendido y más, así que no hace falta `unicode-range`.
 
