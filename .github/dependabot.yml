@@ -21,8 +21,12 @@ updates:
     commit-message:
       prefix: "ci(deps)"
 
-  # Base images of the Dockerfile, pinned by digest (python and uv): a new digest of the same
-  # tag (Debian security rebuilds) is proposed as a PR. No `docker-compose` entry: the compose
+  # Base images of the Dockerfile, pinned by digest (python, distroless and uv): a new digest of
+  # the same tag (Debian security rebuilds) is proposed as a PR. For a tag that is not a version
+  # (distroless `nonroot`) Dependabot keeps the tag and refreshes the digest; for registries
+  # other than Docker Hub it has no publication date, so the cooldown does not apply there.
+  # python and distroless arrive as separate PRs: tests/unit/test_container_files.py fails if
+  # they stop naming the same Debian release (ADR-0019). No `docker-compose` entry: the compose
   # files only use Antifaz's own image (the published one, or antifaz:local built from this
   # Dockerfile), whose version moves with each release (a test ties it to pyproject.toml).
   - package-ecosystem: docker

@@ -472,6 +472,24 @@ With 0.1.1, your two tools are `docker compose logs antifaz` (why it does not st
 | `init` says "no terminal to ask the questions" (v0.2.0) | `docker run` without `-it`. | Add `-it`, or use `--non-interactive`. |
 | Linux: "Permission denied" when you read `.env` (v0.2.0) | `init` ran without `--user`, so the file belongs to the container user. | `sudo chown "$(id -u):$(id -g)" .env`, and next time use `--user "$(id -u):$(id -g)"`. |
 | Windows: Antifaz does not start although `.env` looks right (with v0.2.0, `doctor` says "cannot read .env as UTF-8 text") | `.env` was saved in another encoding. In Windows PowerShell 5.1, `>` and `Out-File` write UTF-16 and `Set-Content` writes ANSI. | Open `.env` in Notepad, "Save as", encoding **UTF-8**. Do not create `.env` with `>`, `Out-File` or `Set-Content`. Use `Copy-Item .env.example .env` (or `init` with v0.2.0). |
+| `docker compose exec antifaz sh` says "executable file not found" (v0.2.0) | From v0.2.0 the image is distroless: it has no shell, no `apt` and no `curl`. This is on purpose (fewer tools for an attacker). | `docker compose exec antifaz antifaz doctor` and `docker compose exec antifaz antifaz verify` still work. To look inside, see "Look inside the container" just below. |
+
+### Look inside the container (v0.2.0, image without a shell)
+
+The main way: a temporary container with tools (`busybox`) **attached** to the Antifaz one. It shares its processes (`--pid`) and its network (`--network`), so you see its processes and reach `127.0.0.1:8000` as if you were inside; the Antifaz files are under `/proc/1/root`. With `--rm` it is gone when you leave, and it does not change the Antifaz image or container.
+
+```bash
+c=$(docker compose ps -q antifaz)
+docker run --rm -it --pid=container:$c --network=container:$c --cap-add SYS_PTRACE busybox:1.37
+# Inside:
+ps                                   # process 1 is antifaz serve, as 10001
+ls -a /proc/1/root/app               # the Antifaz files
+wget -qO- http://127.0.0.1:8000/healthz
+```
+
+In PowerShell: `$c = docker compose ps -q antifaz`, then the same line with `$c`. `--cap-add SYS_PTRACE` gives that permission **only to the helper container** (without it, `/proc/1/root` says "Permission denied", because Antifaz runs as another user); the Antifaz container still has no capabilities. Careful: from there you can read what the Antifaz process can, including its environment variables (`/proc/1/environ` holds the keys). Do not share it on screen or in a ticket. Checked on 2026-10-16 with Docker Desktop 29.8.
+
+Alternative: `docker debug <container>`, which opens a shell with tools in any container, even one without a shell ([Docker documentation](https://docs.docker.com/reference/cli/docker/debug/)). It is a **Docker Desktop** feature, not part of the Docker Engine on a Linux server, and Docker says it is available with a **Pro, Team or Business** license ([Docker Desktop 4.33 announcement](https://www.docker.com/blog/docker-desktop-4-33/)); the reference page says nothing about plans, so check your license before you rely on it.
 
 ## 9. What is not tested yet
 

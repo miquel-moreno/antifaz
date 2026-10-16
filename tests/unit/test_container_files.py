@@ -43,9 +43,74 @@ def test_every_base_image_is_pinned_by_digest() -> None:
         assert re.fullmatch(r"[a-z0-9./_-]+:[\w.-]+@sha256:[0-9a-f]{64}", image), image
 
 
-def test_build_and_final_stages_use_the_same_python_image() -> None:
-    pythons = {line.split()[0] for line in _instructions("FROM") if line.startswith("python:")}
+def _stages() -> dict[str, str]:
+    """{stage name: base image} from every `FROM image AS name` line."""
+    stages = {}
+    for line in _instructions("FROM"):
+        image, as_, name = line.split()
+        assert as_ == "AS", line
+        stages[name] = image
+    return stages
+
+
+def _stage(name: str) -> str:
+    """The text of one stage (continuation lines joined), from its FROM to the next FROM."""
+    joined = re.sub(r"\\\n\s*", " ", DOCKERFILE)
+    after = re.split(rf"^FROM\s+\S+\s+AS\s+{name}\s*$", joined, flags=re.MULTILINE)[1]
+    return re.split(r"^FROM\s", after, flags=re.MULTILINE)[0]
+
+
+# Issue 54 (ADR-0019): the build and the Python runtime come from the official Python image of
+# Debian 13 "trixie", the final stage is distroless cc on Debian 13. The tag names the Debian
+# release, so a Dependabot PR that moves only one of them to another Debian fails here.
+PYTHON_IMAGE = re.compile(r"python:3\.12-slim-trixie@sha256:[0-9a-f]{64}")
+DISTROLESS_IMAGE = re.compile(r"gcr\.io/distroless/cc-debian13:nonroot@sha256:[0-9a-f]{64}")
+
+
+def test_build_and_python_stages_use_the_same_python_image() -> None:
+    stages = _stages()
+    pythons = {image for image in stages.values() if image.startswith("python:")}
     assert len(pythons) == 1
+    assert stages["build"] == stages["python"]
+    assert PYTHON_IMAGE.fullmatch(stages["build"]), stages["build"]
+
+
+def test_the_final_stage_is_distroless_cc_on_the_same_debian_release() -> None:
+    stages = _stages()
+    assert list(stages)[-1] == "runtime"
+    assert DISTROLESS_IMAGE.fullmatch(stages["runtime"]), stages["runtime"]
+    # trixie is Debian 13: the Python copied in was built for the C library of the final base.
+    assert "-trixie@" in stages["python"] and "-debian13:" in stages["runtime"]
+
+
+def test_the_final_stage_runs_nothing() -> None:
+    # Distroless has no shell: a RUN there could not work, and nothing is installed or changed.
+    assert re.findall(r"^RUN\s", _stage("runtime"), re.MULTILINE) == []
+
+
+def test_the_final_stage_copies_only_python_and_the_virtualenv() -> None:
+    copies = re.findall(r"^COPY\s+(.+)$", _stage("runtime"), re.MULTILINE)
+    assert [c.strip() for c in copies] == [
+        "--from=python /usr/local/bin/python3.12 /usr/local/bin/python3.12",
+        "--from=python /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpython3.12.so.1.0",
+        "--from=python /usr/local/lib/python3.12 /usr/local/lib/python3.12",
+        "--from=build /app/.venv /app/.venv",
+    ]
+
+
+def test_the_python_stage_drops_installers_tools_and_modules_without_their_library() -> None:
+    joined = " ".join(re.findall(r"^RUN\s+(.+)$", _stage("python"), re.MULTILINE))
+    for leftover in ("site-packages/pip", "site-packages/setuptools", "site-packages/wheel"):
+        assert leftover in joined, leftover
+    for folder in ("ensurepip", "idlelib", "tkinter", "turtledemo", "ctypes", "sqlite3"):
+        assert f" {folder} " in f" {joined} ", folder
+    # The compiled modules whose system library distroless cc does not ship (ADR-0019; the e2e
+    # test checks that nothing installed needs them), removed one by one from lib-dynload.
+    assert 'rm "lib-dynload/${module}.cpython-312-x86_64-linux-gnu.so"' in joined
+    for module in ("_ctypes", "_sqlite3", "_lzma", "_bz2", "readline", "_curses", "_dbm"):
+        assert f" {module} " in joined, module
+    for module in ("_gdbm", "_uuid", "_crypt", "_tkinter", "_testcapi"):
+        assert f" {module} " in joined, module
 
 
 def test_the_final_stage_runs_as_a_fixed_non_root_user() -> None:
@@ -53,13 +118,16 @@ def test_the_final_stage_runs_as_a_fixed_non_root_user() -> None:
     assert users and users[-1] == "10001:10001"
 
 
-def test_the_image_has_a_healthcheck_without_curl() -> None:
+def test_the_image_has_a_healthcheck_without_curl_or_a_shell() -> None:
     (healthcheck,) = _instructions("HEALTHCHECK")
     assert "antifaz.healthcheck" in healthcheck
     assert "curl" not in healthcheck
+    # Exec form: there is no shell in the image to run a CMD-SHELL healthcheck.
+    assert '["python", "-m", "antifaz.healthcheck"]' in healthcheck
+    assert "CMD-SHELL" not in DOCKERFILE
     # Nothing is installed with the system package manager (no curl, wget or shells added).
     for line in _instructions("RUN"):
-        assert "apt-get install" not in line and "apk " not in line, line
+        assert "apt-get" not in line and "apk " not in line, line
 
 
 def test_the_image_runs_the_antifaz_command_and_serves_by_default() -> None:
@@ -70,26 +138,6 @@ def test_the_image_runs_the_antifaz_command_and_serves_by_default() -> None:
     final = DOCKERFILE.rsplit("AS runtime", 1)[1]
     assert final.index("USER 10001:10001") < final.index("ENTRYPOINT")
     assert "uvicorn" not in " ".join(_instructions("ENTRYPOINT") + _instructions("CMD"))
-
-
-def test_the_final_stage_removes_pip_and_ensurepip() -> None:
-    final = re.sub(r"\\\n\s*", " ", DOCKERFILE.rsplit("AS runtime", 1)[1])
-    joined = " ".join(re.findall(r"^RUN\s+(.+)$", final, re.MULTILINE))
-    for leftover in ("site-packages/pip", "site-packages/setuptools", "site-packages/wheel"):
-        assert leftover in joined, leftover
-    assert "ensurepip" in joined and "/usr/local/bin/pip" in joined
-
-
-def test_the_final_stage_applies_debian_security_updates_without_installing() -> None:
-    final = re.sub(r"\\\n\s*", " ", DOCKERFILE.rsplit("AS runtime", 1)[1])
-    runs = re.findall(r"^RUN\s+(.+)$", final, re.MULTILINE)
-    (upgrade,) = [line for line in runs if "apt-get upgrade" in line]
-    assert "apt-get update" in upgrade and "-y --no-install-recommends" in upgrade
-    assert "rm -rf /var/lib/apt/lists/*" in upgrade
-    assert "apt-get install" not in upgrade and "dist-upgrade" not in upgrade
-    # Before pip is removed, and before the switch to the non-root user.
-    assert final.index("apt-get upgrade") < final.index("site-packages/pip")
-    assert final.index("apt-get upgrade") < final.index("USER ")
 
 
 def test_the_image_installs_no_dev_dependencies_and_no_extras() -> None:
@@ -233,13 +281,32 @@ def test_grype_gate_fails_only_on_high_or_critical_with_a_fix() -> None:
 
 
 def test_grype_full_report_lists_everything_and_never_fails() -> None:
+    # The same full report twice: a table to read and JSON for check_scan_sees (issue 54).
     reports = [s for s in _grype_steps() if s["with"].get("fail-build") is False]
-    assert len(reports) == 1
-    (report,) = reports
-    assert report["with"]["only-fixed"] is False
-    assert "config" not in report["with"]  # the gate's ignore rules do not hide anything here
-    assert report["id"] == "grype-report"
-    assert report["with"]["output-file"] == "grype-report.txt"
+    assert [(r["id"], r["with"]["output-format"], r["with"]["output-file"]) for r in reports] == [
+        ("grype-report", "table", "grype-report.txt"),
+        ("grype-json", "json", "grype-report.json"),
+    ]
+    for report in reports:
+        assert report["with"]["only-fixed"] is False
+        assert "config" not in report["with"]  # the gate's ignore rules hide nothing here
+        assert report["with"]["image"] == "antifaz:local"
+
+
+def test_ci_fails_if_the_scanners_stop_seeing_the_system_packages() -> None:
+    """Issue 54: on distroless, Debian packages are only visible through status.d records."""
+    steps = _image_steps()
+    (sbom,) = [s for s in steps if str(s.get("uses", "")).startswith("anchore/sbom-action@")]
+    assert sbom["with"]["output-file"] == "antifaz-image.cdx.json"
+    (check,) = [s for s in steps if "scripts.check_scan_sees" in str(s.get("run", ""))]
+    assert check["run"].split() == [
+        "python3", "-m", "scripts.check_scan_sees",
+        "--sbom", "antifaz-image.cdx.json", "--grype", "grype-report.json",
+        "--package", "zlib1g", "--vulnerability", "CVE-2026-85091", "--python", "3.12",
+    ]  # fmt: skip
+    json_report = next(s for s in steps if s.get("id") == "grype-json")
+    gate = next(s for s in _grype_steps() if s["with"].get("fail-build") is True)
+    assert steps.index(sbom) < steps.index(json_report) < steps.index(check) < steps.index(gate)
 
 
 def test_grype_full_report_is_uploaded_even_when_the_gate_fails() -> None:
@@ -247,7 +314,7 @@ def test_grype_full_report_is_uploaded_even_when_the_gate_fails() -> None:
     (upload,) = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
     assert re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", upload["uses"])
     assert "always()" in upload["if"] and "steps.grype-report.outcome" in upload["if"]
-    assert upload["with"]["path"] == "grype-report.txt"
+    assert upload["with"]["path"].split() == ["grype-report.txt", "grype-report.json"]
     assert upload["with"]["retention-days"] == 30
     # After the gate, so a failing gate still uploads the report.
     gate = next(s for s in _grype_steps() if s["with"].get("fail-build") is True)

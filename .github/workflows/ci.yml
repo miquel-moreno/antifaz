@@ -153,6 +153,7 @@ jobs:
           syft-version: v1.51.1
           format: cyclonedx-json
           artifact-name: antifaz-image.cdx.json
+          output-file: antifaz-image.cdx.json
           upload-artifact-retention: 30
           upload-release-assets: false
       # Full report: every vulnerability Grype finds, fixed or not. Never fails; it is
@@ -167,6 +168,23 @@ jobs:
           only-fixed: false
           output-format: table
           output-file: grype-report.txt
+      # The same full report as JSON, for the check below (and uploaded with the table).
+      - name: Vulnerability report of the image as JSON (Grype, full, never fails)
+        id: grype-json
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: antifaz:local
+          grype-version: v0.118.0
+          fail-build: false
+          only-fixed: false
+          output-format: json
+          output-file: grype-report.json
+      # On distroless, Debian packages are visible only through /var/lib/dpkg/status.d and
+      # CPython only through its binary: if the scanners lost them, the gate below would pass
+      # for the wrong reason. Canaries: zlib1g, its unfixed CVE-2026-85091 and CPython 3.12.x
+      # (issue 54, ADR-0019). Standard library only.
+      - name: Check that the scanners still see the system packages
+        run: python3 -m scripts.check_scan_sees --sbom antifaz-image.cdx.json --grype grype-report.json --package zlib1g --vulnerability CVE-2026-85091 --python 3.12
       # Gate: fails on high or critical only when a fix exists (an upgrade can remove it).
       # .github/grype-gate.yaml lists the few ignored findings, each with its reason.
       - name: Vulnerability gate of the image (Grype, high or critical with a fix)
@@ -185,6 +203,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: grype-report
-          path: grype-report.txt
+          path: |
+            grype-report.txt
+            grype-report.json
           retention-days: 30
           if-no-files-found: error

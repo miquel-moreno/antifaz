@@ -6,8 +6,8 @@ looked like. So every check inside the container uses the image's `python`
 (tests/e2e/image_probes.py), and this test fails if a shell or a coreutil comes back.
 
 It reads the string values of the Python sources (dict keys and subscripts are names of JSON
-fields, not commands) and the YAML files of tests/e2e. ABSENT_TOOLS is the one exception: it
-lists the commands the image must NOT have.
+fields, not commands) and the YAML files of tests/e2e. ABSENT_SHELLS and ABSENT_TOOLS are the
+exceptions: they list the commands the image must NOT have.
 """
 
 import ast
@@ -31,7 +31,7 @@ SHELL_PATTERNS = (
     re.compile(r"CMD-SHELL"),
     re.compile(r"/bin/(?:ba|da)?sh\b"),
 )
-ALLOWED_LISTS = frozenset({"ABSENT_TOOLS"})
+ALLOWED_LISTS = frozenset({"ABSENT_SHELLS", "ABSENT_TOOLS"})
 
 
 def _skipped_nodes(tree: ast.AST) -> set[int]:
@@ -116,6 +116,7 @@ def test_the_check_finds_a_shell_or_a_coreutil(source: str) -> None:
         'body = {"id": "chatcmpl-e2e"}',
         'event["id"]',
         'ABSENT_TOOLS = ("curl", "sh", "bash", "which")',
+        'ABSENT_SHELLS = ("sh", "bash", "dash", "busybox")',
         'docker("run", "--rm", "--entrypoint", "python", IMAGE, "-c", "import os")',
         '"""A docstring that says the image has no sh, no id and no ls."""',
     ],
