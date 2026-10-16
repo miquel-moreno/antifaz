@@ -7,6 +7,7 @@ names and paths only, never the contents of a file.
 """
 
 import subprocess
+from collections.abc import Mapping
 
 from tests.e2e.conftest import IMAGE, docker
 
@@ -130,6 +131,63 @@ for name in sorted(names):
 
 # Modules that only work on Windows: they fail on Linux in any image, with or without ctypes.
 WINDOWS_ONLY_MODULES = frozenset({"click._winconsole"})
+
+# Optional packages that some module of an installed package imports but that the image does not
+# install, each with its reason. Compared with what is really missing: a new one fails (look at
+# what needs it), and one that is no longer missing fails too (take it off the list).
+EXPECTED_MISSING: dict[str, str] = {
+    "trio": "the trio backend of anyio, httpcore and websockets; Antifaz runs on asyncio",
+    "pytest": "anyio's pytest plugin; pytest is never shipped in the image",
+    "IPython": "the IPython extension of python-dotenv",
+    "h2": "HTTP/2 in httpcore; the provider client speaks HTTP/1.1",
+    "socksio": "SOCKS proxies in httpcore; not supported by Antifaz",
+    "pygments": "colours of the httpx command line, which the image never runs",
+    "mypy": "pydantic's mypy plugin, a development tool",
+    "hypothesis": "pydantic v1's Hypothesis plugin, a test tool",
+    "opentelemetry": "starlette's optional OpenTelemetry middleware, not used",
+    "itsdangerous": "starlette's session middleware; the panel has its own sessions",
+    "zuvloop": "an experimental uvicorn event loop; Antifaz uses uvloop",
+    "zttp": "uvicorn's experimental HTTP implementations; Antifaz uses httptools",
+    "wsproto": "uvicorn's wsproto websockets; Antifaz serves no websockets",
+    "gunicorn": "uvicorn's gunicorn worker; antifaz serve runs uvicorn alone",
+}
+
+
+def import_problems(
+    output: str,
+    expected_missing: Mapping[str, str],
+    *,
+    windows_only: frozenset[str] = WINDOWS_ONLY_MODULES,
+    minimum: int = 900,
+) -> list[str]:
+    """What is wrong in the output of IMPORT_EVERYTHING (empty when everything is as expected).
+
+    Any failure inside `antifaz` or of a top-level name is a problem; otherwise a module may
+    fail only because a package of `expected_missing` is not installed, or because it is
+    Windows-only. Every package of `expected_missing` must really be missing.
+    """
+    lines = output.splitlines()
+    problems = []
+    first = lines[0].split() if lines else []
+    if len(first) != 2 or first[0] != "modules" or int(first[1]) < minimum:
+        problems.append(f"fewer than {minimum} modules were imported: {lines[:1]}")
+    missing: set[str] = set()
+    for line in lines[1:]:
+        _, name, kind, lost, *flags = line.split()
+        if name == "antifaz" or name.startswith("antifaz."):
+            problems.append(f"antifaz module does not import: {name} ({kind} {lost})")
+        elif "top" in flags:
+            problems.append(f"top-level module does not import: {name} ({kind} {lost})")
+        elif kind == "not-installed" and lost.split(".")[0] in expected_missing:
+            missing.add(lost.split(".")[0])
+        elif kind == "not-installed":
+            problems.append(f"unexpected missing package {lost} (needed by {name})")
+        elif name not in windows_only:
+            problems.append(f"module needs something the image lacks: {name} ({kind} {lost})")
+    for package in sorted(set(expected_missing) - missing):
+        problems.append(f"listed as missing but nothing misses it now: {package}")
+    return problems
+
 
 # Standard-library modules removed from the image (issue 54, ADR-0019): their system libraries
 # (libffi, sqlite, liblzma, libbz2, readline, ncurses, gdbm, Berkeley DB, libuuid, libcrypt, Tk)

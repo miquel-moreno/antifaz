@@ -16,12 +16,13 @@ import pytest
 from tests.e2e.conftest import IMAGE, Stack, docker
 from tests.e2e.image_probes import (
     BUILD_APP,
+    EXPECTED_MISSING,
     HARDENED,
     IMPORT_ALL,
     IMPORT_EVERYTHING,
     NER_FAKE_POOL,
     REQUIRED_MODULES,
-    WINDOWS_ONLY_MODULES,
+    import_problems,
     python_in_image,
 )
 
@@ -48,23 +49,14 @@ def test_the_image_imports_every_required_module(stack: Stack) -> None:
 def test_the_image_imports_every_module_of_every_installed_package(stack: Stack) -> None:
     """Issue 54: a standard-library module was removed only because nothing installed needs it.
 
-    A module may fail only because an optional third-party package is not installed (trio,
-    h2, gunicorn...) or because it is Windows-only. Every top-level name must import, and no
-    module may miss a standard-library module (_ctypes, _sqlite3, _lzma...) or a library.
+    At least 900 modules. Nothing inside `antifaz` and no top-level name may fail; any other
+    module may fail only because a package of EXPECTED_MISSING (each with its reason) is not
+    installed, or because it is Windows-only. Every listed package must really be missing.
     """
     result = python_in_image(IMPORT_EVERYTHING, timeout=300)
     assert result.returncode == 0, result.stderr[-2000:]
-    lines = result.stdout.splitlines()
-    assert lines[0].startswith("modules ") and int(lines[0].split()[1]) > 500, lines[:1]
-    failures = [line.split() for line in lines[1:]]
-    tops = [" ".join(f) for f in failures if f[-1] == "top"]
-    assert tops == [], "top-level modules that do not import:\n" + "\n".join(tops)
-    wrong = [
-        " ".join(f)
-        for f in failures
-        if f[2] != "not-installed" and f[1] not in WINDOWS_ONLY_MODULES
-    ]
-    assert wrong == [], "modules that need something the image lacks:\n" + "\n".join(wrong)
+    problems = import_problems(result.stdout, EXPECTED_MISSING)
+    assert problems == [], "\n".join(problems)
 
 
 def test_the_ner_process_pool_runs_in_the_image_with_the_fake_backend(stack: Stack) -> None:
