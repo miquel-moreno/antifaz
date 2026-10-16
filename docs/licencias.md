@@ -17,6 +17,8 @@ Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que
 | Paquete | Licencia | Para qué |
 |---|---|---|
 | anyio | MIT | Ya venía con Starlette y httpx; se declara porque el streaming (parte 5c) la usa directamente para cerrar la conexión con el proveedor aunque el cliente se vaya (`CancelScope(shield=True)`). |
+| jinja2 | BSD-3-Clause (sus metadatos: «BSD License») | Plantillas del panel (ADR-0018, PR 11c-1), con autoescape. Versión 3.1.6 en `uv.lock`. Antes solo llegaba con el extra `ner` (por torch); ahora es directa y se distribuye siempre, así que sale de `RECORDED_EXTRA` y se comprueba con sus metadatos instalados. |
+| markupsafe | BSD-3-Clause | Llega con jinja2 (el escape de las plantillas). Versión 3.0.3 en `uv.lock`. Igual que jinja2: ya no es solo del extra `ner`. |
 
 ## Solo para desarrollo: los SDK oficiales de los tests de contrato
 
@@ -72,7 +74,6 @@ axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, 
 | tqdm | 4.70.1 | MPL-2.0 AND MIT | gliner, transformers (ver copyleft débil) |
 | sympy, mpmath | 1.14.0, 1.3.0 | BSD | torch |
 | networkx | 3.7 | BSD-3-Clause | torch |
-| jinja2, markupsafe | 3.1.6, 3.0.3 | BSD | torch |
 | fsspec, filelock | 2026.9.0, 4.0.6 | BSD-3-Clause, MIT | torch, huggingface-hub |
 | setuptools | 84.0.0 | MIT | torch |
 | typer, rich, shellingham, markdown-it-py, mdurl, pygments, colorama | — | MIT, MIT, ISC, MIT, MIT, BSD-2-Clause, BSD | huggingface-hub (su línea de comandos) |

@@ -136,6 +136,24 @@ def test_every_package_only_the_extras_bring_has_a_recorded_license() -> None:
     assert with_extras - without <= set(check_licenses.RECORDED_EXTRA)
 
 
+def test_the_extra_record_holds_only_packages_that_only_the_extras_bring() -> None:
+    """A package that also ships without the extras is checked from its installed metadata:
+    a stale record would hide what its metadata says now."""
+    with_extras = {name for name, _ in check_licenses.runtime_dependencies()}
+    without = {name for name, _ in check_licenses.runtime_dependencies(extras=False)}
+
+    assert set(check_licenses.RECORDED_EXTRA) <= with_extras - without
+
+
+def test_jinja2_ships_without_any_extra() -> None:
+    """The panel's templates (ADR-0018): Jinja2 and MarkupSafe are direct runtime packages."""
+    without = {name for name, _ in check_licenses.runtime_dependencies(extras=False)}
+
+    assert {"jinja2", "markupsafe"} <= without
+    assert classify(check_licenses.license_texts("jinja2")) is Verdict.OK
+    assert classify(check_licenses.license_texts("markupsafe")) is Verdict.OK
+
+
 def test_recorded_licenses_match_the_installed_metadata() -> None:
     """Where the extra is installed, what was recorded by hand must say the same."""
     checked = 0
