@@ -13,6 +13,14 @@ import httpx
 import pytest
 
 from tests.e2e.conftest import IMAGE, SUMMARY, Stack, _wait_healthy, docker
+from tests.e2e.image_probes import (
+    ABSENT_TOOLS,
+    FIND_ENV_FILES,
+    LIST_APP,
+    UID_GID,
+    WHICH,
+    python_in_image,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -76,9 +84,9 @@ def test_a_request_without_the_key_is_refused(stack: Stack) -> None:
 
 
 def test_the_gateway_runs_as_a_fixed_non_root_user(stack: Stack) -> None:
-    result = stack.compose("exec", "-T", "antifaz", "id", "-u")
+    result = stack.compose("exec", "-T", "antifaz", "python", "-c", UID_GID)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "10001"
+    assert result.stdout.strip() == "10001 10001"
     user = docker("image", "inspect", "--format", "{{.Config.User}}", IMAGE).stdout.strip()
     assert user == "10001:10001"
 
@@ -108,23 +116,24 @@ def test_the_container_is_hardened_as_compose_says(stack: Stack) -> None:
 
 
 def test_the_image_holds_only_the_virtualenv_in_app() -> None:
-    listing = docker("run", "--rm", "--entrypoint", "ls", IMAGE, "-a", "/app")
+    listing = python_in_image(LIST_APP)
     assert listing.returncode == 0, listing.stderr
-    assert sorted(listing.stdout.split()) == [".", "..", ".venv"]
+    assert listing.stdout.split() == [".venv"]
 
 
 def test_the_image_has_no_env_file_anywhere(stack: Stack) -> None:
-    script = "find / -xdev \\( -name '.env' -o -name '.env.*' \\) -print 2>/dev/null; true"
-    found = docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c", script, timeout=180)
+    found = python_in_image(FIND_ENV_FILES, timeout=180)
     assert found.returncode == 0, found.stderr
-    assert found.stdout.strip() == ""
+    assert found.stdout.strip() == ""  # only paths would be printed, never contents
 
 
 def test_the_image_has_no_dev_tools_nor_http_clients() -> None:
-    pytest_import = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-c", "import pytest")
+    pytest_import = python_in_image("import pytest")
     assert pytest_import.returncode != 0
-    tools = docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c", "command -v curl wget pip")
-    assert tools.stdout.strip() == ""
+    assert "ModuleNotFoundError" in pytest_import.stderr
+    tools = python_in_image(WHICH, *ABSENT_TOOLS)
+    assert tools.returncode == 0, tools.stderr
+    assert tools.stdout.split() == []
 
 
 def test_the_image_ships_no_pip() -> None:

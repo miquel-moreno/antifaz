@@ -154,6 +154,35 @@ def test_the_e2e_tests_use_the_build_override() -> None:
     assert '"compose.build.yml"' in conftest
 
 
+def _verbosity(args: list[str]) -> int:
+    count = 0
+    for arg in args:
+        if re.fullmatch(r"-v+", arg):
+            count += len(arg) - 1
+        elif arg == "--verbose":
+            count += 1
+        elif re.fullmatch(r"-q+", arg):
+            count -= len(arg) - 1
+        elif arg == "--quiet":
+            count -= 1
+    return count
+
+
+def test_make_e2e_names_every_test_in_the_log() -> None:
+    """Issue 54: CI logs list each e2e test. pyproject's addopts count too (-q cancels a -v)."""
+    (recipe,) = re.findall(r"^e2e:\n\t(.+)$", MAKEFILE, re.MULTILINE)
+    pytest_ini = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    addopts = pytest_ini["tool"]["pytest"]["ini_options"].get("addopts", "").split()
+    assert _verbosity(addopts + recipe.split()) >= 1
+
+
+def test_the_verbosity_count_follows_pytest() -> None:
+    assert _verbosity(["-q", "-v"]) == 0
+    assert _verbosity(["-q", "-vv"]) == 1
+    assert _verbosity(["--quiet", "--verbose", "-v"]) == 1
+    assert _verbosity(["-qq", "-v"]) == -1
+
+
 def test_compose_reads_keys_from_the_env_file_and_never_holds_them() -> None:
     assert SERVICE["env_file"][0]["path"] == "${ANTIFAZ_ENV_FILE:-.env}"
     for name in SERVICE.get("environment", {}):

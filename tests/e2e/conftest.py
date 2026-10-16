@@ -38,8 +38,14 @@ def _free_port() -> int:
         return port
 
 
-def docker(*args: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
-    """Run the docker CLI (fixed argument list, never a shell) and capture its output."""
+def docker(
+    *args: str, timeout: float = 120, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the docker CLI (fixed argument list, never a shell) and capture its output.
+
+    `env` is the docker CLI's own environment: with `-e NAME` docker takes the value from it,
+    so a throwaway key is never in an argument.
+    """
     return subprocess.run(
         ["docker", *args],
         capture_output=True,
@@ -47,6 +53,7 @@ def docker(*args: str, timeout: float = 120) -> subprocess.CompletedProcess[str]
         encoding="utf-8",
         errors="replace",
         timeout=timeout,
+        env=env,
         check=False,
     )
 
