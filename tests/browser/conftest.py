@@ -3,9 +3,11 @@
 Playwright is imported inside the fixtures, never at the top: pytest loads this file even when
 it is given `tests/browser` without --panel, and then nothing here may need the `panel` group.
 
-- The whole session runs without any ANTIFAZ_*, OPENAI_* or ANTHROPIC_* variable and with
+- The whole session runs without any ANTIFAZ_*, OPENAI_*, ANTHROPIC_* or PLAYWRIGHT_* variable,
+  without DEBUG, DEBUG_FILE, PWDEBUG or proxies (server.isolated_variable), and with
   forbid_network() (tests/conftest.py): this Python process may only open loopback
-  connections. Playwright talks to its driver over pipes, so it is not affected.
+  connections. Playwright talks to its driver over pipes, so it is not affected. Chromium also
+  gets host resolver rules that resolve nothing but 127.0.0.1.
 - `browser_name` comes from --panel-browser (default chromium, firefox, webkit) and every test
   that uses a browser runs once per browser. One browser process per engine for the session.
 - `server`: a new gateway per test (tests/browser/server.py), stopped afterwards; no provider
@@ -24,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.browser.server import PanelServer
+from tests.browser.server import PanelServer, isolated_variable
 from tests.conftest import forbid_network, panel_browsers
 
 if TYPE_CHECKING:
@@ -33,7 +35,9 @@ if TYPE_CHECKING:
     from tests.browser.harness import NewTab, Tab
 
 ARTIFACTS = Path(__file__).resolve().parents[2] / "test-results" / "panel-browser"
-ISOLATED_PREFIXES = ("ANTIFAZ_", "OPENAI_", "ANTHROPIC_")
+# Chromium resolves no name but 127.0.0.1: an extra guard against browser-internal traffic
+# (the context route already aborts every request the page makes elsewhere).
+LAUNCH_ARGS = {"chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"]}
 FAILED = pytest.StashKey[str]()
 
 
@@ -54,7 +58,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 def isolated() -> Iterator[None]:
     with pytest.MonkeyPatch.context() as patch:
         for name in list(os.environ):
-            if name.upper().startswith(ISOLATED_PREFIXES):
+            if isolated_variable(name):
                 patch.delenv(name)
         forbid_network(patch)
         yield
@@ -70,7 +74,8 @@ def playwright(isolated: None) -> Iterator[Playwright]:
 
 @pytest.fixture(scope="session")
 def browser(playwright: Playwright, browser_name: str) -> Iterator[Browser]:
-    launched = getattr(playwright, browser_name).launch(headless=True)
+    engine = getattr(playwright, browser_name)
+    launched = engine.launch(headless=True, args=LAUNCH_ARGS.get(browser_name, []))
     yield launched
     launched.close()
 
@@ -78,9 +83,11 @@ def browser(playwright: Playwright, browser_name: str) -> Iterator[Browser]:
 @pytest.fixture
 def server(isolated: None) -> Iterator[PanelServer]:
     gateway = PanelServer()
-    gateway.start()
-    yield gateway
-    gateway.stop()
+    try:
+        gateway.start()
+        yield gateway
+    finally:
+        gateway.stop()  # socket, thread and HTTP client, also when start() failed
     assert gateway.provider_calls == [], "a browser test reached a provider"
 
 
@@ -103,6 +110,7 @@ def new_tab(
     failure = request.node.stash.get(FAILED, None)
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[-150:]
     for number, tab in enumerate(tabs):
+        tab.remember_secrets()  # this tab's cookie values and CSRF token, for the redactor
         if failure is not None:
             tab.save_failure(ARTIFACTS, f"{stem}-{number}", server.throwaway_tokens, failure)
         tab.close()

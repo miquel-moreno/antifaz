@@ -61,7 +61,7 @@ def test_collecting_without_panel_never_imports_playwright() -> None:
         "import sys, pytest\n"
         "code = pytest.main(['--collect-only', '-q', '--no-cov', '-p', 'no:cacheprovider',"
         " 'tests/browser'])\n"
-        "print('playwright' in sys.modules, 'axe_playwright_python' in sys.modules)\n"
+        "print(int(code), 'playwright' in sys.modules, 'axe_playwright_python' in sys.modules)\n"
     )
     result = subprocess.run(  # noqa: S603 - this Python, fixed arguments
         [sys.executable, "-c", code],
@@ -71,4 +71,7 @@ def test_collecting_without_panel_never_imports_playwright() -> None:
         timeout=300,
         check=False,
     )
-    assert result.stdout.strip().splitlines()[-1] == "False False", result.stdout[-2000:]
+    # 5 is pytest's NO_TESTS_COLLECTED: the folder was skipped, not broken (a collection error
+    # is 2 or 3), and nothing of the panel group was imported.
+    assert result.stdout.strip().splitlines()[-1] == "5 False False", result.stdout[-2000:]
+    assert "error" not in result.stdout.lower(), result.stdout[-2000:]

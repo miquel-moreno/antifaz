@@ -16,6 +16,7 @@
 Standard library, httpx, uvicorn and Antifaz only: no Playwright here.
 """
 
+import asyncio
 import secrets
 import socket
 import threading
@@ -29,6 +30,21 @@ from antifaz.api.app import create_app
 from antifaz.config import Settings
 
 HOST = "127.0.0.1"
+# Removed for the whole browser session (any case): Antifaz and provider settings, Playwright's
+# own switches and debug output (DEBUG=pw:* logs every protocol message, tokens included), and
+# proxies (the browsers must talk to 127.0.0.1 directly).
+ISOLATED_PREFIXES = ("ANTIFAZ_", "OPENAI_", "ANTHROPIC_", "PLAYWRIGHT_")
+ISOLATED_NAMES = frozenset(
+    {"DEBUG", "DEBUG_FILE", "PWDEBUG", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}
+)
+
+
+def isolated_variable(name: str) -> bool:
+    """Whether the browser session removes this environment variable."""
+    upper = name.upper()
+    return upper in ISOLATED_NAMES or upper.startswith(ISOLATED_PREFIXES)
+
+
 # Only a guard against a hang (a broken startup or shutdown), never a limit on speed.
 HANG_GUARD_SECONDS = 120
 
@@ -92,8 +108,8 @@ class PanelServer:
             log_level="WARNING",
             _env_file=None,  # type: ignore[call-arg]
         )
-        http = httpx.AsyncClient(transport=httpx.MockTransport(self._provider))
-        self._recorder = _PostRecorder(create_app(settings, http_client=http))
+        self._http = httpx.AsyncClient(transport=httpx.MockTransport(self._provider))
+        self._recorder = _PostRecorder(create_app(settings, http_client=self._http))
         config = uvicorn.Config(
             self._recorder,
             loop="asyncio",
@@ -138,8 +154,22 @@ class PanelServer:
             raise RuntimeError("the panel test server failed to start; see the log above")
 
     def stop(self) -> None:
+        """Stop the server (started or not) and release its socket and HTTP client."""
         self._server.should_exit = True
-        self._thread.join(HANG_GUARD_SECONDS)
-        self._socket.close()
+        try:
+            if self._thread.ident is not None:
+                self._thread.join(HANG_GUARD_SECONDS)
+        finally:
+            self._socket.close()
+            if not self._http.is_closed:
+                # In a thread of its own: Playwright's sync API keeps a loop running here.
+                closer = threading.Thread(target=asyncio.run, args=(self._http.aclose(),))
+                closer.start()
+                closer.join(HANG_GUARD_SECONDS)
         if self._thread.is_alive():
             raise RuntimeError("the panel test server did not stop (hang guard)")
+
+    @property
+    def closed(self) -> bool:
+        """The thread ended (or never started), the socket and the HTTP client are closed."""
+        return not self._thread.is_alive() and self._socket.fileno() == -1 and self._http.is_closed
