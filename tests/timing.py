@@ -9,8 +9,8 @@ work 16 times, catastrophic backtracking far more; the assertion is a ratio belo
   not count. It covers every thread of this process, which matters for the proxy tests (the
   TestClient runs the app in another thread); it does not cover child processes, and nothing
   measured with it runs in one (the NER pool is tested by facts, see test_pool.py).
-- n calibrates itself: it doubles until one run takes at least `min_seconds`, so the ratio is
-  not noise (process_time ticks every ~16 ms on Windows) on a fast or a slow machine.
+- n calibrates itself: it doubles until the best run takes at least `min_seconds` (0.1 s), so
+  the ratio is not noise (process_time ticks every ~16 ms on Windows) on any machine.
 - Best of `repeats` runs for each size: noise only ever adds time.
 - The only limit in seconds is a hang guard (120 s of wall time for one run): it is there so a
   real hang ends with a clear message, not to measure speed.
@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 MAX_RATIO = 8.0
-MIN_SECONDS = 0.05
+MIN_SECONDS = 0.1
 REPEATS = 3
 HANG_GUARD_SECONDS = 120.0
 
@@ -82,22 +82,34 @@ def measure_shape(
 ) -> Shape:
     """Time `prepare(n)()` and `prepare(4 * n)()`; only the returned callable is timed.
 
-    n starts at `start` and doubles until one run takes `min_seconds` of CPU, as long as 4n
-    stays within `limit` (when the input has a maximum size, such as the body limit). Building
-    the input happens in `prepare`, outside the measure.
+    n starts at `start` and doubles until the BEST of `repeats` runs takes `min_seconds` of CPU
+    (a first run is often slower: caches, compiled patterns), as long as 4n stays within `limit`
+    (when the input has a maximum size, such as the body limit). Building the input happens in
+    `prepare`, outside the measure.
     """
     if start < 1 or repeats < 1 or min_seconds <= 0:
         raise ValueError("start, repeats and min_seconds must be positive")
     if limit is not None and 4 * start > limit:
         raise ValueError("4 * start must fit in limit")
+
+    def can_grow() -> bool:
+        return limit is None or 8 * n <= limit
+
     n = start
-    small = _run_once(prepare(n), clock, guard_seconds)
-    while small < min_seconds and (limit is None or 8 * n <= limit):
-        n *= 2
-        small = _run_once(prepare(n), clock, guard_seconds)
     work = prepare(n)
-    for _ in range(repeats - 1):
-        small = min(small, _run_once(work, clock, guard_seconds))
+    small = _run_once(work, clock, guard_seconds)
+    while True:
+        while small < min_seconds and can_grow():  # one run per size while it is clearly short
+            n *= 2
+            work = prepare(n)
+            small = _run_once(work, clock, guard_seconds)
+        for _ in range(repeats - 1):
+            small = min(small, _run_once(work, clock, guard_seconds))
+        if small >= min_seconds or not can_grow():
+            break
+        n *= 2
+        work = prepare(n)
+        small = _run_once(work, clock, guard_seconds)
     if small <= 0:
         raise AssertionError(
             f"the work for n={n} took no measurable CPU time; give it a larger start or limit"

@@ -45,9 +45,28 @@ def test_linear_work_passes_and_n_doubles_until_the_minimum_time() -> None:
     clock = FakeClock()
     sizes: list[int] = []
     shape = assert_linear(_costing(clock, lambda n: n * 1e-4, sizes), start=10, clock=clock)
-    assert shape.n == 640  # 10, 20, ... until 0.064 s >= 0.05 s
+    assert shape.n == 1280  # 10, 20, ... until 0.128 s >= 0.1 s
     assert shape.ratio == pytest.approx(4.0)
-    assert max(sizes) == 4 * 640
+    assert max(sizes) == 4 * 1280
+
+
+def test_a_slow_first_run_does_not_stop_the_calibration_too_early() -> None:
+    # Each new input costs 3 times as much the first time (caches, compiled patterns): at
+    # n=640 the first run looks long enough (0.192 s) but the best of 3 is 0.064 s.
+    clock = FakeClock()
+
+    def prepare(n: int) -> Work:
+        runs: list[None] = []
+
+        def work() -> None:
+            clock.now += n * 1e-4 * (3 if not runs else 1)
+            runs.append(None)
+
+        return work
+
+    shape = assert_linear(prepare, start=10, clock=clock)
+    assert shape.n == 1280
+    assert shape.small == pytest.approx(0.128)
 
 
 def test_quadratic_work_fails() -> None:
@@ -109,6 +128,8 @@ def test_the_ratio_is_large_over_small() -> None:
 
 
 # --- Canaries: real code, real CPU time ---------------------------------------------------------
+# The two quadratic ones run each size once: best of 3 can only remove noise, and their x16 is
+# far above x8, so 3 runs of a 4n that takes seconds would only make the suite slower.
 
 
 def _retry_from_every_position(n: int) -> Work:
@@ -144,7 +165,7 @@ def _python_linear(n: int) -> Work:
 
 def test_canary_a_regex_that_retries_from_every_position_fails() -> None:
     with pytest.raises(AssertionError, match="grows faster than linear"):
-        assert_linear(_retry_from_every_position, start=1_000)
+        assert_linear(_retry_from_every_position, start=1_000, repeats=1)
 
 
 def test_canary_a_linear_regex_passes() -> None:
@@ -164,7 +185,7 @@ def test_canary_catastrophic_backtracking_fails_and_cannot_hang() -> None:
 
 def test_canary_a_quadratic_python_loop_fails() -> None:
     with pytest.raises(AssertionError, match="grows faster than linear"):
-        assert_linear(_python_quadratic, start=100)
+        assert_linear(_python_quadratic, start=100, repeats=1)
 
 
 def test_canary_a_linear_python_loop_passes() -> None:
