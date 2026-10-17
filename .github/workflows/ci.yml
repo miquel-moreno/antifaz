@@ -68,6 +68,69 @@ jobs:
       - name: CLI tests
         run: uv run pytest tests/unit/test_cli.py tests/unit/test_cli_init.py tests/unit/test_cli_doctor.py tests/unit/test_cli_setup_claude_code.py --no-cov
 
+  # The real panel in a real browser (PR 11c-2a, tests/browser): an in-process gateway on
+  # 127.0.0.1 with throwaway tokens, no provider and no network beyond loopback. Chromium only
+  # here; Firefox and WebKit run locally (`make panel-check`). No secret is used.
+  panel-browser:
+    name: Panel in a real browser (Chromium)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group panel
+      # The version uv.lock installed: the browser build that Playwright release expects.
+      - name: Playwright version
+        id: playwright
+        run: |
+          version=$(uv run --frozen --group panel python -c 'from importlib.metadata import version; print(version("playwright"))')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      # Downloaded once per Playwright version, then restored. No restore-keys: a new version
+      # never starts from another version's browsers.
+      - name: Cache of the Chromium headless shell
+        id: browser-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      # Only Chromium's headless shell (about 122 MB: 119.8 MB + ffmpeg 2.4 MB), on a cache miss.
+      - name: Chromium headless shell
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        env:
+          PLAYWRIGHT_VERSION: ${{ steps.playwright.outputs.version }}
+        run: |
+          echo "Chromium headless shell for Playwright ${PLAYWRIGHT_VERSION}"
+          uv run --frozen --group panel playwright install --only-shell chromium
+      # System libraries only if the runner lacks one (apt, through Playwright's own list).
+      - name: System libraries of the headless shell (only if missing)
+        run: |
+          shell=$(find ~/.cache/ms-playwright -type f -name chrome-headless-shell -print -quit)
+          test -n "$shell"
+          if ldd "$shell" | grep "not found" >/dev/null; then
+            uv run --frozen --group panel playwright install-deps chromium
+          fi
+      - name: Panel checks
+        run: make panel-check PANEL_BROWSERS=chromium
+      # Only what the harness writes on a failure: screenshots and logs with every token
+      # replaced. Never traces, videos or HAR files (they would hold tokens and cookies).
+      - name: Upload the failure screenshots and redacted logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: panel-browser-failures
+          path: |
+            test-results/panel-browser/*.png
+            test-results/panel-browser/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
   supply-chain:
     name: Vulnerabilities and licenses
     runs-on: ubuntu-latest
