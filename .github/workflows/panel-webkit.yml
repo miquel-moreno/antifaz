@@ -1,0 +1,59 @@
+name: Panel in WebKit on Linux
+
+# The panel checks (tests/browser, PR 11c-2a) in Playwright's WebKit on Linux. Only by hand or
+# when this file changes: WebKit needs its own browser and a dozen system packages, too much for
+# every push (ci.yml runs Chromium on every push; all three run locally with make panel-check).
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/panel-webkit.yml
+
+# Least privilege: nothing by default; the job asks only for what it needs.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The same uv as ci.yml (tests/unit/test_container_files.py keeps them equal).
+env:
+  UV_VERSION: "0.13.0"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  panel-webkit:
+    name: Panel in WebKit on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group panel
+      # No cache: this job is rare. The apt "Need to get" line in this step tells the size of the
+      # system packages.
+      - name: WebKit and its system packages
+        run: uv run --no-sync playwright install --with-deps webkit
+      - name: Size of the browsers
+        run: du -sh ~/.cache/ms-playwright
+      - name: Panel checks
+        run: make panel-check PANEL_BROWSERS=webkit
+      # Only what the harness writes on a failure: screenshots and logs with every token
+      # replaced. Never traces, videos or HAR files (they would hold tokens and cookies).
+      - name: Upload the failure screenshots and redacted logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: panel-webkit-failures
+          path: |
+            test-results/panel-browser/*.png
+            test-results/panel-browser/*.log
+          retention-days: 7
+          if-no-files-found: ignore

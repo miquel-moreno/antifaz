@@ -351,4 +351,7 @@ def test_the_same_uv_version_everywhere() -> None:
 
     assert len(image) == 1
     assert len(audit) == 1
-    assert image[0] == ci["env"]["UV_VERSION"] == audit[0]
+    webkit = yaml.safe_load(
+        (REPO / ".github/workflows/panel-webkit.yml").read_text(encoding="utf-8")
+    )
+    assert image[0] == ci["env"]["UV_VERSION"] == audit[0] == webkit["env"]["UV_VERSION"]
