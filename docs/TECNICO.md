@@ -842,7 +842,7 @@ Primer PR de la interfaz del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)
 - **axe, aparte.** axe se inyecta en la página y la CSP podría bloquearlo, así que se pasa en otro contexto con `bypass_csp`, como dice el ADR-0018. Se usa el `axe.min.js` que trae la rueda de axe-playwright-python, nunca un CDN.
 - **WebKit para Windows** (el de Playwright, no Safari) no guarda `SameSite` en su almacén de cookies: la cookie llega con `SameSite=Strict` (el test lo comprueba en la cabecera `Set-Cookie`, en los tres navegadores), pero WebKit la apunta como `None`. En ese motor, lo que frena las peticiones de otra web es la puerta (`Origin` y `Sec-Fetch-Site`) y el token CSRF. Safari de verdad se comprueba en 11f.
 - **Sin trazas.** Si un test falla, solo quedan una captura y un registro de texto con los tokens tapados, en `test-results/panel-browser/` (fuera de git). Nunca trazas, vídeos ni HAR de Playwright: guardarían los tokens y las cookies.
-- **CI**: el trabajo «Panel in a real browser (Chromium)» lo pasa solo en Chromium (su «headless shell», unos 122 MB), sin secretos y con permiso de solo lectura. Si falla, sube solo esas capturas y registros.
+- **CI**: el trabajo «Panel in a real browser (Chromium)» lo pasa solo en Chromium (su «headless shell», unos 122 MB que se descargan una vez por versión de Playwright y después salen de la caché de Actions, con la versión en la clave y sin claves parciales), sin secretos y con permiso de solo lectura. Si falla, sube solo esas capturas y registros.
 
 ## Decisiones técnicas del issue 1
 

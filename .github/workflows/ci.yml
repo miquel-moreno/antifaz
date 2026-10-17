@@ -92,8 +92,17 @@ jobs:
         run: |
           version=$(uv run --frozen --group panel python -c 'from importlib.metadata import version; print(version("playwright"))')
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-      # Only Chromium's headless shell (about 122 MB: 119.8 MB + ffmpeg 2.4 MB).
+      # Downloaded once per Playwright version, then restored. No restore-keys: a new version
+      # never starts from another version's browsers.
+      - name: Cache of the Chromium headless shell
+        id: browser-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      # Only Chromium's headless shell (about 122 MB: 119.8 MB + ffmpeg 2.4 MB), on a cache miss.
       - name: Chromium headless shell
+        if: steps.browser-cache.outputs.cache-hit != 'true'
         env:
           PLAYWRIGHT_VERSION: ${{ steps.playwright.outputs.version }}
         run: |

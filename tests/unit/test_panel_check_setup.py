@@ -146,6 +146,26 @@ def test_the_ci_job_reads_the_playwright_version_from_the_installed_package() ->
     assert "GITHUB_OUTPUT" in version["run"]
 
 
+def test_the_ci_job_caches_the_headless_shell_per_playwright_version() -> None:
+    (cache,) = [step for step in STEPS if step.get("uses", "").startswith("actions/cache@")]
+    assert re.fullmatch(r"actions/cache@[0-9a-f]{40}", cache["uses"])
+    assert cache["with"]["path"] == "~/.cache/ms-playwright"
+    assert cache["with"]["key"] == (
+        "ms-playwright-${{ runner.os }}-${{ runner.arch }}-"
+        "${{ steps.playwright.outputs.version }}-chromium-shell"
+    )
+    assert "restore-keys" not in cache["with"]
+    (install,) = [s for s in STEPS if "playwright install --only-shell" in s.get("run", "")]
+    assert install["if"] == f"steps.{cache['id']}.outputs.cache-hit != 'true'"
+    names = [step.get("id") for step in STEPS]
+    assert names.index("playwright") < names.index(cache["id"])
+
+
+def test_the_cache_key_follows_the_lock() -> None:
+    # The key reads the installed version, which uv.lock decides: the lock and the pin agree.
+    assert f"playwright=={_locked('playwright')}" in PYPROJECT["dependency-groups"]["panel"]
+
+
 def test_the_ci_job_uses_no_secret_and_no_expression_inside_a_script() -> None:
     assert "secrets." not in JOB_TEXT
     for step in STEPS:
