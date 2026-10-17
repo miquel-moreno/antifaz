@@ -161,6 +161,14 @@ def test_the_ci_job_caches_the_headless_shell_per_playwright_version() -> None:
     assert names.index("playwright") < names.index(cache["id"])
 
 
+def test_the_system_libraries_step_fails_without_the_binary_and_survives_pipefail() -> None:
+    (deps,) = [s for s in STEPS if "playwright install-deps" in s.get("run", "")]
+    script = deps["run"]
+    assert 'test -n "$shell"' in script  # no headless shell found: the step fails
+    assert "grep -q" not in script  # -q exits early and ldd gets SIGPIPE under pipefail
+    assert 'grep "not found" >/dev/null' in script
+
+
 def test_the_cache_key_follows_the_lock() -> None:
     # The key reads the installed version, which uv.lock decides: the lock and the pin agree.
     assert f"playwright=={_locked('playwright')}" in PYPROJECT["dependency-groups"]["panel"]

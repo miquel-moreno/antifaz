@@ -111,8 +111,9 @@ jobs:
       # System libraries only if the runner lacks one (apt, through Playwright's own list).
       - name: System libraries of the headless shell (only if missing)
         run: |
-          shell=$(find ~/.cache/ms-playwright -type f -name chrome-headless-shell | head -n 1)
-          if ldd "$shell" | grep -q "not found"; then
+          shell=$(find ~/.cache/ms-playwright -type f -name chrome-headless-shell -print -quit)
+          test -n "$shell"
+          if ldd "$shell" | grep "not found" >/dev/null; then
             uv run --frozen --group panel playwright install-deps chromium
           fi
       - name: Panel checks
