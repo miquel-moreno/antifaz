@@ -6,8 +6,8 @@ Tests marked xfail(strict=True) are findings: they turn red (XPASS) once fixed. 
 phones and emails are invented.
 """
 
-import contextlib
 import json
+import logging
 import time
 import unicodedata
 from collections.abc import Sequence
@@ -31,7 +31,7 @@ from antifaz.errors import UnmaskableField
 from antifaz.providers.openai_chat import mask_request
 from tests.integration import test_proxy_openai as oai
 from tests.integration.fakes import FakeUpstream
-from tests.nerfakes import ANA, CARMEN, FAKE_FACTORY, JORDI, NAMES, InProcess
+from tests.nerfakes import ANA, CARMEN, FAKE_FACTORY, JORDI, NAMES, InProcess, when_ready
 from tests.redteam.conftest import OPENAI_AUTH, PHONE, assert_not_sent
 
 # --- helpers -----------------------------------------------------------------------------
@@ -363,9 +363,10 @@ def test_workers_never_write_names_and_failures_block(capfd: pytest.CaptureFixtu
     pool.start()
     try:
         for trigger in ("FAKE_PRINT FAKE_RAISE", "FAKE_SLEEP", "FAKE_CRASH", "FAKE_MALFORMED"):
+            when_ready(lambda: pool.predict(["calentar"], ["person"], 0.5))  # a loaded worker
             with pytest.raises(DetectorFailed):
                 mask([f"{trigger} {CARMEN} {PHONE}"], detector=detector)
-        (ok,) = mask([f"FAKE_PRINT {CARMEN}"], detector=detector).texts
+        (ok,) = when_ready(lambda: mask([f"FAKE_PRINT {CARMEN}"], detector=detector)).texts
         assert CARMEN not in ok
     finally:
         pool.close()
@@ -383,28 +384,35 @@ def test_a_crash_in_a_late_window_blocks_the_whole_text() -> None:
         text = f"{CARMEN} " + " ".join(["relleno"] * 5000) + " FAKE_CRASH"
         with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
-        (after,) = mask([f"Soy {CARMEN}"], detector=detector).texts
+        (after,) = when_ready(lambda: mask([f"Soy {CARMEN}"], detector=detector)).texts
         assert after == "Soy [[PERSON_1]]"
     finally:
         pool.close()
 
 
-def test_a_huge_text_is_bounded_by_the_ner_time_limit() -> None:
-    """Un texto con muchas ventanas lentas (cada lote justo por debajo del límite) no debería
-    retener el NER mucho más que ANTIFAZ_NER_TIMEOUT_SECONDS."""
-    timeout = 1.0
-    pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.05})
+def test_a_huge_text_is_bounded_by_the_ner_time_limit(caplog: pytest.LogCaptureFixture) -> None:
+    """Un texto con muchas ventanas lentas (cada lote justo por debajo del límite) no retiene el
+    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: el segundo lote se corta y la petición se bloquea.
+
+    Facts, not seconds: each call of 16 windows takes 1.6 s, under its 2 s limit, so only ONE
+    deadline for the whole request can stop it (DetectorFailed and a killed worker); the ~300
+    windows would hold the NER for about 30 s."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    pool = _pool(timeout=2.0, backend={"sleep_seconds": 0.1})
     detector = Scanner(NerDetector(pool))
     pool.start()
     try:
-        text = ("FAKE_SLEEP " + "palabra " * 99) * 150  # ~100 windows, 16 per call
+        before = set(pool.worker_pids())
+        text = ("FAKE_SLEEP " + "palabra " * 99) * 450  # ~300 windows, 16 per call
         began = time.monotonic()
-        with contextlib.suppress(DetectorFailed):
+        with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
         elapsed = time.monotonic() - began
+        assert "went past the time limit" in caplog.text
+        assert before.isdisjoint(pool.worker_pids())
     finally:
         pool.close()
-    assert elapsed < 2 * timeout
+    assert elapsed < 15  # far below the ~30 s of every window
 
 
 # --- 8. configuration --------------------------------------------------------------------------
