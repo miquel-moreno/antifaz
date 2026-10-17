@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.13.0 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures
+.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures panel-check
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -31,6 +31,8 @@ help:
 	@echo "design-check  Panel prototype in Chromium: console, requests, overflow, motion, axe-core"
 	@echo "           (Playwright, axe and Pillow in the script's inline metadata; needs Playwright's Chromium)"
 	@echo "design-captures  Reference captures of the prototype into design/captures/ (same script)"
+	@echo "panel-check  The real panel in Chromium, Firefox and WebKit: CSP, console, cookies, axe"
+	@echo "           (panel group; PANEL_BROWSERS=chromium for one; browsers installed once, see CONTRIBUTING)"
 
 install:
 	uv sync
@@ -116,11 +118,19 @@ demo:
 # The panel prototype (design/prototype) in headless Chromium: console, third-party requests,
 # horizontal scroll, clipped or ellipsised text, identifiers broken inside, motion and axe-core, at
 # 390/768/1024/1280 px, both themes and reduced motion. Not part of `check`. Its dependencies
-# (Playwright, axe-playwright-python, Pillow) are in the script's PEP 723 metadata, never in uv.lock;
-# Chromium comes once with
+# (Playwright, axe-playwright-python, Pillow) are in the script's PEP 723 metadata (Playwright and axe
+# with the same pins as the `panel` group of uv.lock; a test keeps them equal); Chromium comes once with
 # `uv run --with playwright==1.63.0 playwright install chromium`.
 design-check:
 	uv run scripts/check_design.py $(ARGS)
+
+# The real panel (tests/browser) in real browsers with Playwright: an in-process gateway on
+# 127.0.0.1, throwaway tokens, no network, no provider. Not part of `check`. Its dependencies are
+# the `panel` group (never installed by `uv sync`); the browsers come once with
+# `uv run --group panel playwright install chromium firefox webkit`.
+# PANEL_BROWSERS=chromium (or a comma list) limits the run; CI runs Chromium only.
+panel-check:
+	uv run --frozen --group panel pytest tests/browser -vv --no-cov --panel -p no:cacheprovider $(if $(PANEL_BROWSERS),--panel-browser $(PANEL_BROWSERS),)
 
 # Reference captures of the prototype (design/captures/): the five views in light and dark, desktop
 # and mobile, plus the other states of the Playground. Same script and dependencies as design-check.

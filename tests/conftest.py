@@ -2,6 +2,7 @@ import ipaddress
 import os
 import socket
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +16,11 @@ from antifaz.config import Settings
 # appear in logs, error bodies or metrics.
 SENTINEL_DNI = "12345678Z"
 
+# The panel in real browsers (tests/browser, PR 11c-2a): only with --panel (`make panel-check`).
+BROWSER_TESTS = Path(__file__).parent / "browser"
+BROWSERS = ("chromium", "firefox", "webkit")
+ALL_BROWSERS = ",".join(BROWSERS)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -23,6 +29,35 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="run the end-to-end tests (Docker Compose, tests/e2e): `make e2e`",
     )
+    parser.addoption(
+        "--panel",
+        action="store_true",
+        default=False,
+        help="run the panel in real browsers (Playwright, tests/browser): `make panel-check`",
+    )
+    parser.addoption(
+        "--panel-browser",
+        default=ALL_BROWSERS,
+        help=f"comma list of the browsers for --panel (default {ALL_BROWSERS})",
+    )
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """tests/browser is not even collected without --panel: `make test` never imports
+    Playwright (only the `panel` dependency group installs it)."""
+    if config.getoption("--panel"):
+        return None
+    if collection_path == BROWSER_TESTS or BROWSER_TESTS in collection_path.parents:
+        return True
+    return None
+
+
+def panel_browsers(config: pytest.Config) -> list[str]:
+    """The browsers of --panel-browser, in order: known, not empty, not repeated."""
+    names = [name.strip() for name in str(config.getoption("--panel-browser")).split(",")]
+    if any(name not in BROWSERS for name in names) or len(set(names)) != len(names):
+        raise pytest.UsageError(f"--panel-browser takes a comma list of {ALL_BROWSERS}")
+    return names
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

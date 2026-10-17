@@ -153,6 +153,8 @@ def test_the_image_installs_no_dev_dependencies_and_no_extras() -> None:
     for line in syncs:
         assert "--frozen" in line and "--no-dev" in line
         assert "--extra" not in line and "--all-extras" not in line
+        # No dependency group either: `bench` and `panel` (Playwright, PR 11c-2a) never ship.
+        assert "--group" not in line and "--all-groups" not in line and "--only-group" not in line
 
 
 def test_no_secret_is_set_in_the_dockerfile() -> None:
@@ -349,4 +351,7 @@ def test_the_same_uv_version_everywhere() -> None:
 
     assert len(image) == 1
     assert len(audit) == 1
-    assert image[0] == ci["env"]["UV_VERSION"] == audit[0]
+    webkit = yaml.safe_load(
+        (REPO / ".github/workflows/panel-webkit.yml").read_text(encoding="utf-8")
+    )
+    assert image[0] == ci["env"]["UV_VERSION"] == audit[0] == webkit["env"]["UV_VERSION"]

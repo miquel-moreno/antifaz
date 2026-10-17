@@ -14,6 +14,16 @@ Thanks for helping. Antifaz handles personal data, so a few rules are stricter t
 - **Tests first.** New detectors come with tests that show what they find and what they
   must not find.
 
+## Requirements
+
+- Python 3.12 and [uv](https://docs.astral.sh/uv/) for everything (`make install`, `make check`).
+- **Docker Engine 28 or later with Compose v2 (`docker compose`) for `make e2e`.** The network
+  isolation of the end-to-end tests depends on it (see `docs/TECNICO.md`).
+- For `make panel-check` (the panel in real browsers, not part of `make check`): the `panel`
+  dependency group and Playwright's browsers, installed once outside the repo with
+  `uv run --group panel playwright install chromium firefox webkit` (about 120–205 MB each).
+  `make panel-check PANEL_BROWSERS=chromium` runs one browser only.
+
 ## Workflow
 
 1. Open or pick an issue.

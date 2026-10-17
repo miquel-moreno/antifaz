@@ -13,8 +13,9 @@
     make design-captures       # uv run scripts/check_design.py --captures (design/captures/)
 
 Dev tool only: it is not part of `make check` and its dependencies (Playwright and
-axe-playwright-python, which bundles axe-core) live in the inline metadata above, never in
-pyproject.toml or uv.lock. Playwright needs its own Chromium once:
+axe-playwright-python, which bundles axe-core) live in the inline metadata above, with the same
+pins as the `panel` dependency group of pyproject.toml (`make panel-check`, the real panel; a test
+keeps them equal). Playwright needs its own Chromium once:
 `uv run --with playwright==1.63.0 playwright install chromium`.
 
 It serves the repository on 127.0.0.1 (a random free port) with a small http.server that only
