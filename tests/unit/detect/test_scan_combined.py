@@ -161,13 +161,13 @@ def _visa(i: int) -> str:
     return body + str(luhn.check_digit(body))
 
 
-# Many real values in one text: a builder for n values, the type and the old count (the
-# passport keeps six digits).
+# Many real values in one text: a builder for n values, the type and the old count (house
+# numbers stay under 10 000 and the passport keeps six digits, whatever n calibrates to).
 MANY = [
     (lambda n: " ".join(f"usuario{i}@example.com" for i in range(n)), T.EMAIL, 10_000),
     (lambda n: ", ".join(f"6{i:08d}" for i in range(n)), T.PHONE, 10_000),
     (lambda n: " ".join(_visa(i) for i in range(n)), T.CREDIT_CARD, 5_000),
-    (lambda n: "; ".join(f"C/ Mayor {i + 1}, 08001" for i in range(n)), T.ADDRESS, 5_000),
+    (lambda n: "; ".join(f"C/ Mayor {i % 9_999 + 1}, 08001" for i in range(n)), T.ADDRESS, 5_000),
     (lambda n: " ".join(f"pasaporte AAA{i:06d}" for i in range(n)), T.ES_PASSPORT, 5_000),
 ]
 
