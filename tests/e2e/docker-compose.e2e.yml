@@ -1,15 +1,24 @@
-# End-to-end override (`make e2e`), always used on top of docker-compose.yml and compose.build.yml:
+# End-to-end override (`make e2e`), always used on top of docker-compose.yml, compose.build.yml
+# and tests/e2e/docker-compose.no-egress.yml:
 #   docker compose -p antifaz-e2e -f docker-compose.yml -f compose.build.yml \
-#     -f tests/e2e/docker-compose.e2e.yml ...
-# It adds a fake provider that records what it gets. The tests write a throwaway env file
-# (random keys, base URLs pointing at the fake) and pass it with --env-file and
-# ANTIFAZ_ENV_FILE, so your .env is never read. Paths are relative to the repository root.
+#     -f tests/e2e/docker-compose.no-egress.yml -f tests/e2e/docker-compose.e2e.yml ...
+# It adds a fake provider that records what it gets, on the internal network only (no way out,
+# no port of its own): the relay publishes it on 127.0.0.1 for the tests. The tests write a
+# throwaway env file (random keys, base URLs pointing at the fake, checked before Compose
+# starts) and pass it with --env-file and ANTIFAZ_ENV_FILE, so your .env is never read. Paths
+# are relative to the repository root.
 services:
   antifaz:
     depends_on:
       fake-upstream:
         condition: service_healthy
     restart: "no"
+
+  relay:
+    environment:
+      E2E_RELAY_ROUTES: "8000=${ANTIFAZ_E2E_GATEWAY_IP}:8000,9000=${ANTIFAZ_E2E_FAKE_IP}:9000"
+    ports:
+      - "127.0.0.1:${ANTIFAZ_E2E_FAKE_PORT:?set by the e2e tests}:9000"
 
   fake-upstream:
     # The Antifaz image itself (it already has Python): no other image is pulled.
@@ -18,8 +27,9 @@ services:
     entrypoint: ["python", "/e2e/fake_upstream.py"]
     volumes:
       - ./tests/e2e/fake_upstream.py:/e2e/fake_upstream.py:ro
-    ports:
-      - "127.0.0.1:${ANTIFAZ_E2E_FAKE_PORT:?set by the e2e tests}:9000"
+    networks:
+      e2e-internal:
+        ipv4_address: ${ANTIFAZ_E2E_FAKE_IP:?set by the e2e tests}
     read_only: true
     cap_drop:
       - ALL

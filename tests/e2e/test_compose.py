@@ -109,6 +109,8 @@ def test_the_container_is_hardened_as_compose_says(stack: Stack) -> None:
     assert host["CapDrop"] == ["ALL"]
     assert "no-new-privileges:true" in host["SecurityOpt"]
     assert host["Memory"] > 0 and host["NanoCpus"] > 0 and host["PidsLimit"] > 0
+    # PortBindings is the configuration docker-compose.yml declares (127.0.0.1 only). On the
+    # e2e internal network nothing is really published (test_no_egress.py checks that).
     bindings = host["PortBindings"]["8000/tcp"]
     assert [b["HostIp"] for b in bindings] == ["127.0.0.1"]
 
@@ -139,7 +141,10 @@ def test_the_image_has_no_dev_tools_nor_http_clients() -> None:
 
 def test_the_image_ships_no_pip() -> None:
     for module in ("pip", "ensurepip"):
-        found = docker("run", "--rm", "--entrypoint", "python", IMAGE, "-m", module, "--version")
+        found = docker(
+            "run", "--rm", "--network", "none", "--entrypoint", "python", IMAGE,
+            "-m", module, "--version",
+        )  # fmt: skip
         assert found.returncode != 0, f"python -m {module} works in the image"
 
 

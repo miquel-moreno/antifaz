@@ -342,6 +342,84 @@ app = create_app(Settings(_env_file=None))
 print(type(app).__name__, len(app.routes) > 0)
 """
 
+# For each "host:port" or "[v6]:port" in argv, one JSON line {"target", "result", "errno"}.
+# result: dns-failed, unreachable (ENETUNREACH/EHOSTUNREACH), no-address (EADDRNOTAVAIL,
+# EAFNOSUPPORT: no address of that family), refused, timeout (3 s), error (any other errno) or
+# connected. A literal IP is never looked up (AI_NUMERICHOST; IPv6 brackets stripped). Of all the
+# addresses of a name, the worst result is printed. It only tries a TCP connection and closes it:
+# not a byte is sent, so no request ever reaches a provider (judged by egress.canary_problems).
+REACH_OUT = """
+import errno, ipaddress, json, socket, sys
+CLASSES = {errno.ENETUNREACH: 'unreachable', errno.EHOSTUNREACH: 'unreachable',
+           errno.EADDRNOTAVAIL: 'no-address', errno.EAFNOSUPPORT: 'no-address',
+           errno.ECONNREFUSED: 'refused'}
+WORST_FIRST = ['connected', 'timeout', 'refused', 'error', 'unreachable', 'no-address']
+
+def failed(error):
+    return CLASSES.get(error.errno, 'error'), errno.errorcode.get(error.errno, str(error.errno))
+
+def attempt(family, kind, proto, address):
+    try:
+        sock = socket.socket(family, kind, proto)
+    except OSError as error:
+        return failed(error)
+    with sock:
+        sock.settimeout(3)
+        try:
+            sock.connect(address)
+        except TimeoutError:
+            return 'timeout', None
+        except OSError as error:
+            return failed(error)
+    return 'connected', None
+
+for target in sys.argv[1:]:
+    host, _, port = target.rpartition(':')
+    host = host.strip('[]')
+    try:
+        ipaddress.ip_address(host)
+        flags = socket.AI_NUMERICHOST
+    except ValueError:
+        flags = 0
+    try:
+        infos = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM, flags=flags)
+    except socket.gaierror as error:
+        result, code = 'dns-failed', str(error.errno)
+    else:
+        seen = [attempt(f, k, p, a) for f, k, p, _, a in infos]
+        result, code = min(seen, key=lambda r: WORST_FIRST.index(r[0]))
+    print(json.dumps({'target': target, 'result': result, 'errno': code}))
+"""
+
+# The gateway's effective settings, as booleans only (never a value): for each provider base
+# URL, whether it is plain http, to fake-upstream, on port 9000.
+EFFECTIVE_UPSTREAMS = """
+from urllib.parse import urlsplit
+from antifaz.config import Settings
+settings = Settings()
+for url in (settings.openai_base_url, settings.anthropic_base_url):
+    parts = urlsplit(url)
+    print(parts.scheme == 'http', parts.hostname == 'fake-upstream', parts.port == 9000)
+"""
+
+# GET the 127.0.0.1 URL in argv[1] from inside a container started with --network none, and
+# print {"status", "headers", "body" (base64)} as JSON. No redirects are followed.
+FETCH_LOCAL = """
+import base64, json, sys, urllib.error, urllib.request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+opener = urllib.request.build_opener(NoRedirect)
+try:
+    answer = opener.open(sys.argv[1], timeout=5)
+except urllib.error.HTTPError as error:
+    answer = error
+body = answer.read()
+headers = {k.lower(): v for k, v in answer.headers.items()}
+print(json.dumps({'status': answer.status, 'headers': headers,
+                  'body': base64.b64encode(body).decode()}))
+"""
+
 # No network, read-only image, no capabilities: the probes need none of them.
 HARDENED = ["--network", "none", "--read-only", "--cap-drop", "ALL"]
 HARDENED += ["--security-opt", "no-new-privileges"]
@@ -356,8 +434,10 @@ def python_in(
     timeout: float = 120,
 ) -> subprocess.CompletedProcess[str]:
     """`docker run` the image's python with `-c script args...` (never a shell)."""
-    run = ["run", "--rm", *HARDENED, *options, "--entrypoint", "python", image, "-c", script]
-    return docker(*run, *args, env=env, timeout=timeout)
+    return docker(
+        "run", "--rm", *HARDENED, *options, "--entrypoint", "python", image, "-c", script, *args,
+        env=env, timeout=timeout,
+    )  # fmt: skip
 
 
 def python_in_image(

@@ -143,6 +143,11 @@ jobs:
       # Built locally and loaded into Docker; never pushed (publishing is a separate workflow).
       - name: Build the image
         run: docker buildx build --load --tag antifaz:local .
+      # The e2e network isolation (internal network, inhibit_ipv4) depends on these versions.
+      - name: Docker versions
+        run: |
+          docker version
+          docker compose version
       # Compose with a fake provider and throwaway keys; never calls a real provider.
       - name: End-to-end tests
         run: make e2e
