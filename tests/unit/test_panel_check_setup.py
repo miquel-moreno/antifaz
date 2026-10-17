@@ -11,6 +11,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import yaml
 from scripts import check_licenses
 
 from tests.e2e.image_probes import BROWSER_CHECK_PACKAGES
@@ -81,3 +82,80 @@ def test_the_browser_marker_is_registered() -> None:
 def test_ruff_treats_the_browser_tests_like_the_other_tests() -> None:
     ignores = PYPROJECT["tool"]["ruff"]["lint"]["per-file-ignores"]
     assert set(ignores["tests/browser/**"]) == set(ignores["tests/**"])
+
+
+# --- make panel-check and its CI job ------------------------------------------------------------
+
+MAKEFILE = (REPO / "Makefile").read_text(encoding="utf-8")
+CI: dict[str, Any] = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+JOB: dict[str, Any] = CI["jobs"].get("panel-browser", {})
+STEPS: list[dict[str, Any]] = JOB.get("steps", [])
+JOB_TEXT = yaml.safe_dump(JOB)
+PANEL_CHECK = (
+    "uv run --frozen --group panel pytest tests/browser -vv --no-cov --panel -p no:cacheprovider"
+)
+
+
+def _recipe(target: str) -> str:
+    match = re.search(rf"^{target}:.*\n((?:\t.*\n)+)", MAKEFILE, re.MULTILINE)
+    assert match, target
+    return match.group(1)
+
+
+def test_make_panel_check_runs_only_the_browser_tests() -> None:
+    recipe = _recipe("panel-check")
+    assert PANEL_CHECK in recipe
+    assert "$(if $(PANEL_BROWSERS),--panel-browser $(PANEL_BROWSERS),)" in recipe
+    phony = re.search(r"^\.PHONY:(.*)$", MAKEFILE, re.MULTILINE)
+    assert phony and "panel-check" in phony.group(1).split()
+    assert re.search(r'^\t@echo "panel-check ', MAKEFILE, re.MULTILINE)
+
+
+def test_make_check_does_not_run_the_browsers() -> None:
+    (check,) = re.findall(r"^check:(.*)$", MAKEFILE, re.MULTILINE)
+    assert "panel" not in check
+    assert "--group panel" not in _recipe("test")
+
+
+def test_the_ci_job_is_chromium_only_with_least_privilege() -> None:
+    assert JOB["name"] == "Panel in a real browser (Chromium)"
+    assert JOB["runs-on"] == "ubuntu-24.04"
+    assert JOB["timeout-minutes"] == 15
+    assert JOB["permissions"] == {"contents": "read"}
+    runs = "\n".join(step.get("run", "") for step in STEPS)
+    assert "uv sync --frozen --group panel" in runs
+    assert "playwright install --only-shell chromium" in runs
+    assert "make panel-check PANEL_BROWSERS=chromium" in runs
+    for other in ("firefox", "webkit"):
+        assert other not in JOB_TEXT.lower(), other
+
+
+def test_the_ci_job_checks_out_without_the_token_and_pins_uv() -> None:
+    quality = {step["uses"] for step in CI["jobs"]["quality"]["steps"] if "uses" in step}
+    (checkout,) = [step for step in STEPS if step.get("uses", "").startswith("actions/checkout@")]
+    assert checkout["uses"] in quality  # the same pinned SHA as the other jobs
+    assert checkout["with"]["persist-credentials"] is False
+    (setup,) = [step for step in STEPS if step.get("uses", "").startswith("astral-sh/setup-uv@")]
+    assert setup["uses"] in quality
+    assert setup["with"]["version"] == "${{ env.UV_VERSION }}"
+
+
+def test_the_ci_job_reads_the_playwright_version_from_the_installed_package() -> None:
+    (version,) = [step for step in STEPS if step.get("id") == "playwright"]
+    assert 'version("playwright")' in version["run"]
+    assert "GITHUB_OUTPUT" in version["run"]
+
+
+def test_the_ci_job_uses_no_secret_and_no_expression_inside_a_script() -> None:
+    assert "secrets." not in JOB_TEXT
+    for step in STEPS:
+        assert "${{" not in step.get("run", ""), step.get("name")
+
+
+def test_the_ci_job_uploads_only_screenshots_and_redacted_logs_on_failure() -> None:
+    (upload,) = [s for s in STEPS if s.get("uses", "").startswith("actions/upload-artifact@")]
+    assert upload["if"] == "failure()"
+    paths = upload["with"]["path"].split()
+    assert paths == ["test-results/panel-browser/*.png", "test-results/panel-browser/*.log"]
+    for word in ("trace", "video", ".har", "har:"):
+        assert word not in JOB_TEXT.lower(), word
