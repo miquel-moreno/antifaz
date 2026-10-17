@@ -358,6 +358,22 @@ def test_dependabot_keeps_the_python_image_on_the_same_minor_version() -> None:
     assert [r["dependency-name"] for r in docker["ignore"]] == ["python"]
 
 
+def test_dependabot_updates_the_codeql_actions_together() -> None:
+    """CodeQL init and analyze must run the same version (PRs #82 and #84 failed apart)."""
+    (actions,) = [u for u in DEPENDABOT["updates"] if u["package-ecosystem"] == "github-actions"]
+    assert actions.get("groups", {}).get("codeql") == {"patterns": ["github/codeql-action*"]}
+
+
+def test_every_codeql_action_is_pinned_to_the_same_sha() -> None:
+    workflows = sorted((REPO / ".github/workflows").glob("*.yml"))
+    text = "\n".join(p.read_text(encoding="utf-8") for p in workflows)
+    uses = re.findall(r"uses:\s*github/codeql-action/([\w-]+)@(\S+)", text)
+    assert {name for name, _ in uses} >= {"init", "analyze"}
+    shas = {sha for _, sha in uses}
+    assert len(shas) == 1
+    assert re.fullmatch(r"[0-9a-f]{40}", shas.pop())
+
+
 def test_the_same_uv_version_everywhere() -> None:
     """The image, CI and `make audit` use one uv version: a bump changes all three at once."""
     image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)
