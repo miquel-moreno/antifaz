@@ -340,6 +340,24 @@ def test_dependabot_updates_the_base_image_digests_with_a_cooldown() -> None:
     assert docker["cooldown"]["default-days"] == 7
 
 
+def test_dependabot_keeps_the_python_image_on_the_same_minor_version() -> None:
+    """Python stays on 3.12 (ADR-0019): no 3.13/3.14 PR, but digest and patch updates still come.
+
+    Only `version-update:semver-major` and `version-update:semver-minor` are ignored for
+    `python`, so a new digest of `3.12-slim-trixie` (or a 3.12.x patch tag) is still proposed.
+    """
+    (docker,) = [u for u in DEPENDABOT["updates"] if u["package-ecosystem"] == "docker"]
+    python_rules = [r for r in docker.get("ignore", []) if r["dependency-name"] == "python"]
+    assert python_rules == [
+        {
+            "dependency-name": "python",
+            "update-types": ["version-update:semver-major", "version-update:semver-minor"],
+        }
+    ]
+    # Nothing else is ignored: distroless and uv keep their digest and version updates.
+    assert [r["dependency-name"] for r in docker["ignore"]] == ["python"]
+
+
 def test_the_same_uv_version_everywhere() -> None:
     """The image, CI and `make audit` use one uv version: a bump changes all three at once."""
     image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)

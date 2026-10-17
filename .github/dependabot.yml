@@ -35,5 +35,11 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    # Antifaz stays on Python 3.12: the distroless image copies CPython from this base
+    # (ADR-0019), so moving to 3.13+ is a deliberate change with its own tests, not a bot PR.
+    # Only major/minor bumps are ignored: new digests and 3.12.x patch tags still arrive.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     commit-message:
       prefix: "build(deps)"
