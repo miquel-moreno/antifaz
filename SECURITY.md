@@ -57,5 +57,8 @@ Antifaz sends nothing anywhere except to the providers you configure in `.env`
 connections: no analytics, no update checks, no crash reports. The Docker healthcheck only
 calls Antifaz itself on `127.0.0.1`. The optional NER runs offline (the Hugging Face libraries
 are set offline, telemetry off) from a model downloaded once with `make ner-model`, which is the
-only command that downloads it. If Antifaz ever sends anything else, it will be opt-in and
-documented here with the full list of fields.
+only command that downloads it. FastAPI ships the OpenTelemetry API (no SDK, no exporter) for
+its native telemetry; Antifaz switches it off explicitly, including the exporter
+auto-configuration and incoming `traceparent` headers, and tests it
+(`tests/integration/test_fastapi_telemetry_off.py`). If Antifaz ever sends anything else, it
+will be opt-in and documented here with the full list of fields.
