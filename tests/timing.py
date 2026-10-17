@@ -80,7 +80,9 @@ def cpu_budget(
     """Fail if the block used more than `seconds` of CPU time (every thread of this process).
 
     A loose absolute limit for work of a fixed size: waiting on a busy machine does not count,
-    so the limit can stay close to what the work really costs (with room for coverage)."""
+    so the limit can stay closer to what the work really costs than a wall-time one. Leave room
+    for coverage and for a machine with every core busy (a lower clock and shared cores made the
+    same work use about twice the CPU time)."""
     with hang_guard(guard_seconds):
         began = time.process_time()
         yield

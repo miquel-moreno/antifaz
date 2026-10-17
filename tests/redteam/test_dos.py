@@ -25,14 +25,16 @@ from tests.redteam.conftest import (
 from tests.timing import Work, assert_linear, cpu_budget
 
 MAX_BODY = 4 * 1024 * 1024
-# Loose limits in CPU seconds (tests/timing.py, cpu_budget) for the inputs of a fixed size. CPU
-# time is not inflated by a loaded machine, so they can sit closer to the real cost than the old
-# wall-time limits: 4 to 6 times what each costs under coverage on a desktop (3.2 s, 1.6 s and
-# 0.22 s on 2026-10-18). With the scanner 10 times slower the 4 MiB body takes ~30 s of CPU: it
-# would pass the old 30 s, it fails 15 s. See docs/TECNICO.md.
+# Loose limits in CPU seconds (tests/timing.py, cpu_budget) for the inputs of a fixed size.
+# CPU time ignores the time spent waiting for a busy CPU, but not everything: with every core
+# busy the clock drops and cores are shared, and the same work used about twice the CPU time.
+# Measured on a desktop on 2026-10-18 under coverage, idle / with 15 CPU burners: body 3.2 /
+# 6.2 s, history 1.6 / 3.1 s, 5 000 DNIs 0.22 / 0.45 s. The limits keep at least 2.4 times the
+# worst of those. With the scanner 10 times slower the 4 MiB body takes ~30 s of CPU: it would
+# pass the old 30 s of wall time and fails 15 s. See docs/TECNICO.md.
 BODY_CPU_SECONDS = 15
-HISTORY_CPU_SECONDS = 8
-MANY_DNIS_CPU_SECONDS = 1
+HISTORY_CPU_SECONDS = 10
+MANY_DNIS_CPU_SECONDS = 2
 
 # Inputs designed to trigger catastrophic backtracking in the usual PII regexes: a head, a unit
 # repeated n times, a tail and the size of the old fixed-time test. The speed is measured by its
