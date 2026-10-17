@@ -390,29 +390,43 @@ def test_a_crash_in_a_late_window_blocks_the_whole_text() -> None:
         pool.close()
 
 
-def test_a_huge_text_is_bounded_by_the_ner_time_limit(caplog: pytest.LogCaptureFixture) -> None:
-    """Un texto con muchas ventanas lentas (cada lote justo por debajo del límite) no retiene el
-    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: el segundo lote se corta y la petición se bloquea.
+def test_a_huge_text_is_bounded_by_the_ner_time_limit(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un texto con muchas ventanas lentas (cada lote muy por debajo del límite) no retiene el
+    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: el tercer lote se corta y la petición se bloquea.
 
-    Facts, not seconds: each call of 16 windows takes 1.6 s, under its 2 s limit, so only ONE
-    deadline for the whole request can stop it (DetectorFailed and a killed worker); the ~300
-    windows would hold the NER for about 30 s."""
+    Facts, not seconds: each call of 16 windows takes 0.8 s, far under its 2 s limit, so a
+    deadline per call would never kill it (the ~300 windows would hold the NER for ~15 s); only
+    ONE deadline for the whole request does, in the third call. Every call gets that same
+    deadline, set when the request began, and the request is released right after it."""
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
-    pool = _pool(timeout=2.0, backend={"sleep_seconds": 0.1})
+    timeout = 2.0
+    pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.05})
     detector = Scanner(NerDetector(pool))
     pool.start()
+    deadlines: list[float] = []
+    real_call = pool._call
+
+    def spy(*args: Any) -> Any:
+        deadlines.append(args[-1])  # _call(worker, texts, labels, threshold, deadline)
+        return real_call(*args)
+
+    monkeypatch.setattr(pool, "_call", spy)
     try:
-        before = set(pool.worker_pids())
+        hung = caplog.text.count("went past the time limit")
         text = ("FAKE_SLEEP " + "palabra " * 99) * 450  # ~300 windows, 16 per call
         began = time.monotonic()
         with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
-        elapsed = time.monotonic() - began
-        assert "went past the time limit" in caplog.text
-        assert before.isdisjoint(pool.worker_pids())
+        ended = time.monotonic()
+        assert caplog.text.count("went past the time limit") == hung + 1  # killed once
     finally:
         pool.close()
-    assert elapsed < 15  # far below the ~30 s of every window
+    assert len(deadlines) >= 3  # 0.8 s per call: the deadline falls in the third
+    assert len(set(deadlines)) == 1  # one deadline for the whole request
+    assert began + timeout <= deadlines[0] <= ended
+    assert ended - began - timeout < 3  # released right after it, not seconds later
 
 
 # --- 8. configuration --------------------------------------------------------------------------

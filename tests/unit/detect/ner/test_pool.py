@@ -14,6 +14,7 @@ import multiprocessing
 import threading
 import time
 from collections.abc import Callable, Iterator
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,11 @@ from tests.nerfakes import CARMEN, FAKE_FACTORY, READY_WITHIN_SECONDS, when_read
 OPTIONS = {"names": {CARMEN: "person"}, "triggers": True, "sleep_seconds": 60}
 TIMEOUT = 2.0
 FAR_BELOW_THE_HANG = 30.0  # seconds; FAKE_SLEEP would hold a worker for 60
+# How long a request may be held past its deadline: killing and replacing a worker took under
+# 0.2 s on a machine with 47 CPU burners; a slow kill or a late watchdog takes seconds more.
+OVERSHOOT = 3.0
+HUNG = "went past the time limit"
+DIED = "died or broke the protocol"
 
 
 @pytest.fixture(scope="module")
@@ -48,9 +54,15 @@ def test_a_worker_answers_with_the_entities(pool: NerPool) -> None:
     assert pool.predict([text, "nada"], ["person"], 0.5) == [_person(text), []]
 
 
-def _alive_children() -> set[int | None]:
-    """Process ids of the child processes still running (it also reaps the finished ones)."""
-    return {child.pid for child in multiprocessing.active_children()}
+def _workers(pool: NerPool) -> set[BaseProcess]:
+    """The pool's worker processes, as process objects (never compared by pid, which the
+    system can reuse); `active_children` also reaps the finished ones."""
+    pids = set(pool.worker_pids())
+    return {child for child in multiprocessing.active_children() if child.pid in pids}
+
+
+def _alive(processes: set[BaseProcess]) -> set[BaseProcess]:
+    return processes & set(multiprocessing.active_children())
 
 
 def _ask(pool: NerPool, text: str) -> Callable[[], object]:
@@ -62,14 +74,15 @@ def test_a_hung_worker_is_killed_at_the_time_limit_and_replaced(
 ) -> None:
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the hang must reach a loaded worker
-    before = set(pool.worker_pids())
+    before = _workers(pool)
+    hung = caplog.text.count(HUNG)
     started = time.monotonic()
     with pytest.raises(DetectorFailed):
         pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
-    assert time.monotonic() - started < FAR_BELOW_THE_HANG  # the fake never got to answer
-    assert "went past the time limit" in caplog.text  # the deadline, not another failure
-    assert before.isdisjoint(pool.worker_pids())  # replaced...
-    assert before.isdisjoint(_alive_children())  # ...and the hung process is gone
+    assert time.monotonic() - started < TIMEOUT + OVERSHOOT  # released at its deadline
+    assert caplog.text.count(HUNG) == hung + 1  # the deadline, not another failure
+    assert not _alive(before)  # the hung process is gone...
+    assert _workers(pool) and before.isdisjoint(_workers(pool))  # ...and replaced
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]  # the replacement serves
 
 
@@ -78,23 +91,24 @@ def test_a_worker_that_dies_blocks_the_request_and_is_replaced(
 ) -> None:
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the crash must reach a loaded worker
-    before = set(pool.worker_pids())
+    before = _workers(pool)
+    died = caplog.text.count(DIED)
     with pytest.raises(DetectorFailed):
         pool.predict(["FAKE_CRASH"], ["person"], 0.5)
-    assert "died or broke the protocol" in caplog.text
-    assert before.isdisjoint(pool.worker_pids())
-    assert before.isdisjoint(_alive_children())
+    assert caplog.text.count(DIED) == died + 1
+    assert not _alive(before)
+    assert _workers(pool) and before.isdisjoint(_workers(pool))
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
 
 
 def test_a_backend_error_blocks_without_its_text_and_keeps_the_worker(pool: NerPool) -> None:
     when_ready(_ask(pool, "calentar"))  # make sure the worker is loaded
-    before = pool.worker_pids()
+    before = _workers(pool)
     with pytest.raises(DetectorFailed) as error:
         pool.predict([f"FAKE_RAISE {SENTINEL_DNI}"], ["person"], 0.5)
     assert SENTINEL_DNI not in str(error.value)
     assert error.value.__cause__ is None
-    assert pool.worker_pids() == before
+    assert before and _workers(pool) == before  # the same process objects
 
 
 def test_malformed_output_through_the_engine_blocks(pool: NerPool) -> None:
@@ -190,7 +204,7 @@ def test_a_request_waits_at_most_its_time_limit_for_a_reloading_worker(tmp_path:
         began = time.monotonic()
         with pytest.raises(DetectorFailed):
             slow_reload.predict([CARMEN], ["person"], 0.5)
-        assert time.monotonic() - began < 4  # its 0.5 s limit, far from the 6 s of the load
+        assert time.monotonic() - began < 0.5 + OVERSHOOT  # its own limit, not the 6 s load
         assert slow_reload.status() == "starting"
         # Once loaded (plus starting a process, slow on a busy Windows machine) it serves.
         assert when_ready(_ask(slow_reload, CARMEN)) == [_person(CARMEN)]
@@ -212,17 +226,18 @@ def _count_calls(pool: NerPool, monkeypatch: pytest.MonkeyPatch) -> list[None]:
     return calls
 
 
-def _crash(pool: NerPool) -> None:
-    """Send FAKE_CRASH until it reaches a loaded worker (its pid changes): one failure in a row.
+def _crash(pool: NerPool, caplog: pytest.LogCaptureFixture) -> None:
+    """Send FAKE_CRASH until it reaches a loaded worker (the pool logs one more death): one
+    failure in a row.
 
     A worker still loading only blocks the request, neither a failure nor a success, so this
     never resets the count the way a warm-up answer would."""
     give_up = time.monotonic() + READY_WITHIN_SECONDS
+    died = caplog.text.count(DIED)
     while True:
-        before = pool.worker_pids()
         with pytest.raises(DetectorFailed):
             pool.predict([f"FAKE_CRASH {SENTINEL_DNI}"], ["person"], 0.5)
-        if pool.worker_pids() != before:
+        if caplog.text.count(DIED) > died:
             return
         assert time.monotonic() < give_up, "the replacement worker never got ready"
 
@@ -238,12 +253,23 @@ def test_repeated_failures_open_the_circuit_and_it_closes_after_the_backoff(
     calls = _count_calls(breaker, monkeypatch)
     try:
         for _ in range(2):
-            _crash(breaker)
+            _crash(breaker, caplog)
         assert breaker.status() == "circuit_open"
+        assert caplog.text.count("NER circuit open") == 1
         reached = len(calls)
+        waited: list[None] = []
+        real_get = breaker._idle.get
+
+        def get(*args: Any, **kwargs: Any) -> object:
+            waited.append(None)
+            return real_get(*args, **kwargs)
+
+        monkeypatch.setattr(breaker._idle, "get", get)
         with pytest.raises(DetectorFailed):
             breaker.predict([CARMEN], ["person"], 0.5)  # blocked at once: circuit open
         assert len(calls) == reached  # no worker was asked
+        assert waited == []  # nor waited for: refused before taking a worker
+        monkeypatch.undo()  # the next request takes a worker again
         give_up = time.monotonic() + READY_WITHIN_SECONDS
         while breaker.status() == "circuit_open" and time.monotonic() < give_up:
             time.sleep(0.05)  # until the 5 s backoff has passed (long, so no check races it)
