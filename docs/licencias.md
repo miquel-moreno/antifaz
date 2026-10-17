@@ -52,6 +52,8 @@ Playwright y axe-playwright-python sirven para abrir el panel en navegadores de 
 
 axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, así que no obliga a nada.
 
+La rueda de playwright trae dentro un Node.js (MIT, con sus avisos de terceros) que mueve los navegadores. Solo se usa en los tests y no se distribuye.
+
 **Los navegadores.** Playwright necesita sus propios navegadores (Chromium «Chrome for Testing» 153.0.8010.12 y su «headless shell», Firefox y WebKit), que se descargan una vez con `uv run --group panel playwright install chromium firefox webkit` a `%LOCALAPPDATA%\ms-playwright` (fuera del repo): entre 120 y 205 MB comprimidos cada uno. La CI solo descarga el «headless shell» de Chromium (unos 122 MB con ffmpeg), una vez por versión de Playwright, y después lo guarda en su caché. Son Chromium (BSD-3-Clause), Firefox (MPL-2.0) y WebKit (LGPL-2.1 y BSD), con componentes de terceros; no se han revisado componente por componente porque solo se usan para probar y nunca se distribuyen.
 
 ## El extra `ner` (opcional)
