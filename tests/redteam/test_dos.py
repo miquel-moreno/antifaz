@@ -22,9 +22,16 @@ from tests.redteam.conftest import (
     gateway_settings,
     openai_body,
 )
-from tests.timing import Work, assert_linear, hang_guard
+from tests.timing import Work, assert_linear, cpu_budget
 
 MAX_BODY = 4 * 1024 * 1024
+# Loose limits in CPU seconds (tests/timing.py, cpu_budget) for the inputs of a fixed size: the
+# old wall-time limits, now in CPU time, which a loaded machine does not inflate. They leave
+# room for coverage (2 to 3 times slower) over what the work costs today; a path 10 times slower
+# goes past them. The numbers measured are in docs/TECNICO.md.
+BODY_CPU_SECONDS = 15
+HISTORY_CPU_SECONDS = 8
+MANY_DNIS_CPU_SECONDS = 1
 
 # Inputs designed to trigger catastrophic backtracking in the usual PII regexes: a head, a unit
 # repeated n times, a tail and the size of the old fixed-time test. The speed is measured by its
@@ -66,7 +73,7 @@ def test_texto_enorme_cerca_del_limite(
     """El atacante manda casi 4 MiB de texto con un DNI escondido en medio."""
     filler = "palabra " * ((MAX_BODY - 1024) // 16)
     text = f"{filler} DNI {DNI} {filler}"
-    with hang_guard():  # the speed: test_el_coste_del_proxy_crece_con_el_texto
+    with cpu_budget(BODY_CPU_SECONDS, "a 4 MiB body through the proxy"):
         response = openai_proxy.post(
             "/v1/chat/completions", json=openai_body(text), headers=OPENAI_AUTH
         )
@@ -121,7 +128,7 @@ def _history(turns: int) -> dict[str, object]:
 
 def test_historial_muy_largo(anthropic_proxy: TestClient, upstream_anthropic: FakeUpstream) -> None:
     """El atacante manda un historial de miles de turnos con datos repartidos."""
-    with hang_guard():  # the speed: test_el_coste_del_historial_crece_con_los_turnos
+    with cpu_budget(HISTORY_CPU_SECONDS, "a history of 3 000 turns through the proxy"):
         response = anthropic_proxy.post(
             "/v1/messages", json=_history(3_000), headers=ANTHROPIC_AUTH
         )
@@ -183,17 +190,19 @@ def test_muchos_valores_distintos() -> None:
     más DNI cuestan unas 4 veces más, nunca 16, y ninguno sale en claro."""
     letters = "TRWAGMYFPDXBNJZSQVHLCKE"
 
+    def dnis(n: int) -> list[str]:
+        return [f"{k:08d}{letters[k % 23]}" for k in range(10_000_000, 10_000_000 + n)]
+
     def prepare(n: int) -> Work:
-        dnis = [f"{k:08d}{letters[k % 23]}" for k in range(10_000_000, 10_000_000 + n)]
-        text = " ".join(dnis)
-
-        def work() -> None:
-            result = mask(text)
-            assert all(d not in result.text for d in dnis[:100])
-
-        return work
+        text = " ".join(dnis(n))
+        return lambda: mask(text)
 
     assert_linear(prepare, start=5_000 // 4)
+    old_size = dnis(5_000)
+    text = " ".join(old_size)
+    with cpu_budget(MANY_DNIS_CPU_SECONDS, "masking 5 000 distinct DNIs"):
+        result = mask(text)
+    assert not any(d in result.text for d in old_size)
 
 
 def test_muchos_campos_desconocidos(

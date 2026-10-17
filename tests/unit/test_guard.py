@@ -8,7 +8,7 @@ from antifaz import EgressBlocked, mask
 from antifaz.detect.types import EntityType
 from antifaz.guard import check
 from antifaz.vault import Vault
-from tests.timing import Work, assert_linear, hang_guard
+from tests.timing import Work, assert_linear, cpu_budget
 
 DNI = "12345678Z"  # synthetic, valid check letter
 EMAIL = "ana@example.com"
@@ -129,7 +129,9 @@ def test_one_megabyte_with_200_values_is_fast() -> None:
     filler = "texto de relleno sin datos " * 190
     one_mb = json.dumps({"messages": [{"content": filler} for _ in range(200)]})
     assert len(one_mb) > 1_000_000
-    with hang_guard():
+    # The old wall-time limit, now in CPU time (a loaded machine does not inflate it); it
+    # costs well under 0.5 s today, and coverage makes it 2 to 3 times slower.
+    with cpu_budget(0.5, "checking 1 MB against 200 values"):
         check(one_mb, vault)
 
     def prepare(n: int) -> Work:

@@ -146,7 +146,7 @@ ADVERSARIAL = [
 @pytest.mark.parametrize(
     ("head", "unit", "tail", "size"),
     ADVERSARIAL,
-    ids=[repr(h + u + t) for h, u, t, _ in ADVERSARIAL],
+    ids=[f"{h}|{u}|{t}" for h, u, t, _ in ADVERSARIAL],  # "a"+"@" and "a@" differ
 )
 def test_scan_of_long_adversarial_input_is_fast(head: str, unit: str, tail: str, size: int) -> None:
     def prepare(n: int) -> Work:
@@ -178,14 +178,10 @@ def test_many_real_values_in_one_text_are_all_found_quickly(
 ) -> None:
     def prepare(n: int) -> Work:
         text = build(n)
-
-        def work() -> None:
-            spans = scan(text)
-            assert sum(1 for s in spans if s.type is entity_type) == n
-
-        return work
+        return lambda: scan(text)
 
     assert_linear(prepare, start=size // 4, limit=999_999)
+    assert sum(1 for s in scan(build(size)) if s.type is entity_type) == size
 
 
 # ADR-0010 and the privacy review of PR 2b: no piece of an email is left in clear.

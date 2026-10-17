@@ -221,13 +221,10 @@ def test_many_valid_identifiers_are_resolved_quickly() -> None:
     # cost about 4 times as much, and every one is found.
     def prepare(n: int) -> Work:
         text = f"{SENTINEL_DNI} " * n
-
-        def work() -> None:
-            assert len(scan(text)) == n
-
-        return work
+        return lambda: scan(text)
 
     assert_linear(prepare, start=20_000 // 4)
+    assert len(scan(f"{SENTINEL_DNI} " * 20_000)) == 20_000
 
 
 # Found by the synthetic benchmark: an accented letter before a value is part of a word.
