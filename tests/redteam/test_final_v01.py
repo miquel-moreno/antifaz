@@ -6,16 +6,20 @@ proveedor es siempre el falso que guarda los bytes recibidos.
 
 import codecs
 import gzip
+import importlib.metadata
 import io
 import json
+import os
 import socket
 import sys
 import zlib
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from scripts import check_licenses
 
 from antifaz import cli
 from tests.conftest import _loopback, forbid_network
@@ -377,9 +381,41 @@ def test_la_pasarela_no_abre_ninguna_conexion_propia(
     assert not analytics & {name.split(".")[0] for name in sys.modules}
     # FastAPI (0.142+) importa la API de OpenTelemetry, que sin SDK no hace nada (y Antifaz la
     # apaga, tests/integration/test_fastapi_telemetry_off.py). El SDK, los exportadores y las
-    # instrumentaciones, que sí envían datos, siguen prohibidos.
+    # instrumentaciones, que sí envían datos, siguen prohibidos. Se mira el proceso entero: si una
+    # dependencia de desarrollo trajera el SDK y lo cargara, este test fallaría a propósito.
     otel_senders = ("opentelemetry.sdk", "opentelemetry.exporter", "opentelemetry.instrumentation")
     assert not [name for name in sys.modules if name.startswith(otel_senders)]
+    # Cada módulo opentelemetry.* cargado es de la distribución opentelemetry-api, nada más (los
+    # paquetes de espacio de nombres, sin __file__, por sus carpetas).
+    api = importlib.metadata.distribution("opentelemetry-api")
+    api_files = {_real(api.locate_file(f)) for f in api.files or ()}
+    api_dirs = {os.path.dirname(f) for f in api_files}
+    otel_modules = [m for n, m in list(sys.modules.items()) if n.split(".")[0] == "opentelemetry"]
+    for module in otel_modules:
+        file = getattr(module, "__file__", None)
+        if file is not None:
+            assert _real(file) in api_files, module.__name__
+        else:
+            assert {_real(p) for p in module.__path__} <= api_dirs, module.__name__
+    # Y nadie registró un proveedor global: siguen los proxies de la API, que no hacen nada.
+    if otel_modules:
+        from opentelemetry import _logs, metrics, trace
+
+        assert type(trace.get_tracer_provider()).__name__ == "ProxyTracerProvider"
+        assert type(metrics.get_meter_provider()).__name__ == "_ProxyMeterProvider"
+        assert type(_logs.get_logger_provider()).__name__ == "ProxyLoggerProvider"
+
+
+def _real(path: object) -> str:
+    return os.path.normcase(str(Path(str(path)).resolve()))
+
+
+def test_lo_que_se_distribuye_no_trae_sdk_de_telemetria() -> None:
+    """`uv export --frozen --no-dev --all-extras` (lo bloqueado que se distribuye, sin red): de
+    OpenTelemetry solo la API, y ningún agente de observabilidad que se enganche solo."""
+    shipped = {name for name, _ in check_licenses.runtime_dependencies()}
+    assert {name for name in shipped if name.startswith("opentelemetry")} == {"opentelemetry-api"}
+    assert not shipped & {"opentelemetry-distro", "logfire", "ddtrace", "newrelic", "sentry-sdk"}
 
 
 # --- CLI ---------------------------------------------------------------------------------------

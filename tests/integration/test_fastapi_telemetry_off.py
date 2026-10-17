@@ -117,7 +117,8 @@ def otel(monkeypatch: pytest.MonkeyPatch) -> Iterator[Calls]:
     """Fake global, non-proxy tracer, meter and logger providers, as if an SDK were set up.
 
     They go into the API's own globals (what set_*_provider writes, which only works once per
-    process), so monkeypatch puts the proxies back after the test.
+    process), so monkeypatch puts the proxies back after the test. Setting the globals directly
+    skips the proxies' on_set_* rebinding, so nothing created meanwhile latches onto the fakes.
     """
     calls = Calls()
     monkeypatch.setattr(trace, "_TRACER_PROVIDER", RecordingTracerProvider(calls))
@@ -131,7 +132,25 @@ def otel(monkeypatch: pytest.MonkeyPatch) -> Iterator[Calls]:
 
 def _native_telemetry_enabled(app: FastAPI) -> bool:
     # FastAPI keeps no public flag: its own check, the one that decides whether to wrap a request.
-    return bool(app._native_telemetry.enabled())  # type: ignore[attr-defined]
+    return bool(app._native_telemetry.enabled())
+
+
+def _gateway_app(upstream: FakeUpstream) -> FastAPI:
+    """The gateway app without entering it, so a test can change it before the lifespan runs."""
+    http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    return create_app(gateway_settings(), http_client=http)
+
+
+def _auto_configure_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    forbid_network(monkeypatch)
+    monkeypatch.setenv("FASTAPI_OTEL_AUTO_CONFIGURE", "true")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", "otlp")
+    monkeypatch.setenv("OTEL_METRICS_EXPORTER", "otlp")
+    monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
+
+
+AUTO_CONFIGURE_FAILED = "automatic telemetry configuration failed"
 
 
 def test_the_fakes_would_be_used_by_a_default_fastapi_app(otel: Calls) -> None:
@@ -185,12 +204,7 @@ def test_fastapi_exporter_auto_configuration_stays_off(
     Without the SDK FastAPI would log "automatic telemetry configuration failed" and go on;
     with it, it would register exporters to the endpoint. Antifaz never gets that far.
     """
-    forbid_network(monkeypatch)
-    monkeypatch.setenv("FASTAPI_OTEL_AUTO_CONFIGURE", "true")
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.invalid:4318")
-    monkeypatch.setenv("OTEL_TRACES_EXPORTER", "otlp")
-    monkeypatch.setenv("OTEL_METRICS_EXPORTER", "otlp")
-    monkeypatch.setenv("OTEL_LOGS_EXPORTER", "otlp")
+    _auto_configure_env(monkeypatch)
     proxy_tracer_provider = trace.get_tracer_provider()
 
     with caplog.at_level(logging.DEBUG):
@@ -198,6 +212,30 @@ def test_fastapi_exporter_auto_configuration_stays_off(
             assert client.get("/healthz").status_code == 200
     assert "telemetry" not in caplog.text.lower()
     assert trace.get_tracer_provider() is proxy_tracer_provider
+
+
+def test_the_auto_configuration_control_logs_in_a_default_app(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Control: the same variables do reach FastAPI's auto-configuration in a default app (no
+    SDK installed, so it logs the failure and starts), so the test above can see it."""
+    _auto_configure_env(monkeypatch)
+    with caplog.at_level(logging.DEBUG), TestClient(FastAPI()) as client:
+        assert client.get("/missing").status_code == 404
+    assert AUTO_CONFIGURE_FAILED in caplog.text.lower()
+
+
+def test_auto_configure_false_alone_holds_with_the_signals_on(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With tracing, metrics and logs forced on (so FastAPI would ask for exporters), the
+    explicit auto_configure=False still sets nothing up."""
+    _auto_configure_env(monkeypatch)
+    app = _gateway_app(FakeUpstream(both_echo))
+    app._telemetry.update({"tracing": True, "metrics": True, "logs": True})
+    with caplog.at_level(logging.DEBUG), TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+    assert "telemetry" not in caplog.text.lower()
 
 
 def test_an_incoming_traceparent_is_neither_joined_nor_sent_upstream(otel: Calls) -> None:
@@ -221,6 +259,29 @@ def test_an_incoming_traceparent_is_neither_joined_nor_sent_upstream(otel: Calls
     assert TRACE_ID not in str(dict(sent))
 
 
+def test_the_traceparent_control_is_joined_when_tracing_is_forced_on(otel: Calls) -> None:
+    """Control: with tracing on and no exclusion, the upstream handler does run inside the
+    client's trace (so the test above can see it), and the gateway still does not forward
+    `traceparent` to the provider."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        context = trace.get_current_span().get_span_context()
+        seen.append(format(context.trace_id, "032x") if context.is_valid else "none")
+        return both_echo(request)
+
+    upstream = FakeUpstream(handler)
+    app = _gateway_app(upstream)
+    app._telemetry.update({"tracing": True, "exclude": None})
+    headers = {**OPENAI_AUTH, "traceparent": TRACEPARENT}
+    with TestClient(app) as client:
+        response = client.post("/v1/chat/completions", json=openai_body("hola"), headers=headers)
+        assert response.status_code == 200
+    assert seen == [TRACE_ID]
+    assert "get_tracer" in otel.calls
+    assert "traceparent" not in upstream.requests[0].headers
+
+
 def test_the_exclusion_still_skips_requests_if_a_signal_came_back_on(otel: Calls) -> None:
     """Fail-closed: should a future FastAPI turn a signal on despite the settings, `exclude`
     (which FastAPI checks before anything else) still skips every request."""
@@ -228,7 +289,7 @@ def test_the_exclusion_still_skips_requests_if_a_signal_came_back_on(otel: Calls
     for client in gateway_client(upstream):
         app = client.app
         assert isinstance(app, FastAPI)
-        app._telemetry.update(tracing=True, metrics=True, logs=True)  # type: ignore[attr-defined]
+        app._telemetry.update({"tracing": True, "metrics": True, "logs": True})
         assert _native_telemetry_enabled(app)
         response = client.post(
             "/v1/chat/completions",
