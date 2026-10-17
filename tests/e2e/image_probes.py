@@ -189,6 +189,19 @@ def import_problems(
     return problems
 
 
+# The packages of the panel's real-browser checks (the `panel` dependency group, PR 11c-2a) and
+# the ones only they bring: never in the image (tests/unit/test_panel_check_setup.py checks the
+# lock and the Dockerfile; tests/e2e/test_image_imports.py the image).
+BROWSER_CHECK_PACKAGES = frozenset({"playwright", "axe-playwright-python", "greenlet", "pyee"})
+
+# The normalised name (PEP 503) of every distribution installed, one per line.
+INSTALLED_DISTRIBUTIONS = """
+import importlib.metadata as md, re
+names = {re.sub(r'[-_.]+', '-', d.metadata['Name']).lower() for d in md.distributions()}
+print('\\n'.join(sorted(names)))
+"""
+
+
 # Standard-library modules removed from the image (issue 54, ADR-0019): their system libraries
 # (libffi, sqlite, liblzma, libbz2, readline, ncurses, gdbm, Berkeley DB, libuuid, libcrypt, Tk)
 # are not in the distroless base and no installed package needs them (IMPORT_EVERYTHING); plus

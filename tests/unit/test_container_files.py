@@ -153,6 +153,8 @@ def test_the_image_installs_no_dev_dependencies_and_no_extras() -> None:
     for line in syncs:
         assert "--frozen" in line and "--no-dev" in line
         assert "--extra" not in line and "--all-extras" not in line
+        # No dependency group either: `bench` and `panel` (Playwright, PR 11c-2a) never ship.
+        assert "--group" not in line and "--all-groups" not in line and "--only-group" not in line
 
 
 def test_no_secret_is_set_in_the_dockerfile() -> None:

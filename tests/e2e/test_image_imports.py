@@ -15,11 +15,13 @@ import pytest
 
 from tests.e2e.conftest import IMAGE, Stack, docker
 from tests.e2e.image_probes import (
+    BROWSER_CHECK_PACKAGES,
     BUILD_APP,
     EXPECTED_MISSING,
     HARDENED,
     IMPORT_ALL,
     IMPORT_EVERYTHING,
+    INSTALLED_DISTRIBUTIONS,
     NER_FAKE_POOL,
     REQUIRED_MODULES,
     import_problems,
@@ -57,6 +59,15 @@ def test_the_image_imports_every_module_of_every_installed_package(stack: Stack)
     assert result.returncode == 0, result.stderr[-2000:]
     problems = import_problems(result.stdout, EXPECTED_MISSING)
     assert problems == [], "\n".join(problems)
+
+
+def test_the_image_ships_no_package_of_the_browser_checks(stack: Stack) -> None:
+    """PR 11c-2a: Playwright, axe and what they bring live in the `panel` group, never here."""
+    result = python_in_image(INSTALLED_DISTRIBUTIONS)
+    assert result.returncode == 0, result.stderr[-2000:]
+    installed = set(result.stdout.split())
+    assert {"antifaz", "fastapi", "jinja2"} <= installed  # the listing is not empty
+    assert not installed & BROWSER_CHECK_PACKAGES
 
 
 def test_the_ner_process_pool_runs_in_the_image_with_the_fake_backend(stack: Stack) -> None:
