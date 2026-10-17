@@ -39,6 +39,7 @@ ARTIFACTS = Path(__file__).resolve().parents[2] / "test-results" / "panel-browse
 # (the context route already aborts every request the page makes elsewhere).
 LAUNCH_ARGS = {"chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"]}
 FAILED = pytest.StashKey[str]()
+NOTES = pytest.StashKey[list[str]]()
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -52,6 +53,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     if report.when == "call" and report.failed:
         item.stash[FAILED] = report.longreprtext
     return report
+
+
+def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pytest.Config) -> None:
+    """The notes the tests left (e.g. the SameSite each browser stored), at the end of the log,
+    whatever the output capture. Only attributes go there, never a value or a token."""
+    notes = config.stash.get(NOTES, [])
+    if notes:
+        terminalreporter.section("panel browser notes")
+        for note in notes:
+            terminalreporter.write_line(note)
+
+
+@pytest.fixture
+def panel_notes(request: pytest.FixtureRequest) -> list[str]:
+    """A line appended here is printed in the terminal summary."""
+    return request.config.stash.setdefault(NOTES, [])
 
 
 @pytest.fixture(scope="session")

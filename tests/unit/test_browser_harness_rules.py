@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 import pytest
 
+from tests.browser.console_rules import unexpected_console
 from tests.browser.redact import redact
 from tests.browser.server import PanelServer, isolated_variable
 
@@ -148,3 +149,57 @@ def test_a_started_gateway_stops_and_closes_its_client() -> None:
     finally:
         gateway.stop()
     assert gateway.closed
+
+
+# --- the one console message a browser may log (tests/browser/console_rules.py) ----------------
+
+BLUETOOTH = "[warning] Error with Permissions-Policy header: Unrecognized feature: 'bluetooth'."
+
+
+def test_chromium_on_linux_must_log_exactly_the_bluetooth_warning() -> None:
+    assert unexpected_console([BLUETOOTH], "chromium", "linux") == []
+    assert unexpected_console([BLUETOOTH, BLUETOOTH], "chromium", "linux") == []
+
+
+def test_on_chromium_linux_the_warning_must_be_there() -> None:
+    # When Chromium learns the feature, the exception fails and must be removed.
+    assert unexpected_console([], "chromium", "linux") != []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "[warning] Error with Permissions-Policy header: Unrecognized feature: 'camera'.",
+        BLUETOOTH + " ",
+        BLUETOOTH.replace("[warning]", "[error]"),
+        "[error] Refused to load the script",
+    ],
+)
+def test_on_chromium_linux_any_other_message_fails(message: str) -> None:
+    assert unexpected_console([BLUETOOTH, message], "chromium", "linux") == [message]
+
+
+@pytest.mark.parametrize(
+    ("browser", "platform"),
+    [("chromium", "win32"), ("chromium", "darwin"), ("firefox", "linux"), ("webkit", "linux")],
+)
+def test_elsewhere_the_warning_fails_and_silence_passes(browser: str, platform: str) -> None:
+    assert unexpected_console([BLUETOOTH], browser, platform) == [BLUETOOTH]
+    assert unexpected_console([], browser, platform) == []
+
+
+def test_the_page_tests_judge_the_console_with_the_rule() -> None:
+    pages = (BROWSER / "test_panel_pages.py").read_text(encoding="utf-8")
+    assert "unexpected_console(tab.console, browser_name, sys.platform) == []" in pages
+    assert "tab.console == []" not in pages
+
+
+def test_the_stored_same_site_is_reported_in_the_log() -> None:
+    pages = (BROWSER / "test_panel_pages.py").read_text(encoding="utf-8")
+    assert "f\"stored sameSite on {browser_name}/{sys.platform}: {cookie['sameSite']}\"" in pages
+    conftest = (BROWSER / "conftest.py").read_text(encoding="utf-8")
+    assert "def pytest_terminal_summary(" in conftest
+
+
+def test_linux_is_any_linux_platform_string() -> None:
+    assert unexpected_console([BLUETOOTH], "chromium", "linux2") == []

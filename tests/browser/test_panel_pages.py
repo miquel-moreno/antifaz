@@ -23,6 +23,7 @@ import time
 import pytest
 
 from antifaz.web.headers import CONTENT_SECURITY_POLICY
+from tests.browser.console_rules import unexpected_console
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer
 
@@ -103,9 +104,10 @@ def _open_panel(tab: Tab, server: PanelServer) -> None:
     assert tab.page.url == f"{server.origin}/panel"
 
 
-def _assert_clean(tab: Tab) -> None:
+def _assert_clean(tab: Tab, browser_name: str) -> None:
     assert tab.csp_violations() == []
-    assert tab.console == []
+    # Nothing in the console, but for the one strict exception of console_rules.py.
+    assert unexpected_console(tab.console, browser_name, sys.platform) == []
     assert tab.errors == []
     assert tab.failed == []
     assert tab.blocked == []
@@ -146,19 +148,19 @@ def test_a_request_outside_the_gateway_is_aborted_and_recorded(new_tab: NewTab) 
 
 
 def test_the_login_page_has_no_csp_violation_and_a_clean_console(
-    tab: Tab, server: PanelServer
+    tab: Tab, server: PanelServer, browser_name: str
 ) -> None:
     _goto_panel_page(tab, "/panel/login")
     assert tab.page.locator("h1").inner_text() == "Panel de Antifaz"
-    _assert_clean(tab)
+    _assert_clean(tab, browser_name)
 
 
 def test_the_panel_page_has_no_csp_violation_and_a_clean_console(
-    tab: Tab, server: PanelServer
+    tab: Tab, server: PanelServer, browser_name: str
 ) -> None:
     _open_panel(tab, server)
     assert tab.page.locator(CSRF_META).count() == 1
-    _assert_clean(tab)
+    _assert_clean(tab, browser_name)
 
 
 def test_the_live_dom_has_no_inline_code_and_only_same_origin_requests(
@@ -175,7 +177,7 @@ def test_the_live_dom_has_no_inline_code_and_only_same_origin_requests(
 
 
 def test_login_from_the_page_sets_only_the_local_session_cookie(
-    tab: Tab, server: PanelServer, browser_name: str
+    tab: Tab, server: PanelServer, browser_name: str, panel_notes: list[str]
 ) -> None:
     _goto_panel_page(tab, "/panel/login")
     started = time.time()
@@ -196,6 +198,8 @@ def test_login_from_the_page_sets_only_the_local_session_cookie(
     assert "x-antifaz-csrf" not in sent  # the login is exempt from the token layer
 
     (cookie,) = tab.cookie_attributes()
+    # One line in the terminal summary (the CI log): only this attribute, never a value.
+    panel_notes.append(f"stored sameSite on {browser_name}/{sys.platform}: {cookie['sameSite']}")
     assert cookie["name"] == SESSION_COOKIE
     assert cookie["httpOnly"] is True
     assert cookie["sameSite"] == STORED_SAME_SITE.get((browser_name, sys.platform), "Strict")
