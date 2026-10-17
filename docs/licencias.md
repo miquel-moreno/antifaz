@@ -37,22 +37,22 @@ Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic cont
 
 `httpx2-jsfetch` solo se instala en navegador (emscripten); aquí no se usa.
 
-## Solo para desarrollo: la comprobación del prototipo del panel
+## Solo para desarrollo: el grupo `panel` (no se distribuye)
 
-`make design-check` (`scripts/check_design.py`, issue #30, paso 6) abre el prototipo del panel en un Chromium sin ventana y le pasa axe-core. Sus dependencias **no están en `pyproject.toml` ni en `uv.lock`**: van en los metadatos en línea del propio script (PEP 723), con versión fija, y `uv run` las instala en un entorno aparte solo para esa ejecución. Por eso `scripts/check_licenses.py` no las ve (solo mira `uv.lock`) y se anotan aquí a mano. **No se distribuyen** (ni en la librería ni en la imagen) y `make check` no las usa. Licencias leídas el 2026-10-07 de los metadatos de cada paquete, y del archivo de licencia cuando los metadatos no la dicen:
+Playwright y axe-playwright-python sirven para abrir el panel en navegadores de verdad: `make panel-check` (el panel real, PR 11c-2a) y `make design-check` (`scripts/check_design.py`, el prototipo, issue #30). Están en el grupo de dependencias `panel` de `pyproject.toml`, con versión fija y en `uv.lock`; el script del prototipo lleva las mismas versiones en sus metadatos en línea (PEP 723) y un test las mantiene iguales. **No se distribuyen** (ni en la librería ni en la imagen): `uv sync` y `make check` no los instalan, y un test comprueba que `uv export --no-dev` (lo que se distribuye) no lista ninguno. `scripts/check_licenses.py` no los mira porque no son de ejecución, así que se anotan aquí a mano. Licencias leídas el 2026-10-07 de los metadatos de cada paquete, y del archivo de licencia cuando los metadatos no la dicen (las versiones siguen siendo las de `uv.lock`):
 
 | Paquete | Versión | Licencia | Llega por |
 |---|---|---|---|
-| playwright | 1.63.0 | Apache-2.0 | directa (metadatos del script) |
-| axe-playwright-python | 0.1.8 | MIT (sus metadatos no la declaran; leída en su archivo `LICENSE`) | directa (metadatos del script) |
+| playwright | 1.63.0 | Apache-2.0 | directa (grupo `panel`) |
+| axe-playwright-python | 0.1.8 | MIT (sus metadatos no la declaran; leída en su archivo `LICENSE`) | directa (grupo `panel`) |
 | axe-core | 4.12.1 | MPL-2.0 | va dentro de axe-playwright-python (`axe.min.js`, sin modificar); se inyecta en la página que se comprueba |
 | greenlet | 3.5.6 | MIT AND PSF-2.0 | playwright |
 | pyee | 13.0.1 | MIT | playwright |
-| typing-extensions | 4.16.0 | PSF-2.0 | playwright |
+| typing-extensions | 4.16.0 | PSF-2.0 | playwright (también llega con lo que se distribuye, por pydantic) |
 
 axe-core es copyleft débil (MPL-2.0): se usa sin modificar y no se distribuye, así que no obliga a nada.
 
-**El navegador.** Playwright necesita su propio Chromium («Chrome for Testing» 153.0.8010.12 y su «headless shell»), que se descarga una vez con `uv run --with playwright==1.63.0 playwright install chromium` a `%LOCALAPPDATA%\ms-playwright` (fuera del repo): unos 205 MB + 120 MB comprimidos y unos 700 MB en disco. Es Chromium (BSD-3-Clause y componentes de terceros); no se ha revisado componente por componente porque solo se usa en local y nunca se distribuye.
+**Los navegadores.** Playwright necesita sus propios navegadores (Chromium «Chrome for Testing» 153.0.8010.12 y su «headless shell», Firefox y WebKit), que se descargan una vez con `uv run --group panel playwright install chromium firefox webkit` a `%LOCALAPPDATA%\ms-playwright` (fuera del repo): entre 120 y 205 MB comprimidos cada uno. La CI solo descarga el «headless shell» de Chromium (unos 122 MB con ffmpeg). Son Chromium (BSD-3-Clause), Firefox (MPL-2.0) y WebKit (LGPL-2.1 y BSD), con componentes de terceros; no se han revisado componente por componente porque solo se usan para probar y nunca se distribuyen.
 
 ## El extra `ner` (opcional)
 
