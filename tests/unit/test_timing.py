@@ -11,7 +11,15 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.timing import MAX_RATIO, Shape, Work, assert_linear, hang_guard, measure_shape
+from tests.timing import (
+    MAX_RATIO,
+    Shape,
+    Work,
+    assert_linear,
+    cpu_budget,
+    hang_guard,
+    measure_shape,
+)
 
 
 class FakeClock:
@@ -51,13 +59,12 @@ def test_linear_work_passes_and_n_doubles_until_the_minimum_time() -> None:
 
 
 def test_a_slow_first_run_does_not_stop_the_calibration_too_early() -> None:
-    # Each new input costs 3 times as much the first time (caches, compiled patterns): at
-    # n=640 the first run looks long enough (0.192 s) but the best of 3 is 0.064 s.
+    # The very first run costs 3 times as much (caches, compiled patterns): at n=640 it looks
+    # long enough (0.192 s) but the best of 3 is 0.064 s.
     clock = FakeClock()
+    runs: list[None] = []
 
     def prepare(n: int) -> Work:
-        runs: list[None] = []
-
         def work() -> None:
             clock.now += n * 1e-4 * (3 if not runs else 1)
             runs.append(None)
@@ -67,6 +74,30 @@ def test_a_slow_first_run_does_not_stop_the_calibration_too_early() -> None:
     shape = assert_linear(prepare, start=10, clock=clock)
     assert shape.n == 1280
     assert shape.small == pytest.approx(0.128)
+
+
+def test_every_run_gets_a_fresh_input_so_stateful_work_is_never_measured_warm() -> None:
+    # Work that is cheap once it has run (a table already full, a cache already warm) must not
+    # be measured warm: each run gets its own prepare(n).
+    clock = FakeClock()
+    prepared: list[int] = []
+    runs: list[int] = []
+
+    def prepare(n: int) -> Work:
+        prepared.append(n)
+        done: list[None] = []
+
+        def work() -> None:
+            clock.now += 0.0 if done else n * 1e-4
+            done.append(None)
+            runs.append(n)
+
+        return work
+
+    shape = assert_linear(prepare, start=10, clock=clock)
+    assert shape.small == pytest.approx(0.128)
+    assert shape.ratio == pytest.approx(4.0)
+    assert prepared == runs  # one fresh input per run, never a second run of the same one
 
 
 def test_quadratic_work_fails() -> None:
@@ -94,6 +125,33 @@ def test_the_limit_caps_the_size_even_below_the_minimum_time() -> None:
     assert max(sizes) <= 100
 
 
+def test_a_4n_far_above_the_limit_is_run_only_once() -> None:
+    clock = FakeClock()
+    sizes: list[int] = []
+    with pytest.raises(AssertionError, match="grows faster than linear"):
+        assert_linear(_costing(clock, lambda n: n * n * 1e-6, sizes), start=10, clock=clock)
+    assert sizes.count(max(sizes)) == 1  # x16 > 2 * x8: more runs could not bring it below
+
+
+def test_a_long_4n_run_is_not_repeated() -> None:
+    clock = FakeClock()
+    sizes: list[int] = []
+    cost = lambda n: 0.15 * (n / 10) ** 1.6  # noqa: E731  # x9.2 at 4n, and 4n takes 1.4 s
+    with pytest.raises(AssertionError):
+        assert_linear(_costing(clock, cost, sizes), start=10, clock=clock, long_seconds=1.0)
+    assert sizes.count(max(sizes)) == 1
+    sizes.clear()
+    with pytest.raises(AssertionError):
+        assert_linear(_costing(clock, cost, sizes), start=10, clock=clock)  # 1.4 s < 5 s
+    assert sizes.count(max(sizes)) == 3
+
+
+def test_the_calibration_gives_up_after_20_doublings() -> None:
+    clock = FakeClock()
+    with pytest.raises(AssertionError, match="20 doublings"):
+        measure_shape(_costing(clock, lambda n: n * 1e-12, []), start=1, clock=clock)
+
+
 def test_work_that_takes_no_measurable_time_is_an_error() -> None:
     clock = FakeClock()
     with pytest.raises(AssertionError, match="no measurable CPU time"):
@@ -101,12 +159,23 @@ def test_work_that_takes_no_measurable_time_is_an_error() -> None:
 
 
 def test_the_hang_guard_says_it_is_a_hang_guard() -> None:
-    with pytest.raises(AssertionError, match=r"hang guard.*not a speed measure"):
+    message = r"hang guard: it finished but took .* not a speed measure"
+    with pytest.raises(AssertionError, match=message):
         measure_shape(lambda n: lambda: time.sleep(0.01), start=1, guard_seconds=0.001)
-    with pytest.raises(AssertionError, match=r"hang guard.*not a speed measure"), hang_guard(0.001):
+    with pytest.raises(AssertionError, match=message), hang_guard(0.001):
         time.sleep(0.01)
     with hang_guard():
         pass
+
+
+def test_the_cpu_budget_counts_cpu_not_waiting() -> None:
+    with cpu_budget(0.5, "sleeping"):
+        time.sleep(0.6)  # waiting, as on a busy machine: no CPU
+    spinning = r"spinning took .* s of CPU time \(limit 0\.05 s"
+    with pytest.raises(AssertionError, match=spinning), cpu_budget(0.05, "spinning"):
+        end = time.process_time() + 0.2
+        while time.process_time() < end:
+            pass
 
 
 @pytest.mark.parametrize(
@@ -128,8 +197,6 @@ def test_the_ratio_is_large_over_small() -> None:
 
 
 # --- Canaries: real code, real CPU time ---------------------------------------------------------
-# The two quadratic ones run each size once: best of 3 can only remove noise, and their x16 is
-# far above x8, so 3 runs of a 4n that takes seconds would only make the suite slower.
 
 
 def _retry_from_every_position(n: int) -> Work:
@@ -165,7 +232,7 @@ def _python_linear(n: int) -> Work:
 
 def test_canary_a_regex_that_retries_from_every_position_fails() -> None:
     with pytest.raises(AssertionError, match="grows faster than linear"):
-        assert_linear(_retry_from_every_position, start=1_000, repeats=1)
+        assert_linear(_retry_from_every_position, start=1_000)
 
 
 def test_canary_a_linear_regex_passes() -> None:
@@ -185,7 +252,7 @@ def test_canary_catastrophic_backtracking_fails_and_cannot_hang() -> None:
 
 def test_canary_a_quadratic_python_loop_fails() -> None:
     with pytest.raises(AssertionError, match="grows faster than linear"):
-        assert_linear(_python_quadratic, start=100, repeats=1)
+        assert_linear(_python_quadratic, start=100)
 
 
 def test_canary_a_linear_python_loop_passes() -> None:
