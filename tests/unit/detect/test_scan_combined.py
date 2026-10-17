@@ -3,7 +3,7 @@
 ES4400120345010612345678 is built here: valid CCC and IBAN controls, account 0612345678.
 """
 
-import time
+from collections.abc import Callable
 from itertools import pairwise
 
 import pytest
@@ -12,6 +12,7 @@ from antifaz.detect.scan import scan
 from antifaz.detect.types import Confidence, EntityType, Layer
 from antifaz.detect.validators import luhn
 from tests.conftest import SENTINEL_DNI
+from tests.timing import Work, assert_linear
 
 T = EntityType
 
@@ -105,46 +106,54 @@ def test_scan_output_never_overlaps_with_patterns_on() -> None:
 
 # --- speed (ADR-0008): adversarial inputs, then many real values in one text --------------
 
+# A head, a unit repeated n times, a tail and the size of the old fixed-time test; the speed
+# is the shape of tests/timing.py, with 4n at least the old size.
 ADVERSARIAL = [
-    "a" * 50_000 + "@",
-    "a@" * 25_000,
-    "a." * 25_000,
-    "a@b." * 12_500,
-    "x@" + "a." * 25_000,
-    "a-" * 25_000,
-    "." * 50_000,
-    "-" * 50_000,
-    "1." * 25_000,
-    "1.1.1." * 8_000,
-    "255." * 12_500,
-    "6" * 50_000,
-    "6 " * 25_000,
-    "6." * 25_000,
-    "+34 " * 12_500,
-    "(+34) " * 8_000,
-    "4" * 50_000,
-    "4111 " * 10_000,
-    "4111-" * 10_000,
-    "C/ " * 10_000,
-    "Calle " + "Mayor " * 10_000,
-    "Calle de " * 6_000,
-    "Calle Mayor 3, " * 3_000,
-    "2º B, " * 8_000,
-    "pasaporte " * 5_000,
-    "pasaporte AAA" * 4_000,
-    "matrícula 1234 " * 4_000,
-    "nacido el 12/03/" * 4_000,
-    "nacido el 12 de marzo de " * 2_000,
-    "Steuer-ID 36 574 " * 3_000,
-    "tel " * 12_500,
+    ("", "a", "@", 50_000),
+    ("", "a@", "", 25_000),
+    ("", "a.", "", 25_000),
+    ("", "a@b.", "", 12_500),
+    ("x@", "a.", "", 25_000),
+    ("", "a-", "", 25_000),
+    ("", ".", "", 50_000),
+    ("", "-", "", 50_000),
+    ("", "1.", "", 25_000),
+    ("", "1.1.1.", "", 8_000),
+    ("", "255.", "", 12_500),
+    ("", "6", "", 50_000),
+    ("", "6 ", "", 25_000),
+    ("", "6.", "", 25_000),
+    ("", "+34 ", "", 12_500),
+    ("", "(+34) ", "", 8_000),
+    ("", "4", "", 50_000),
+    ("", "4111 ", "", 10_000),
+    ("", "4111-", "", 10_000),
+    ("", "C/ ", "", 10_000),
+    ("Calle ", "Mayor ", "", 10_000),
+    ("", "Calle de ", "", 6_000),
+    ("", "Calle Mayor 3, ", "", 3_000),
+    ("", "2º B, ", "", 8_000),
+    ("", "pasaporte ", "", 5_000),
+    ("", "pasaporte AAA", "", 4_000),
+    ("", "matrícula 1234 ", "", 4_000),
+    ("", "nacido el 12/03/", "", 4_000),
+    ("", "nacido el 12 de marzo de ", "", 2_000),
+    ("", "Steuer-ID 36 574 ", "", 3_000),
+    ("", "tel ", "", 12_500),
 ]
 
 
-@pytest.mark.parametrize("text", ADVERSARIAL, ids=lambda t: repr(t[:12]))
-def test_scan_of_long_adversarial_input_is_fast(text: str) -> None:
-    started = time.perf_counter()
-    scan(text)
-    assert time.perf_counter() - started < 2.0
+@pytest.mark.parametrize(
+    ("head", "unit", "tail", "size"),
+    ADVERSARIAL,
+    ids=[repr(h + u + t) for h, u, t, _ in ADVERSARIAL],
+)
+def test_scan_of_long_adversarial_input_is_fast(head: str, unit: str, tail: str, size: int) -> None:
+    def prepare(n: int) -> Work:
+        text = head + unit * n + tail
+        return lambda: scan(text)
+
+    assert_linear(prepare, start=size // 4)
 
 
 def _visa(i: int) -> str:
@@ -152,25 +161,31 @@ def _visa(i: int) -> str:
     return body + str(luhn.check_digit(body))
 
 
+# Many real values in one text: a builder for n values, the type and the old count (the
+# passport keeps six digits).
 MANY = [
-    (" ".join(f"usuario{i}@example.com" for i in range(10_000)), T.EMAIL, 10_000),
-    (", ".join(f"6{i:08d}" for i in range(10_000)), T.PHONE, 10_000),
-    (" ".join(_visa(i) for i in range(5_000)), T.CREDIT_CARD, 5_000),
-    ("; ".join(f"C/ Mayor {i + 1}, 08001" for i in range(5_000)), T.ADDRESS, 5_000),
-    (" ".join(f"pasaporte AAA{i:06d}" for i in range(5_000)), T.ES_PASSPORT, 5_000),
+    (lambda n: " ".join(f"usuario{i}@example.com" for i in range(n)), T.EMAIL, 10_000),
+    (lambda n: ", ".join(f"6{i:08d}" for i in range(n)), T.PHONE, 10_000),
+    (lambda n: " ".join(_visa(i) for i in range(n)), T.CREDIT_CARD, 5_000),
+    (lambda n: "; ".join(f"C/ Mayor {i + 1}, 08001" for i in range(n)), T.ADDRESS, 5_000),
+    (lambda n: " ".join(f"pasaporte AAA{i:06d}" for i in range(n)), T.ES_PASSPORT, 5_000),
 ]
 
 
-@pytest.mark.parametrize(
-    ("text", "entity_type", "count"), MANY, ids=[f"{m[2]} {m[1].value}" for m in MANY]
-)
+@pytest.mark.parametrize(("build", "entity_type", "size"), MANY, ids=[m[1].value for m in MANY])
 def test_many_real_values_in_one_text_are_all_found_quickly(
-    text: str, entity_type: EntityType, count: int
+    build: Callable[[int], str], entity_type: EntityType, size: int
 ) -> None:
-    started = time.perf_counter()
-    spans = scan(text)
-    assert time.perf_counter() - started < 3.0
-    assert sum(1 for s in spans if s.type is entity_type) == count
+    def prepare(n: int) -> Work:
+        text = build(n)
+
+        def work() -> None:
+            spans = scan(text)
+            assert sum(1 for s in spans if s.type is entity_type) == n
+
+        return work
+
+    assert_linear(prepare, start=size // 4, limit=999_999)
 
 
 # ADR-0010 and the privacy review of PR 2b: no piece of an email is left in clear.
