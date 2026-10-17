@@ -25,10 +25,11 @@ from tests.redteam.conftest import (
 from tests.timing import Work, assert_linear, cpu_budget
 
 MAX_BODY = 4 * 1024 * 1024
-# Loose limits in CPU seconds (tests/timing.py, cpu_budget) for the inputs of a fixed size: the
-# old wall-time limits, now in CPU time, which a loaded machine does not inflate. They leave
-# room for coverage (2 to 3 times slower) over what the work costs today; a path 10 times slower
-# goes past them. The numbers measured are in docs/TECNICO.md.
+# Loose limits in CPU seconds (tests/timing.py, cpu_budget) for the inputs of a fixed size. CPU
+# time is not inflated by a loaded machine, so they can sit closer to the real cost than the old
+# wall-time limits: 4 to 6 times what each costs under coverage on a desktop (3.2 s, 1.6 s and
+# 0.22 s on 2026-10-18). With the scanner 10 times slower the 4 MiB body takes ~30 s of CPU: it
+# would pass the old 30 s, it fails 15 s. See docs/TECNICO.md.
 BODY_CPU_SECONDS = 15
 HISTORY_CPU_SECONDS = 8
 MANY_DNIS_CPU_SECONDS = 1

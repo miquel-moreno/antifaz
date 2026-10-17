@@ -129,8 +129,8 @@ def test_one_megabyte_with_200_values_is_fast() -> None:
     filler = "texto de relleno sin datos " * 190
     one_mb = json.dumps({"messages": [{"content": filler} for _ in range(200)]})
     assert len(one_mb) > 1_000_000
-    # The old wall-time limit, now in CPU time (a loaded machine does not inflate it); it
-    # costs well under 0.5 s today, and coverage makes it 2 to 3 times slower.
+    # A CPU-time limit (a loaded machine does not inflate it, unlike the old 2 s of wall time):
+    # about 5 times the 0.09 s it costs under coverage on a desktop (2026-10-18).
     with cpu_budget(0.5, "checking 1 MB against 200 values"):
         check(one_mb, vault)
 

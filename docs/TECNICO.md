@@ -878,12 +878,35 @@ Primer PR de la interfaz del panel ([ADR-0018](adr/0018-el-panel-y-su-puerta.md)
 
 ## Cómo se prueba la velocidad
 
-Un test que dice «esto tarda menos de 2 segundos» falla en un portátil cargado o con la cobertura activada, y en cambio deja pasar una expresión regular cuadrática en una máquina rápida (ya pasó en la CI: 5,17 s contra un límite de 5). Por eso los tests de velocidad no miran segundos:
+Un test que dice «esto tarda menos de 2 segundos» de reloj falla en un portátil cargado o con la cobertura activada, y en cambio deja pasar una expresión regular cuadrática en una máquina rápida (ya pasó en la CI: 5,17 s contra un límite de 5). Por eso los tests de velocidad miden **tiempo de CPU** del proceso (`time.process_time`), no tiempo de reloj: esperar a que otro programa suelte el procesador no cuenta. Incluye los hilos del proceso (el TestClient atiende la petición en otro hilo) pero no los procesos hijos, y por eso el pool del NER se prueba de otra forma. Las ayudas están en `tests/timing.py`.
 
-- **Lo que se cuelga con textos maliciosos (ADR-0008)** se mide por su **forma**: el mismo trabajo con un texto de tamaño n y con uno 4 veces mayor. Si el coste es lineal, el grande tarda unas 4 veces más; si es cuadrático, 16; si hay retroceso catastrófico, muchísimo más. El test exige que la proporción quede por debajo de 8. Se mide **tiempo de CPU** del proceso (`time.process_time`), no tiempo de reloj, así que esperar a que otro programa suelte el procesador no cuenta; incluye los hilos del proceso (el TestClient atiende la petición en otro hilo) pero no los procesos hijos, y por eso el pool del NER no se mide así. n se ajusta solo (se dobla hasta que la mejor de 3 ejecuciones dura al menos 0,1 s, para que el redondeo del reloj de Windows no cuente) y el tamaño grande es al menos el que usaba el test antiguo. El único límite en segundos que queda es una guarda de 120 s contra un cuelgue, y su mensaje lo dice. La ayuda está en `tests/timing.py` y sus propios tests comprueban, con canarios reales, que una expresión que reintenta desde cada posición, un retroceso catastrófico y un bucle cuadrático fallan.
-- **Los límites de tiempo del NER** se prueban con **hechos**: el error exacto (`DetectorFailed`), lo que el pool dejó en el log («went past the time limit»), qué procesos siguen vivos (el colgado ya no), si una petición llegó o no a un proceso (con el circuito abierto, ninguna). Antes de pedir algo a un proceso nuevo se espera a que esté listo (`when_ready` en `tests/nerfakes.py`): arrancar un proceso en Windows con la máquina cargada puede tardar varios segundos. Los márgenes que quedan son del tipo «muy por debajo de los 60 s que dormiría el falso».
+- **Lo que se cuelga con textos maliciosos (ADR-0008)** se mide por su **forma** (`assert_linear`): el mismo trabajo con un texto de tamaño n y con uno 4 veces mayor. Si el coste es lineal, el grande tarda unas 4 veces más; si es cuadrático, 16; si hay retroceso catastrófico, muchísimo más. El test exige que la proporción quede por debajo de 8. Cada ejecución recibe una entrada nueva (algo con estado, como una tabla que se llena, nunca se mide «en caliente»); n se ajusta solo (se dobla hasta que la mejor de 3 ejecuciones dura al menos 0,1 s, para que el redondeo del reloj de Windows no cuente, con un máximo de 20 veces) y el tamaño grande es al menos el que usaba el test antiguo. Sus propios tests comprueban, con canarios reales, que una expresión que reintenta desde cada posición, un retroceso catastrófico y un bucle cuadrático fallan.
+- **Lo lento pero lineal** (un camino 10 veces más lento) no cambia la forma, así que los tests de DoS de tamaño fijo tienen además un **presupuesto de CPU** (`cpu_budget`). Como el tiempo de CPU no se infla con la máquina cargada, el límite puede estar cerca del coste real: unas 4 a 6 veces lo que cuesta con cobertura en un PC de sobremesa (medido el 2026-10-18).
 
-Lo que no cubre: un coste cuadrático muy barato por paso, que en el tamaño probado sume menos del doble del trabajo lineal, no llega a la proporción de 8. Los fallos reales del ADR-0008 (reintentar una tira larga desde cada posición) cuestan órdenes de magnitud más y se ven enseguida.
+  | Test | Coste con cobertura | Límite de CPU | Antes (reloj) |
+  |---|---|---|---|
+  | Cuerpo de 4 MiB por el proxy | 3,2 s | 15 s | 30 s |
+  | Historial de 3.000 turnos | 1,6 s | 8 s | 30 s |
+  | 5.000 DNI distintos en `mask()` | 0,22 s | 1 s | 20 s |
+  | Guardia con 1 MB y 200 valores | 0,09 s | 0,5 s | 2 s |
+
+  Con el escáner 10 veces más lento, el cuerpo de 4 MiB gasta unos 30 s de CPU: pasaba el límite antiguo de 30 s y falla el de 15.
+- **Los límites de tiempo del NER** se prueban con **hechos**: el error exacto (`DetectorFailed`), cuántas veces el pool dejó cada línea en el log («went past the time limit», «died or broke the protocol», «NER circuit open»), qué procesos siguen vivos (comparados como objetos, nunca por su número, que el sistema puede reutilizar), si una petición llegó o no a un proceso (con el circuito abierto, ni lo pide ni lo espera) y qué plazo recibió cada llamada (en un texto largo, el mismo para toda la petición). Antes de pedir algo a un proceso nuevo se espera a que esté listo (`when_ready` en `tests/nerfakes.py`): arrancar un proceso en Windows con la máquina cargada puede tardar varios segundos.
+
+**Márgenes de reloj que quedan**, todos de la forma «el plazo más un margen» o «muy por debajo de lo que tardaría el fallo»:
+
+| Test | Margen | Por qué |
+|---|---|---|
+| Proceso colgado (`test_pool.py`) | plazo (2 s) + 3 s | matar y sustituir el proceso tardó menos de 0,2 s con 47 procesos quemando CPU; un cierre lento o un vigilante tardío tardan varios segundos más |
+| Proceso cargándose | plazo (0,5 s) + 3 s | la carga dura 6 s |
+| Texto con muchas ventanas (`redteam/test_ner.py`) | plazo (2 s) + 3 s | con un plazo por llamada tardaría unos 15 s |
+| Cerrar durante una llamada | 30 s | el falso dormiría 60 s y el plazo es de 60 s |
+| `doctor --timeout 1` | 6 s (antes 4) | el servidor de prueba gotea 10 s; con un plazo por lectura no acabaría antes. Se subió de 4 a 6 para dejar sitio a una máquina cargada sin acercarse a los 10 |
+| Ejecuciones de `assert_linear` y `cpu_budget` | 120 s de reloj | guarda contra cuelgues |
+
+La guarda de 120 s se comprueba cuando la ejecución termina: si acaba pero tardó más, falla con un mensaje claro. No puede parar algo que no termina nunca; para eso haría falta un tiempo máximo por test (por ejemplo pytest-timeout, que el proyecto no usa).
+
+Lo que no cubre: un coste cuadrático muy barato por paso, que en el tamaño probado sume menos del doble del trabajo lineal, no llega a la proporción de 8 (y, si es pequeño, tampoco al presupuesto). Los fallos reales del ADR-0008 (reintentar una tira larga desde cada posición) cuestan órdenes de magnitud más y se ven enseguida.
 
 ## Telemetría
 
