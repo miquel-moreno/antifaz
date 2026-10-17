@@ -8,6 +8,8 @@ top-level name fails; an optional package may be missing only if it is on the ex
 true. Synthetic outputs with the probe's line format.
 """
 
+import importlib.util
+
 import pytest
 
 from tests.e2e.image_probes import EXPECTED_MISSING, import_problems
@@ -76,3 +78,10 @@ def test_every_expected_missing_package_has_a_reason() -> None:
     assert EXPECTED_MISSING
     for package, reason in EXPECTED_MISSING.items():
         assert package.isidentifier() and len(reason) > 10, package
+
+
+def test_opentelemetry_is_not_listed_as_missing() -> None:
+    """fastapi 0.142+ requires opentelemetry-api, so the image has it (and starlette's optional
+    middleware imports): listed, the e2e import test would fail with "nothing misses it now"."""
+    assert importlib.util.find_spec("opentelemetry") is not None
+    assert "opentelemetry" not in EXPECTED_MISSING

@@ -373,8 +373,13 @@ def test_la_pasarela_no_abre_ninguna_conexion_propia(
         client.post("/v1/chat/completions", json=openai_body("hola"), headers=OPENAI_AUTH)
         client.post("/v1/messages", json=anthropic_body("hola"), headers=ANTHROPIC_AUTH)
     assert opened == []
-    analytics = {"sentry_sdk", "posthog", "analytics", "segment", "mixpanel", "opentelemetry"}
+    analytics = {"sentry_sdk", "posthog", "analytics", "segment", "mixpanel"}
     assert not analytics & {name.split(".")[0] for name in sys.modules}
+    # FastAPI (0.142+) importa la API de OpenTelemetry, que sin SDK no hace nada (y Antifaz la
+    # apaga, tests/integration/test_fastapi_telemetry_off.py). El SDK, los exportadores y las
+    # instrumentaciones, que sí envían datos, siguen prohibidos.
+    otel_senders = ("opentelemetry.sdk", "opentelemetry.exporter", "opentelemetry.instrumentation")
+    assert not [name for name in sys.modules if name.startswith(otel_senders)]
 
 
 # --- CLI ---------------------------------------------------------------------------------------
