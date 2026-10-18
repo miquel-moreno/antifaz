@@ -101,6 +101,58 @@ def test_a_worker_that_dies_blocks_the_request_and_is_replaced(
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
 
 
+_REAL_TIMER = threading.Timer
+
+
+class _EarlyTimer(_REAL_TIMER):
+    """The pool's watchdog, firing a little before the deadline it was given: the killed
+    worker's pipe then closes while the reply wait is still running, so the parent reads an
+    end of file instead of reaching its own timeout (the race seen in CI, made certain)."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(max(0.0, interval - 0.2), *args, **kwargs)
+
+
+class _SilentTimer(_REAL_TIMER):
+    """A watchdog that never fires (the request ends before its deadline anyway)."""
+
+    def start(self) -> None:
+        pass
+
+
+def test_a_worker_killed_by_the_watchdog_is_logged_as_past_the_time_limit(
+    pool: NerPool, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The log says what happened, whichever the parent notices first: the watchdog's kill
+    (the pipe breaks) or its own wait for the reply running out."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the hang must reach a loaded worker
+    hung, died = caplog.text.count(HUNG), caplog.text.count(DIED)
+    monkeypatch.setattr("antifaz.detect.ner.pool.threading.Timer", _EarlyTimer)
+    with pytest.raises(DetectorFailed):
+        pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
+    monkeypatch.undo()
+    assert caplog.text.count(HUNG) == hung + 1
+    assert caplog.text.count(DIED) == died
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]  # the replacement serves
+
+
+def test_a_crash_before_the_watchdog_fires_is_logged_as_a_death(
+    pool: NerPool, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the watchdog's own kill counts as the time limit, never how close the deadline is."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the crash must reach a loaded worker
+    hung, died = caplog.text.count(HUNG), caplog.text.count(DIED)
+    monkeypatch.setattr("antifaz.detect.ner.pool.threading.Timer", _SilentTimer)
+    with pytest.raises(DetectorFailed):
+        pool.predict(["FAKE_CRASH"], ["person"], 0.5)
+    monkeypatch.undo()
+    assert caplog.text.count(DIED) == died + 1
+    assert caplog.text.count(HUNG) == hung
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
+
+
 def test_a_backend_error_blocks_without_its_text_and_keeps_the_worker(pool: NerPool) -> None:
     when_ready(_ask(pool, "calentar"))  # make sure the worker is loaded
     before = _workers(pool)
