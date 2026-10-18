@@ -166,6 +166,10 @@ def test_a_focused_element_is_never_hidden_under_the_bars(
     tab.page.focus("#panel-playground")
     tab.page.keyboard.press("Tab")
     assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
+    # WebKit may scroll the focused element into view on the next frame: let two frames pass.
+    tab.page.evaluate(
+        "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+    )
     probe = _box(tab, "#probe-end")
     bar = _box(tab, "[role=tablist]")
     top_bar = _box(tab, ".app-sidebar")
