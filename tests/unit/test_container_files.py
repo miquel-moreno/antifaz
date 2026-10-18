@@ -376,6 +376,16 @@ def test_every_codeql_action_is_pinned_to_the_same_sha() -> None:
     assert re.fullmatch(r"[0-9a-f]{40}", shas.pop())
 
 
+def test_every_ci_job_has_a_time_limit() -> None:
+    """A hung step stops at its job's limit, not at GitHub's 6 hours (no pytest-timeout)."""
+    for path in sorted((REPO / ".github/workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name, job in workflow["jobs"].items():
+            limit = job.get("timeout-minutes")
+            assert isinstance(limit, int), f"{path.name}: job {name} has no timeout-minutes"
+            assert 5 <= limit <= 30, f"{path.name}: job {name} has timeout-minutes {limit}"
+
+
 def test_the_same_uv_version_everywhere() -> None:
     """The image, CI and `make audit` use one uv version: a bump changes all three at once."""
     image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)
