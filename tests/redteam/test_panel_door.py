@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from starlette.types import Message
 
+from antifaz import __version__
 from antifaz.api.app import create_app
 from antifaz.web import routes
 from antifaz.web.assets import load_assets
@@ -60,7 +61,7 @@ from tests.integration.panel_client import (
 )
 from tests.redteam.conftest import both_echo
 
-LOGIN_PAGE = Pages(load_assets()).login
+LOGIN_PAGE = Pages(load_assets(), version=__version__).login("en")  # no Accept-Language
 LOGIN_FAILED = b'{"error":{"code":"login_failed","message":"login failed"}}'
 
 

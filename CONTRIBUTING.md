@@ -36,4 +36,23 @@ Thanks for helping. Antifaz handles personal data, so a few rules are stricter t
 4. Open a pull request with a short description. Use Conventional Commits
    (`feat:`, `fix:`, `docs:`, `test:`...).
 
+## Adding a language to the panel
+
+The panel's texts live in `src/antifaz/web/i18n/<code>.json`, one flat JSON object of
+key -> plain text per language; `en.json` is the reference. To add a language you only add a
+file, no code:
+
+1. Copy `en.json` to `<code>.json`, where `<code>` is a language code (`fr`, `pt`, or with a
+   region, `pt-BR`). Files named any other way are ignored.
+2. Translate every text. Keep every key, keep each `{placeholder}` (for example `{seconds}`)
+   exactly as it is, and write plain text: no HTML, no `<` or `>`, no empty texts.
+3. Set `language.name` to the language's own name (`Français`, `Português`): it labels the link
+   in the language selector.
+4. Run `make check`. The catalog tests run over every file they find, so the new one is checked
+   for the same keys and placeholders as English; a broken catalog also stops the gateway from
+   starting, with one line naming the file and the key.
+
+The new language then appears in the selector, and browsers that ask for it (`Accept-Language`)
+get it. Use `make panel-captures` to look at the pages.
+
 By contributing you agree that your contribution is licensed under Apache-2.0.

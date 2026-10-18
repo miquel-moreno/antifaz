@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.browser.server import PanelServer, isolated_variable
+from tests.browser.server import OtherSite, PanelServer, isolated_variable
 from tests.conftest import forbid_network, panel_browsers
 
 if TYPE_CHECKING:
@@ -35,9 +35,12 @@ if TYPE_CHECKING:
     from tests.browser.harness import NewTab, Tab
 
 ARTIFACTS = Path(__file__).resolve().parents[2] / "test-results" / "panel-browser"
-# Chromium resolves no name but 127.0.0.1: an extra guard against browser-internal traffic
-# (the context route already aborts every request the page makes elsewhere).
-LAUNCH_ARGS = {"chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"]}
+# Chromium resolves no name but 127.0.0.1 and localhost (loopback too: the second site of the
+# cross-site tests, PR 11c-2b): an extra guard against browser-internal traffic (the context
+# route already aborts every request the page makes elsewhere).
+LAUNCH_ARGS = {
+    "chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost"]
+}
 FAILED = pytest.StashKey[str]()
 NOTES = pytest.StashKey[list[str]]()
 
@@ -98,14 +101,31 @@ def browser(playwright: Playwright, browser_name: str) -> Iterator[Browser]:
 
 
 @pytest.fixture
-def server(isolated: None) -> Iterator[PanelServer]:
+def server(
+    request: pytest.FixtureRequest, isolated: None, panel_notes: list[str]
+) -> Iterator[PanelServer]:
     gateway = PanelServer()
     try:
         gateway.start()
         yield gateway
     finally:
         gateway.stop()  # socket, thread and HTTP client, also when start() failed
+        if gateway.hit_shutdown_limit:
+            # Visible in the terminal summary: a real hang must not hide behind the limit.
+            panel_notes.append(f"graceful-shutdown limit hit: {request.node.nodeid}")
     assert gateway.provider_calls == [], "a browser test reached a provider"
+
+
+@pytest.fixture(params=["localhost", "127.0.0.1"], ids=["cross-site", "same-site"])
+def other_site(request: pytest.FixtureRequest, isolated: None) -> Iterator[OtherSite]:
+    """Another origin on loopback (PR 11c-2b): named localhost (another site) or 127.0.0.1 on
+    its own port (the same site, so the session cookie travels)."""
+    site = OtherSite(request.param)
+    try:
+        site.start()
+        yield site
+    finally:
+        site.stop()
 
 
 @pytest.fixture
@@ -116,9 +136,26 @@ def new_tab(
 
     tabs: list[Tab] = []
 
-    def make(*, bypass_csp: bool = False, color_scheme: str = "light", width: int = 1280) -> Tab:
+    def make(
+        *,
+        bypass_csp: bool = False,
+        color_scheme: str = "light",
+        width: int = 1280,
+        locale: str | None = None,
+        scale: int = 1,
+        height: int | None = None,
+        extra_origin: str | None = None,
+    ) -> Tab:
         tab = Tab(
-            browser, server.origin, bypass_csp=bypass_csp, color_scheme=color_scheme, width=width
+            browser,
+            server.origin,
+            bypass_csp=bypass_csp,
+            color_scheme=color_scheme,
+            width=width,
+            locale=locale,
+            scale=scale,
+            height=height,
+            extra_origin=extra_origin,
         )
         tabs.append(tab)
         return tab

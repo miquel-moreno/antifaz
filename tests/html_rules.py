@@ -3,12 +3,15 @@
 Parsed with html.parser, not with a regular expression: no <style>, no <script> without src (and
 no code inside one), no style="..." or on...= attribute, no <base>, frames, objects or meta
 refresh, and every URL attribute either a static file of the manifest, a fragment ("#...") or a
-fixed panel path. Never javascript: or data:.
+fixed panel path, alone or with one `?lang=<language code>` (the language selector, 11c-2b).
+Never javascript: or data:.
 """
 
+import re
 from html.parser import HTMLParser
 
 FIXED_PANEL_PATHS = frozenset({"/panel", "/panel/login"})
+LANGUAGE_QUERY = re.compile(r"\?lang=[a-z]{2}(?:-[A-Z]{2})?")
 URL_ATTRIBUTES = frozenset(
     {"href", "src", "srcset", "action", "formaction", "poster", "background", "xlink:href", "data"}
 )
@@ -63,8 +66,13 @@ class _Audit(HTMLParser):
         elif url.startswith("/panel/static/"):
             if url not in self.static_paths:
                 self.problems.append(f"{name}={url!r} is not in the manifest")
-        elif not (url.startswith("#") or url in FIXED_PANEL_PATHS):
+        elif not (url.startswith("#") or _fixed_path(url)):
             self.problems.append(f"{name}={url!r} on <{tag}> is not a panel URL")
+
+
+def _fixed_path(url: str) -> bool:
+    path, mark, query = url.partition("?")
+    return path in FIXED_PANEL_PATHS and (not mark or bool(LANGUAGE_QUERY.fullmatch(mark + query)))
 
 
 def html_problems(page: str, static_paths: frozenset[str]) -> list[str]:

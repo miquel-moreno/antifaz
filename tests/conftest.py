@@ -36,6 +36,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run the panel in real browsers (Playwright, tests/browser): `make panel-check`",
     )
     parser.addoption(
+        "--panel-captures",
+        action="store_true",
+        default=False,
+        help="with --panel, write the panel's reference captures to build/panel-captures/: "
+        "`make panel-captures`",
+    )
+    parser.addoption(
         "--panel-browser",
         default=ALL_BROWSERS,
         help=f"comma list of the browsers for --panel (default {ALL_BROWSERS})",

@@ -34,6 +34,7 @@ PURE = (
     "pages.py",
     "csrf.py",
     "assets.py",
+    "i18n.py",
 )
 # The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
 # FastAPI, no other project module).

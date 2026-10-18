@@ -31,7 +31,7 @@ h1,h2,h3{text-wrap:balance}
 .skip{position:absolute;left:16px;top:12px;transform:translateY(-72px);z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:transform var(--duration-fast) var(--ease-out)}
 .skip:focus{transform:none}
 
-.page{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
+.page{max-width:1180px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left)) max(16px,env(safe-area-inset-right));padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
 
 /* ---------- Ambient light behind the window (decoration; static) ----------
    It does not move: with the frosted window on top, a moving background would make the browser
@@ -107,17 +107,19 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-iconbtn:active{transform:scale(.92)}
 .app-iconbtn .ic{transition:transform .5s var(--ease-spring)}
 @media (hover:hover) and (pointer:fine){ .app-iconbtn:hover .ic{transform:rotate(-20deg)} }
-/* Never with reduced motion, and never while the focus is inside the bar */
-@media (prefers-reduced-motion: no-preference){
-  :root.chrome-hidden .app-header:not(:focus-within){transform:translateY(-110%);opacity:0}
-}
 
 .app-content{padding:36px 44px 52px;display:flex;flex-direction:column;gap:22px;min-width:0}
 .app-content:focus{outline:none}
 .alerts{display:flex;flex-direction:column;gap:12px}
 .alerts:not(:has(>:not([hidden]))){display:none}
 .view{display:flex;flex-direction:column;gap:22px;min-width:0}
-.view.enter>*{animation:rise .55s var(--ease-out) both;animation-delay:calc(var(--i,0)*45ms)}
+/* The pieces of a view rise one after another when its tab is chosen. The step comes from the
+   position (nth-child), never from a style="--i:N" attribute: the CSP forbids those. */
+.view.enter>*{animation:rise .55s var(--ease-out) both}
+.view.enter>:nth-child(2){animation-delay:45ms}
+.view.enter>:nth-child(3){animation-delay:90ms}
+.view.enter>:nth-child(4){animation-delay:135ms}
+.view.enter>:nth-child(n+5){animation-delay:180ms}
 .vh{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
 .vh>div{min-width:0;flex:1 1 320px}
 .vh h1{font-size:var(--text-title);font-weight:var(--weight-title);letter-spacing:var(--tracking-title);line-height:var(--leading-title)}
@@ -372,7 +374,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .keys tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:start;gap:8px 16px;padding:14px 20px;border-top:1px solid var(--color-line)}
   .keys tbody tr:first-child{border-top:0}
   .keys td,.keys td:first-child,.keys td:last-child{display:block;border:0;padding:0;text-align:left;font-size:var(--text-sm);letter-spacing:var(--tracking-small);min-width:0}
-  .keys td[data-label]::before{content:attr(data-label);display:block;font-size:var(--text-2xs);color:var(--color-text-muted)}
+  .keys td[data-text-label]::before{content:attr(data-text-label);display:block;font-size:var(--text-2xs);color:var(--color-text-muted)}
   .keys td:first-child{grid-column:1/3;font-size:14px}
   .keys td.k-state{grid-column:3;grid-row:1;align-self:center}
   .keys td.k-state::before{display:none}
@@ -484,7 +486,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
 .composer label.cap,.bar .lbl,.kh,.hint,.seg label,.eyebrow,.mcap,.flight,.rm-note,.pfoot,.note .sub,.found dt,.found dd,.found dd b,
 .meta,.sh .aside,.tag,.foot,.live-pill,.stat-sub,.bars li,.ev-what,.keys th,.pol-bar .lbl,.help dt,.help dd,.rules .fixed,
-.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.num,
+.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-text-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.num,
 .pswitch button{letter-spacing:var(--tracking-small)}
 
 /* ---------- Medium: one pane at a time, grids stack ---------- */
@@ -607,12 +609,92 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .prov .meter{grid-column:1/-1;grid-row:2}
 }
 
-/* Phone bar: hides on scroll down like the header (same guards) */
-@media (prefers-reduced-motion: no-preference){
-  @container app (max-width: 640px){
-    :root.chrome-hidden .app-sidebar:not(:focus-within){transform:translateY(-100%)}
-  }
+/* ---------- 11c-2b: the icon sprite, the language selector, «Salir», the login ---------- */
+/* The inline SVG sprite: in the page, never shown (a class, not style="..."). */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+
+/* Language selector: plain links to the same page with ?lang=, the current one marked with
+   aria-current like the active tab (white pill with --shadow-pop). Nothing is stored. */
+.langs-list{display:flex;align-items:center;gap:2px}
+.langs-link{display:inline-flex;align-items:center;min-height:28px;padding:0 9px;border-radius:var(--radius-pill);font-size:var(--text-xs);font-weight:var(--weight-medium);letter-spacing:var(--tracking-small);color:var(--color-text-muted);text-decoration:none;white-space:nowrap;transition:background var(--duration-fast),color var(--duration-fast)}
+.langs-link:hover{background:var(--color-surface-3);color:var(--color-text)}
+.langs-link[aria-current="true"]{background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-pop)}
+
+/* «Salir»: a quiet button (leaving is not the main action) at the foot of the sidebar; on a
+   phone, a smaller one in the top bar. */
+.app-sidebar-foot .logout{align-self:flex-start;margin-left:-12px;gap:8px}
+.logout .ic{width:15px;height:15px}
+.empty-cli{font-size:var(--text-sm)}
+
+/* Login: one frosted card centred on the ambient light, the selector and the theme above it. */
+.login{min-height:calc(100vh - 86px);min-height:calc(100dvh - 86px);display:grid;align-content:center;justify-items:center;gap:14px}
+.login-tools{display:flex;align-items:center;gap:6px;justify-self:end}
+.login-card{width:min(100%,420px);padding:32px 32px 26px;display:flex;flex-direction:column;gap:12px}
+.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.login-title{font-size:var(--text-2xl);font-weight:var(--weight-title);letter-spacing:var(--tracking-title);line-height:var(--leading-title)}
+.login-intro{color:var(--color-text-muted)}
+.login-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.login-label{font-size:var(--text-sm);font-weight:var(--weight-semibold)}
+.login-input{width:100%;min-height:42px;padding:0 14px;border:1px solid var(--color-line-strong);border-radius:var(--radius-control);background:var(--color-surface);font-family:var(--font-mono);font-size:15px;letter-spacing:0}
+.login-input:focus-visible{border-color:var(--color-focus)}
+.login-help{font-size:var(--text-xs);color:var(--color-text-muted);letter-spacing:var(--tracking-small)}
+.login-alert:empty{display:none}
+.login-alert{padding:10px 12px;border-radius:12px;border-left:3px solid var(--color-danger);background:var(--color-danger-soft);color:var(--color-text);font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
+.login-submit{margin-top:6px;min-height:40px}
+.login-note{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:var(--text-xs);color:var(--color-text-muted);letter-spacing:var(--tracking-small)}
+.login-note .ic{width:14px;height:14px}
+
+/* The short tab names only show in the phone's bottom bar. */
+.app-tab-short{display:none}
+/* The page's width (the viewport without its scrollbar) decides the phone look of the window
+   below, so it always agrees with the window's own phone rules (@container app). */
+body{container:page/inline-size}
+
+/* ---------- Phone (review of the 11c-2b captures) ----------
+   Top bar: only the logo and the settings button; the button opens a menu (a disclosure,
+   panel.js) with the language, the theme and «Salir». The five tabs: a bar fixed at the
+   bottom, icon over a short name, within thumb reach and above the home indicator
+   (safe-area-inset-bottom); the content keeps room for it. Nothing of this on the desktop. */
+@container app (max-width: 640px){
+  /* No backdrop filter here: it would make the sidebar the containing block of the fixed bar. */
+  .app-sidebar{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--color-window)}
+  .app-bar-tools{position:relative}
+  .settings-btn{width:44px;height:44px}
+  .settings-btn .ic{width:20px;height:20px}
+  .settings-menu{position:absolute;top:calc(100% + 10px);right:0;z-index:30;display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:210px;padding:10px;border-radius:16px;background:var(--color-surface);box-shadow:var(--shadow-card),var(--shadow-pop)}
+  .settings-menu .langs-list{justify-content:space-between}
+  .settings-menu .theme-btn{display:flex;align-items:center;width:auto;height:auto;justify-content:flex-start;gap:8px;padding:0 9px;min-height:32px;font-size:var(--text-sm);font-weight:550}
+  .settings-menu .logout-bar{justify-content:flex-start;gap:8px;min-height:32px;padding:0 9px}
+  .app-tablist{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;margin:0;padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));overflow:visible;background:var(--color-window);border-top:1px solid var(--color-line)}
+  .app-tab{flex-direction:column;justify-content:center;gap:3px;width:auto;min-width:0;padding:7px 2px 6px;border-radius:12px;font-size:.6875rem;line-height:1.15;letter-spacing:0;text-align:center;white-space:normal}
+  .app-tab .ic{width:20px;height:20px}
+  .app-tab-label{display:none}
+  .app-tab-short{display:block;max-width:100%;overflow-wrap:anywhere}
+  .app-content{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+  .app-shell{min-height:100vh;min-height:100dvh;grid-template-rows:auto minmax(0,1fr)}
 }
+/* On a phone the window is the screen: no card, no gutter, no space below. The window is the
+   container of the rules above, so its own look follows the page container (the body, measured
+   without the scrollbar, like the window): 672 px is a 640 px window plus the 16 px gutters it
+   loses here. The window then never keeps its backdrop filter (which would hold the fixed tab
+   bar) while the phone rules apply. */
+@container page (max-width: 672px){
+  .page{padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left);gap:0}
+  .app-window{border-radius:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--color-window);min-height:100vh;min-height:100dvh}
+  .login{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:stretch;gap:0;background:var(--color-window)}
+  .login-tools{align-self:flex-end;padding:12px 12px 0}
+  .login-card{flex:1;width:100%;padding:16px 20px 28px}
+}
+/* WCAG 2.4.11 (focus not obscured): a focused element scrolls clear of the sticky top bar and
+   of the fixed tab bar. On the root, so a media query (generous: 704 px covers a 672 px page
+   plus a classic scrollbar; the extra padding is harmless where the bars are not there). */
+@media (max-width: 704px){
+  html{scroll-padding-top:72px;scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+}
+
+/* No "hide on scroll" for the header or the phone bar (the prototype's chrome-hidden): no
+   script sets it, and a transform on the phone's sidebar would make it the containing block of
+   the fixed tab bar. */
 
 /* Reduced motion: the system setting */
 @media (prefers-reduced-motion: reduce){

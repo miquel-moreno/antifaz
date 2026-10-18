@@ -1,10 +1,11 @@
 """Today's panel pages in real browsers (issue 53, PR 11c-2a, ADR-0018): Chromium, Firefox, WebKit.
 
-The pages are the placeholders of 11c-1 (GET /panel/login, GET /panel behind the door) and the
-two actions of 11b (POST /panel/login, POST /panel/logout), driven from the page itself with
-`fetch`, so each browser sends its own Origin and Sec-Fetch-Site through the door. Every test
-gets its own gateway on 127.0.0.1 (tests/browser/server.py) and its own browser context; a
-request to anything but that gateway is aborted and fails the test (conftest.py).
+The pages (GET /panel/login, GET /panel behind the door; their interface since 11c-2b, see
+test_panel_ui.py) and the two actions of 11b (POST /panel/login, POST /panel/logout), driven
+from the page itself with `fetch`, so each browser sends its own Origin and Sec-Fetch-Site
+through the door. Every test gets its own gateway on 127.0.0.1 (tests/browser/server.py) and
+its own browser context; a request to anything but that gateway is aborted and fails the test
+(conftest.py).
 
 The CSP is measured in contexts without axe, and every panel page is checked to have really
 come with the panel's CSP header; axe runs in another context (ADR-0018), with bypass_csp so
@@ -23,11 +24,14 @@ import time
 import pytest
 
 from antifaz.web.headers import CONTENT_SECURITY_POLICY
+from antifaz.web.i18n import load_catalogs
 from tests.browser.console_rules import unexpected_console
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer
 
 pytestmark = pytest.mark.browser
+
+ENGLISH = load_catalogs()["en"]
 
 SESSION_COOKIE = "antifaz_session"  # http://127.0.0.1: the local cookie (ADR-0018 addendum)
 CSRF_META = 'meta[name="antifaz-csrf"]'
@@ -151,7 +155,7 @@ def test_the_login_page_has_no_csp_violation_and_a_clean_console(
     tab: Tab, server: PanelServer, browser_name: str
 ) -> None:
     _goto_panel_page(tab, "/panel/login")
-    assert tab.page.locator("h1").inner_text() == "Panel de Antifaz"
+    assert tab.page.locator("h1").inner_text() == ENGLISH.text("login.heading")  # en-US
     _assert_clean(tab, browser_name)
 
 
@@ -260,18 +264,19 @@ def test_logout_from_the_page_drops_the_cookie_and_the_panel(tab: Tab, server: P
     assert tab.page.url == f"{server.origin}/panel/login"
     tab.page.go_back(wait_until="load", timeout=TIMEOUT_MS)
     assert tab.page.locator(CSRF_META).count() == 0
-    panel_shown = "Has entrado" in tab.page.content()
-    assert not panel_shown, "the panel came back after logout"
+    assert tab.page.locator('[role="tablist"]').count() == 0, "the panel came back after logout"
     assert tab.blocked == []
     assert tab.csp_violations() == []
 
 
 @pytest.mark.parametrize("width", [1280, 390])
 @pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("locale", ["es-ES", "en-US"])
 def test_axe_finds_no_violation(
-    new_tab: NewTab, server: PanelServer, theme: str, width: int
+    new_tab: NewTab, server: PanelServer, theme: str, width: int, locale: str
 ) -> None:
-    tab = new_tab(bypass_csp=True, color_scheme=theme, width=width)
+    """Both pages in both languages (11c-2b: the browser's locale picks the page's)."""
+    tab = new_tab(bypass_csp=True, color_scheme=theme, width=width, locale=locale)
     _goto_panel_page(tab, "/panel/login")
     for page in ("login", "panel"):
         if page == "panel":
