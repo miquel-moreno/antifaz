@@ -128,3 +128,32 @@ def test_every_catalog_key_is_used_by_a_template() -> None:
 
     assert used - reference == set()  # a template asks only for known keys
     assert reference - used == set()  # and no key is dead
+
+
+# The login form lets password managers keep the token on purpose (autocomplete=current-password
+# and a hidden username): no text may promise that the browser never keeps or saves it.
+UNTRUE_PROMISES = re.compile(
+    r"(browser|navegador)\b[^.]*\b(does not|doesn't|never|no)\b[^.]*\b(keep|save|store|guarda)",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("code", CATALOGS.codes)
+def test_no_text_promises_the_browser_never_keeps_the_token(code: str) -> None:
+    for key, text in CATALOGS[code].texts.items():
+        assert not UNTRUE_PROMISES.search(text), (code, key)
+
+
+def test_the_promise_check_sees_the_untrue_texts() -> None:
+    for bad in (
+        "The browser does not keep it.",
+        "El navegador no lo guarda.",
+        "Your browser never stores the token.",
+    ):
+        assert UNTRUE_PROMISES.search(bad), bad
+    for fine in (
+        "The panel stores nothing in your browser; your password manager may offer to save it.",
+        "El panel no guarda nada en el navegador; tu gestor de contraseñas puede ofrecerse a "
+        "guardarlo.",
+    ):
+        assert not UNTRUE_PROMISES.search(fine), fine

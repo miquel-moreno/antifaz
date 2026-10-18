@@ -11,7 +11,7 @@
   "login.heading": "Antifaz panel",
   "login.intro": "Type the administrator token to open the panel.",
   "login.token.label": "Administrator token",
-  "login.token.help": "It is the value of ANTIFAZ_ADMIN_TOKEN in your configuration. The browser does not keep it.",
+  "login.token.help": "It is the value of ANTIFAZ_ADMIN_TOKEN in your configuration. The panel stores nothing in your browser; your password manager may offer to save it.",
   "login.submit": "Sign in",
   "login.error.empty": "Type the token first.",
   "login.error.failed": "That token does not open the panel.",

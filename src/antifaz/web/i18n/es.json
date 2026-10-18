@@ -11,7 +11,7 @@
   "login.heading": "Panel de Antifaz",
   "login.intro": "Escribe el token de administrador para abrir el panel.",
   "login.token.label": "Token de administrador",
-  "login.token.help": "Es el valor de ANTIFAZ_ADMIN_TOKEN de tu configuración. El navegador no lo guarda.",
+  "login.token.help": "Es el valor de ANTIFAZ_ADMIN_TOKEN de tu configuración. El panel no guarda nada en el navegador; tu gestor de contraseñas puede ofrecerse a guardarlo.",
   "login.submit": "Entrar",
   "login.error.empty": "Escribe primero el token.",
   "login.error.failed": "Ese token no abre el panel.",
