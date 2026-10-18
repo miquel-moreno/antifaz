@@ -76,6 +76,18 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip)
 
 
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """The CPU each fixed-size DoS test used against its budget (tests/timing.py), so a CI run
+    shows how much margin is left even when everything passes."""
+    from tests.timing import CPU_SPENT
+
+    if not CPU_SPENT:
+        return
+    terminalreporter.section("CPU budgets")
+    for what, spent, limit in CPU_SPENT:
+        terminalreporter.write_line(f"{what}: {spent:.2f} s of CPU (limit {limit:g} s)")
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     settings = Settings(

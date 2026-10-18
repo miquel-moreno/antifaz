@@ -12,6 +12,7 @@ from collections.abc import Callable
 import pytest
 
 from tests.timing import (
+    CPU_SPENT,
     MAX_RATIO,
     Shape,
     Work,
@@ -257,3 +258,12 @@ def test_canary_a_quadratic_python_loop_fails() -> None:
 
 def test_canary_a_linear_python_loop_passes() -> None:
     assert_linear(_python_linear, start=10_000)
+
+
+def test_every_cpu_budget_is_recorded_for_the_summary() -> None:
+    """The CPU each budget used is printed at the end of the run, so CI shows the margin left."""
+    with cpu_budget(7.5, "a recorded block"):
+        pass
+    what, spent, limit = CPU_SPENT[-1]
+    assert (what, limit) == ("a recorded block", 7.5)
+    assert 0 <= spent < 7.5

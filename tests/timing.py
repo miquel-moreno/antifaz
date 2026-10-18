@@ -41,6 +41,9 @@ LONG_SECONDS = 5.0
 MAX_DOUBLINGS = 20
 HANG_GUARD_SECONDS = 120.0
 
+# (what, CPU seconds used, limit) of every cpu_budget block, printed in the run's summary
+CPU_SPENT: list[tuple[str, float, float]] = []
+
 Work = Callable[[], object]
 
 
@@ -87,6 +90,7 @@ def cpu_budget(
         began = time.process_time()
         yield
         spent = time.process_time() - began
+    CPU_SPENT.append((what, spent, seconds))
     if spent > seconds:
         raise AssertionError(
             f"{what} took {spent:.1f} s of CPU time (limit {seconds:g} s; CPU time, so waiting "
