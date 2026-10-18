@@ -158,6 +158,18 @@ Solo pone `ANTHROPIC_BASE_URL` en tu configuración de Claude Code (`~/.claude/s
 
 **Panel**: un panel en el navegador, en `/panel`, que se abre con `ANTIFAZ_ADMIN_TOKEN`, está en desarrollo (issue #53).
 
+## Con qué herramientas funciona
+
+Antifaz habla dos API de proveedores: OpenAI Chat Completions y Anthropic Messages. En tu herramienta, pon como URL base la de Antifaz y usa tu `ANTIFAZ_API_KEY` como clave. Después Antifaz llama al proveedor con la clave de API que tiene en su `.env`, así que el uso se paga por tokens en esa cuenta de API.
+
+| Estado | Herramienta | Notas |
+|---|---|---|
+| Funciona | Tu propio código y tus aplicaciones con la API Chat Completions de OpenAI o la API Messages de Anthropic: los SDK oficiales, curl, n8n o cualquier herramienta donde puedas poner la URL base y una clave de API | Mira los ejemplos de arriba. |
+| Debería funcionar (sin probar aún) | Claude Code | `ANTHROPIC_BASE_URL` apuntando a Antifaz y tu clave de Antifaz en `ANTHROPIC_AUTH_TOKEN`; `antifaz setup claude-code` pone la URL por ti (v0.2.0, más arriba). Se paga con la clave de API de Anthropic que tiene Antifaz, no con una suscripción Claude Pro o Max. Todavía no se ha probado con una sesión real de Claude Code contra la API real. |
+| Todavía no | Codex CLI | Necesita la API Responses de OpenAI, prevista para la v1.0 (solo con clave de API). |
+| No se admite | Iniciar sesión con una suscripción de ChatGPT (Plus, Pro) o de Claude (Pro, Max) en Codex o en Claude Code | Antifaz no reenvía ni guarda esos inicios de sesión. |
+| No lo cubre | La web y las apps de ChatGPT (chatgpt.com, escritorio, móvil) y la web y las apps de Claude (claude.ai, escritorio, móvil) | Hablan directamente con OpenAI o Anthropic y no se pueden hacer pasar por Antifaz. |
+
 ## Qué detecta
 
 Solo los tipos que tienen tests. La política por defecto los enmascara todos menos el CIF de empresa.
@@ -212,6 +224,7 @@ Tablas completas, configuración y límites: [docs/benchmark.md](docs/benchmark.
 - No anonimiza: **seudonimiza**. Solo protege lo que detecta, y ningún detector es perfecto.
 - No evita que la IA deduzca cosas por el contexto (forma de escribir, detalles que quedan en el texto).
 - No procesa imágenes ni archivos: los bloquea.
+- No cubre la web ni las apps de ChatGPT o Claude, y no sirve para usar una suscripción de ChatGPT o Claude desde otras herramientas ([con qué herramientas funciona](#con-qué-herramientas-funciona)).
 - No es un DLP de navegador, e instalarlo no convierte a nadie en "cumplidor del RGPD". Ayuda a minimizar los datos personales que se envían a los proveedores de IA; no es asesoría legal.
 
 ## Limitaciones conocidas
