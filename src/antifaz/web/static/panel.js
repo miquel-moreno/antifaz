@@ -150,6 +150,44 @@
     });
   });
 
+  var settingsButton = document.getElementById("settings-btn");
+  var settingsMenu = document.getElementById("settings-menu");
+
+  function menuOpen() {
+    return settingsButton.getAttribute("aria-expanded") === "true";
+  }
+
+  function setMenu(open, giveFocusBack) {
+    settingsButton.setAttribute("aria-expanded", open ? "true" : "false");
+    settingsMenu.hidden = !open;
+    if (open) {
+      settingsMenu.querySelector("a[href],button").focus();
+    } else if (giveFocusBack) {
+      settingsButton.focus();
+    }
+  }
+
+  settingsButton.addEventListener("click", function () {
+    setMenu(!menuOpen(), false);
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && menuOpen()) {
+      event.preventDefault();
+      setMenu(false, true);
+    }
+  });
+  document.addEventListener("click", function (event) {
+    if (menuOpen() && !settingsMenu.contains(event.target) && !settingsButton.contains(event.target)) {
+      setMenu(false, false);
+    }
+  });
+  settingsMenu.addEventListener("focusout", function (event) {
+    var next = event.relatedTarget;
+    if (next && !settingsMenu.contains(next) && next !== settingsButton) {
+      setMenu(false, false);
+    }
+  });
+
   var dark = matchMedia("(prefers-color-scheme: dark)");
   function current() {
     return root.getAttribute("data-theme") || (dark.matches ? "dark" : "light");

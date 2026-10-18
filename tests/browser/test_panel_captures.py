@@ -1,8 +1,9 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 24 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 28 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
-the panel, in light and dark, at 1280x800 and 390x844, both at 2x. With reduced motion,
+the panel, in light and dark, at 1280x800 and 390x844, both at 2x; and at 390x844 the panel
+with the settings menu open (`*-390x844-4-panel-menu.png`). With reduced motion,
 animations disabled, the caret hidden and after every font is ready.
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
@@ -64,5 +65,9 @@ def test_capture_the_panel(
     tab.page.wait_for_url(f"{server.origin}/panel?lang={lang}")
     tab.page.evaluate("() => document.fonts.ready.then(() => true)")
     written.append(_capture(tab, f"{stem}-3-panel"))
+    if width < 768:  # the phone's settings menu, open
+        tab.page.click("#settings-btn")
+        tab.page.locator("#settings-menu").wait_for(state="visible")
+        written.append(_capture(tab, f"{stem}-4-panel-menu"))
 
     assert all(path.stat().st_size > 0 for path in written)

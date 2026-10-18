@@ -42,6 +42,7 @@ ALLOWED_LITERALS = frozenset(
         "ArrowRight",
         "Home",
         "End",
+        "Escape",
     }
 )
 FORBIDDEN = {

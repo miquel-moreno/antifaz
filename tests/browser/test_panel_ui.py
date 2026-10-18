@@ -347,12 +347,17 @@ def test_salir_logs_out_and_the_back_button_shows_no_panel(
     tab.page.click("#tab-keys")
     # A second panel page in the history (/panel?lang=es, then /panel?lang=en), so that the
     # back button after logging out goes to a panel URL.
-    place = ".app-header" if width > 640 else ".app-bar-tools"
+    phone = width <= 640
+    if phone:
+        tab.page.click("#settings-btn")  # on a phone, language and «Salir» are in this menu
+    place = "#settings-menu" if phone else ".app-header"
     tab.page.click(f"{place} a[hreflang=en]")
     tab.page.wait_for_url(f"{server.origin}/panel?lang=en")
+    if phone:
+        tab.page.click("#settings-btn")
     buttons = tab.page.locator("[data-logout]:visible")
-    assert buttons.count() == 1  # the sidebar's on the desktop, the top bar's on a phone
-    expected_place = "app-sidebar-foot" if width > 640 else "app-bar-tools"
+    assert buttons.count() == 1  # the sidebar's on the desktop, the settings menu's on a phone
+    expected_place = "settings-menu" if phone else "app-sidebar-foot"
     assert buttons.evaluate(f"(b) => !!b.closest('.{expected_place}')")
     assert buttons.inner_text().strip() == CATALOGS["en"].text("logout")
 
