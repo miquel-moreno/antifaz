@@ -62,15 +62,25 @@ FORBIDDEN = {
     "import()": re.compile(r"\bimport\s*\("),
     "postMessage": re.compile(r"\bpostMessage\b"),
     "window.open": re.compile(r"\bopen\s*\("),
-    "fetch with a variable URL": re.compile(r"\bfetch\(\s*[^\"\s]"),
+    # Only fetch("<one literal>", ...) or fetch("<one literal>"): never a built URL.
+    "fetch with a variable URL": re.compile(r'\bfetch\((?!\s*""\s*[,)])'),
 }
+PROSE_PROPERTY = re.compile(
+    r"\.\s*(?:textContent|innerText|outerText|title|ariaLabel|alt|placeholder|value|label)"
+    r"\s*=\s*$"
+)
+VISIBLE_ATTRIBUTES = frozenset(
+    {"aria-label", "aria-description", "aria-roledescription", "title", "alt", "placeholder"}
+)
+SET_ATTRIBUTE_VALUE = re.compile(r'setAttribute\(\s*""\s*,\s*$')
 STRICT_OPENER = re.compile(r"\A\s*(?:\(\s*(?:function\s*\(\s*\)|\(\s*\)\s*=>)\s*\{)?\s*")
 
 
-def _split(source: str) -> tuple[str, list[str]]:
-    """(code with every comment removed and every string replaced by "", the string literals)."""
+def _scan(source: str) -> tuple[str, list[tuple[str, str]]]:
+    """(code with every comment removed and every string replaced by "", and each string
+    literal with the code just before it)."""
     code: list[str] = []
-    strings: list[str] = []
+    strings: list[tuple[str, str]] = []
     i = 0
     while i < len(source):
         char = source[i]
@@ -86,7 +96,7 @@ def _split(source: str) -> tuple[str, list[str]]:
             while source[j] != char:
                 assert source[j] != "\n", "unterminated string"
                 j += 2 if source[j] == "\\" else 1
-            strings.append(source[i + 1 : j])
+            strings.append((source[i + 1 : j], "".join(code)[-80:]))
             code.append('""')
             i = j + 1
         elif char == "`":
@@ -95,6 +105,12 @@ def _split(source: str) -> tuple[str, list[str]]:
             code.append(char)
             i += 1
     return "".join(code), strings
+
+
+def _split(source: str) -> tuple[str, list[str]]:
+    """(code with every comment removed and every string replaced by "", the string literals)."""
+    code, strings = _scan(source)
+    return code, [literal for literal, _ in strings]
 
 
 def _source(name: str) -> str:
@@ -108,9 +124,19 @@ def _strict_first(source: str) -> bool:
 
 
 def _problems(source: str) -> list[str]:
-    code, strings = _split(source)
+    code, scanned = _scan(source)
     problems = [] if _strict_first(source) else ['"use strict" is not first']
-    for literal in strings:
+    previous = ""
+    for literal, before in scanned:
+        # A non-empty literal written where a person reads it: assigned to a visible property,
+        # or the value of setAttribute() for a visible attribute (whose name is the literal just
+        # before). Even a single lowercase word there is prose.
+        visible_attribute = previous in VISIBLE_ATTRIBUTES and SET_ATTRIBUTE_VALUE.search(before)
+        if literal and (PROSE_PROPERTY.search(before) or visible_attribute):
+            problems.append(f"prose position: {literal!r}")
+        previous = literal
+        if literal.lower().startswith(("javascript:", "data:", "vbscript:")):
+            problems.append(f"javascript: or data: URL: {literal!r}")
         if literal not in ALLOWED_LITERALS and not PLAIN_TOKEN.fullmatch(literal):
             problems.append(f"prose or an unknown token: {literal!r}")
         if "\\" in literal:
@@ -220,6 +246,25 @@ def test_the_check_sees_what_it_forbids() -> None:
         "on* attribute",
     ):
         assert any(expected in problem for problem in problems), expected
+    # Review of 11c-2b: bypasses that passed before.
+    for sneaky, expected in (
+        ('a.href = "javascript:alert(1)";', "javascript:"),
+        ('el.textContent = "salir";', "prose position"),
+        ('el.title = "cerrar";', "prose position"),
+        ('el.setAttribute("aria-label", "cerrar");', "prose position"),
+        ('el.setAttribute("title", "salir");', "prose position"),
+        ('fetch("" + url);', "fetch with a variable URL"),
+        ('fetch("/panel/" + name);', "fetch with a variable URL"),
+    ):
+        found = _problems('"use strict";\n' + sneaky + "\n")
+        assert any(expected in problem for problem in found), sneaky
+    for fine in (
+        'el.textContent = "";',
+        'fetch("/panel/login", {method: "POST"});',
+        'el.setAttribute("aria-selected", "true");',
+        'el.setAttribute("aria-label", other.getAttribute("data-text-dark"));',
+    ):
+        assert _problems('"use strict";\n' + fine + "\n") == [], fine
     assert '"use strict" is not first' in _problems('var a = 1;\n"use strict";\n')
     assert _strict_first('(function () {\n  "use strict";\n}());')
     with pytest.raises(AssertionError):
