@@ -288,3 +288,33 @@ def test_a_huge_header_does_not_scan_everything() -> None:
     header = "fr," * 1_000_000 + "es"
 
     assert negotiate(None, header, AVAILABLE) == "en"
+
+
+# --- review of 11c-2b: RFC 9110 details --------------------------------------------------------
+
+
+def test_empty_list_elements_do_not_use_up_the_entry_limit() -> None:
+    """RFC 9110 5.6.1: empty elements of a list are ignored. They are dropped before the limit of
+    ranges, so commas alone never push a real range out (the size limit still applies)."""
+    commas = ", " * 30  # 60 characters, no range at all
+    assert negotiate(None, commas + "es", AVAILABLE) == "es"
+    assert negotiate(None, ",,,, ,\t, es", AVAILABLE) == "es"
+    ten_real = ",".join(["fr"] * MAX_LANGUAGE_RANGES)
+    assert negotiate(None, ten_real + ",,es", AVAILABLE) == "en"  # still only ten ranges
+    assert negotiate(None, "," * 300 + "es", AVAILABLE) == "en"  # past the size limit
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("es;q=0.5, *", "en"),  # the wildcard (q=1) is any language: the reference
+        ("es, *;q=0.5", "es"),
+        ("*;q=0.5, es;q=0.4", "en"),
+        ("es, *", "es"),  # a tie keeps the header's order
+        ("fr, *;q=0.1", "en"),
+        ("*;q=0", "en"),
+        ("es;q=0, *", "en"),
+    ],
+)
+def test_the_wildcard_stands_for_the_reference_at_its_weight(header: str, expected: str) -> None:
+    assert negotiate(None, header, AVAILABLE) == expected

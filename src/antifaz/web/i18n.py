@@ -11,9 +11,11 @@ Adding a language is adding a file; no code changes.
 
 The language of a request (negotiate): `?lang=<code>` if it is exactly a loaded catalog (the raw
 value is never used or reflected), else Accept-Language, else English. Of Accept-Language only
-the first MAX_ACCEPT_LANGUAGE characters and the first MAX_LANGUAGE_RANGES ranges are looked at
-(a range cut by the limit is dropped); q-values are honoured (q=0 means "not this one"), ties keep
-the header's order, and a range matches a catalog by its exact tag or by its primary subtag.
+the first MAX_ACCEPT_LANGUAGE characters and the first MAX_LANGUAGE_RANGES non-empty ranges are
+looked at (a range cut by the limit is dropped; empty list elements are ignored first, RFC 9110
+5.6.1); q-values are honoured (q=0 means "not this one"), ties keep the header's order, a range
+matches a catalog by its exact tag or by its primary subtag, and `*` stands for the reference
+language at its own weight.
 """
 
 import json
@@ -165,16 +167,15 @@ def load_catalogs(folder: Path | None = None) -> Catalogs:
 
 def _ranges(header: str) -> list[tuple[float, int, str]]:
     """(q, position, tag) of the ranges looked at, without q=0 and without invalid ones."""
-    text = header[:MAX_ACCEPT_LANGUAGE]
-    parts = text.split(",", MAX_LANGUAGE_RANGES)
-    if len(parts) > MAX_LANGUAGE_RANGES:
-        parts = parts[:MAX_LANGUAGE_RANGES]  # the cut is in what is left out
-    elif len(header) > MAX_ACCEPT_LANGUAGE:
+    parts = header[:MAX_ACCEPT_LANGUAGE].split(",")  # at most 256 characters to split
+    if len(header) > MAX_ACCEPT_LANGUAGE:
         parts = parts[:-1]  # the last range may be cut in the middle
+    # RFC 9110 5.6.1: empty list elements are ignored, before the limit of ranges.
+    parts = [part for part in parts if part.strip(" \t")][:MAX_LANGUAGE_RANGES]
     found: list[tuple[float, int, str]] = []
     for position, part in enumerate(parts):
         tag, *parameters = (piece.strip(" \t") for piece in part.split(";"))
-        if not _RANGE.fullmatch(tag):
+        if tag != "*" and not _RANGE.fullmatch(tag):
             continue
         quality = 1.0
         valid = True
@@ -190,6 +191,8 @@ def _ranges(header: str) -> list[tuple[float, int, str]]:
 
 
 def _candidates(tag: str) -> list[str]:
+    if tag == "*":
+        return [REFERENCE]  # any language: the reference, at the wildcard's weight
     primary, *rest = tag.split("-")
     primary = primary.lower()
     if rest and len(rest[0]) == 2 and rest[0].isalpha():
