@@ -313,6 +313,7 @@ uv run antifaz setup claude-code --apply    # writes it (asks you to type yes, k
     ```
 
     A key typed at a prompt stays in the shell history. You can also set it in Windows: "Edit environment variables for your account".
+- Claude Code then runs on the Anthropic API key in Antifaz's `.env`, billed per token to that account, not on a Claude Pro or Max subscription. Signing in with a Claude subscription does not go through Antifaz.
 - Restart Claude Code. `/status` should show the line "Anthropic base URL" with Antifaz's address.
 - If Antifaz runs on another address, add `--url`, for example `--url https://antifaz.example.internal`.
 - It configures the Claude Code CLI. The VS Code extension and the desktop app read their own settings ([Claude Code docs](https://code.claude.com/docs/en/llm-gateway-connect)); this command does not change them.
