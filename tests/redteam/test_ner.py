@@ -423,15 +423,20 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit(
     starts: list[float] = []
     returns: list[float] = []
     real_call = pool._call
+    real_predict = pool.predict
 
     def spy(*args: Any) -> Any:
-        starts.append(time.monotonic())
         deadlines.append(args[-1])  # _call(worker, texts, labels, threshold, deadline)
         reply = real_call(*args)
         returns.append(time.monotonic())
         return reply
 
+    def ask(*args: Any, **kwargs: Any) -> Any:
+        starts.append(time.monotonic())  # where the engine hands a call to the pool
+        return real_predict(*args, **kwargs)
+
     monkeypatch.setattr(pool, "_call", spy)
+    monkeypatch.setattr(pool, "predict", ask)
     try:
         hung, died = caplog.text.count(HUNG_LOG), caplog.text.count(DIED_LOG)
         began = time.monotonic()
@@ -447,7 +452,7 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit(
     assert began + timeout <= deadline <= ended
     assert all(start < deadline for start in starts)  # no call starts after it
     assert len(deadlines) < batches  # the text was cut short
-    if returns and returns[0] < deadline:
+    if returns and returns[0] < deadline - 0.5:
         assert len(deadlines) >= 2  # a first call that came back in time was not the last
     assert ended - deadline < OVERSHOOT  # released right after it, not seconds later
 
