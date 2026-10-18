@@ -283,6 +283,10 @@ def test_the_menu_theme_row_says_its_name_and_the_name_is_the_text(
     _open_menu(tab)
     row = tab.page.locator("#settings-menu .theme-btn")
     assert row.get_attribute("aria-label") is None
+    icon = _box(tab, "#settings-menu .theme-btn .ic")
+    text = _box(tab, "#settings-menu .theme-text")
+    assert icon["right"] <= text["left"]  # icon and word side by side, on one row
+    assert text["top"] < (icon["top"] + icon["bottom"]) / 2 < text["bottom"]
     assert row.inner_text().strip() == CATALOGS["es"].text("theme.dark")  # light scheme
     desktop_button = tab.page.locator(".app-header .theme-btn")  # icon only, named by aria-label
     assert desktop_button.get_attribute("aria-label") == CATALOGS["es"].text("theme.to_dark")
