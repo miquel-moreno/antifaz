@@ -4,7 +4,10 @@ The door (door.py) has already checked CSRF for every method that is not GET or 
 and JSON for all of them, and the session's token for all but the login. A route never checks
 CSRF again.
 
-- GET /panel/login: the login page (public), rendered from its template once, at startup.
+- GET /panel/login: the login page (public), rendered from its template once per language, at
+  startup. The language (11c-2b): `?lang=xx` if it is a loaded catalog, else Accept-Language,
+  else English (web/i18n.py); never the raw value. The answer says it with Content-Language and
+  `Vary: Accept-Language`, as GET /panel does.
 - GET /panel/static/{name} (11c-1): a static file of the manifest (assets.py), its bytes from
   memory with its fixed Content-Type. Public only for the exact hashed names (the door's rule);
   any other name reaches this route only with a session, and gets the same 404 as an unknown
@@ -23,7 +26,7 @@ CSRF again.
      token) is one byte-identical 401, and it counts.
   5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
      session bound to the request's scheme is made and the cookie of that scheme is set.
-- GET /panel: a placeholder for the interface of 11c-2 (templates/panel.html), with the
+- GET /panel: the panel (templates/panel.html, 11c-2b) in the request's language, with the
   session's CSRF token in a meta.
 - POST /panel/logout: the door let it through with a live session and its CSRF token. The
   session is closed in the store (reason "logout"; its subscribers are told before the answer
@@ -54,6 +57,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.requests import ClientDisconnect
 
+from antifaz import __version__
 from antifaz.http_errors import (
     PanelLoginFailedError,
     PanelNotFoundError,
@@ -107,15 +111,26 @@ def _fingerprint(token: str) -> bytes:
     return hashlib.sha256(token.encode("utf-8", "surrogatepass")).digest()
 
 
+def _language(request: Request, pages: Pages) -> str:
+    """One of the loaded languages for this request (never the raw ?lang or header)."""
+    accept = ", ".join(request.headers.getlist("accept-language"))
+    return pages.catalogs.negotiate(request.query_params.get("lang"), accept)
+
+
+def _page(body: str, lang: str) -> HTMLResponse:
+    return HTMLResponse(body, headers={"Content-Language": lang, "Vary": "Accept-Language"})
+
+
 def build_router(state: PanelState) -> APIRouter:
     """The panel's routes over `state`: the only thing they get from the gateway. The pages are
-    rendered from the templates here, once (a broken template stops the startup)."""
+    rendered from the templates and catalogs here, once (a broken one stops the startup)."""
     router = APIRouter(include_in_schema=False)
-    pages = Pages(state.assets)
+    pages = Pages(state.assets, version=__version__)
 
     @router.get("/panel/login")
-    async def login_page() -> HTMLResponse:
-        return HTMLResponse(pages.login)
+    async def login_page(request: Request) -> HTMLResponse:
+        lang = _language(request, pages)
+        return _page(pages.login(lang), lang)
 
     @router.get("/panel/static/{name}")
     async def static_file(name: str) -> Response:
@@ -154,7 +169,8 @@ def build_router(state: PanelState) -> APIRouter:
         session = panel_context(request.scope).session
         if session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
-        return HTMLResponse(pages.panel(session.csrf_token))
+        lang = _language(request, pages)
+        return _page(pages.panel(lang, session.csrf_token), lang)
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

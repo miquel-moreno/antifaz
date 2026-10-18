@@ -117,7 +117,13 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .alerts{display:flex;flex-direction:column;gap:12px}
 .alerts:not(:has(>:not([hidden]))){display:none}
 .view{display:flex;flex-direction:column;gap:22px;min-width:0}
-.view.enter>*{animation:rise .55s var(--ease-out) both;animation-delay:calc(var(--i,0)*45ms)}
+/* The pieces of a view rise one after another when its tab is chosen. The step comes from the
+   position (nth-child), never from a style="--i:N" attribute: the CSP forbids those. */
+.view.enter>*{animation:rise .55s var(--ease-out) both}
+.view.enter>:nth-child(2){animation-delay:45ms}
+.view.enter>:nth-child(3){animation-delay:90ms}
+.view.enter>:nth-child(4){animation-delay:135ms}
+.view.enter>:nth-child(n+5){animation-delay:180ms}
 .vh{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
 .vh>div{min-width:0;flex:1 1 320px}
 .vh h1{font-size:var(--text-title);font-weight:var(--weight-title);letter-spacing:var(--tracking-title);line-height:var(--leading-title)}
@@ -605,6 +611,50 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .prov li{row-gap:6px;padding:10px 0}
   .prov .status{max-width:190px}
   .prov .meter{grid-column:1/-1;grid-row:2}
+}
+
+/* ---------- 11c-2b: the icon sprite, the language selector, «Salir», the login ---------- */
+/* The inline SVG sprite: in the page, never shown (a class, not style="..."). */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+
+/* Language selector: plain links to the same page with ?lang=, the current one marked with
+   aria-current like the active tab (white pill with --shadow-pop). Nothing is stored. */
+.langs-list{display:flex;align-items:center;gap:2px}
+.langs-link{display:inline-flex;align-items:center;min-height:28px;padding:0 9px;border-radius:var(--radius-pill);font-size:var(--text-xs);font-weight:var(--weight-medium);letter-spacing:var(--tracking-small);color:var(--color-text-muted);text-decoration:none;white-space:nowrap;transition:background var(--duration-fast),color var(--duration-fast)}
+.langs-link:hover{background:var(--color-surface-3);color:var(--color-text)}
+.langs-link[aria-current="true"]{background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-pop)}
+
+/* «Salir»: a quiet button (leaving is not the main action) at the foot of the sidebar; on a
+   phone, a smaller one in the top bar. */
+.app-sidebar-foot .logout{align-self:flex-start;margin-left:-12px;gap:8px}
+.logout .ic{width:15px;height:15px}
+.empty-cli{font-size:var(--text-sm)}
+
+/* Login: one frosted card centred on the ambient light, the selector and the theme above it. */
+.login{min-height:calc(100vh - 86px);min-height:calc(100dvh - 86px);display:grid;align-content:center;justify-items:center;gap:14px}
+.login-tools{display:flex;align-items:center;gap:6px;justify-self:end}
+.login-card{width:min(100%,420px);padding:32px 32px 26px;display:flex;flex-direction:column;gap:12px}
+.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.login-title{font-size:var(--text-2xl);font-weight:var(--weight-title);letter-spacing:var(--tracking-title);line-height:var(--leading-title)}
+.login-intro{color:var(--color-text-muted)}
+.login-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.login-label{font-size:var(--text-sm);font-weight:var(--weight-semibold)}
+.login-input{width:100%;min-height:42px;padding:0 14px;border:1px solid var(--color-line-strong);border-radius:var(--radius-control);background:var(--color-surface);font-family:var(--font-mono);font-size:15px;letter-spacing:0}
+.login-input:focus-visible{border-color:var(--color-focus)}
+.login-help{font-size:var(--text-xs);color:var(--color-text-muted);letter-spacing:var(--tracking-small)}
+.login-alert:empty{display:none}
+.login-alert{padding:10px 12px;border-radius:12px;border-left:3px solid var(--color-danger);background:var(--color-danger-soft);color:var(--color-text);font-size:var(--text-sm);letter-spacing:var(--tracking-small)}
+.login-submit{margin-top:6px;min-height:40px}
+.login-note{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:var(--text-xs);color:var(--color-text-muted);letter-spacing:var(--tracking-small)}
+.login-note .ic{width:14px;height:14px}
+
+@container app (max-width: 640px){
+  .app-bar-tools .langs-link{padding:0 7px}
+  .logout-bar{min-height:28px;padding:0 9px;font-size:var(--text-xs)}
+}
+/* The login card is its own container, so its phone padding follows the viewport. */
+@media (max-width: 480px){
+  .login-card{padding:24px 20px 20px}
 }
 
 /* Phone bar: hides on scroll down like the header (same guards) */

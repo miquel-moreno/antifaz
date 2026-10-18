@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+from antifaz import __version__
 from antifaz.api.app import registered_paths
 from antifaz.web.assets import load_assets
 from antifaz.web.headers import SECURITY_HEADERS
@@ -34,7 +35,7 @@ from tests.integration.panel_client import (
 )
 from tests.redteam.conftest import both_echo, gateway_client, gateway_settings
 
-LOGIN_PAGE = Pages(load_assets()).login
+LOGIN_PAGE = Pages(load_assets(), version=__version__).login("en")  # no Accept-Language
 LOCAL_URLS = [LOCAL_URL, "http://127.0.0.1", "http://[::1]", "http://localhost:8000"]
 
 

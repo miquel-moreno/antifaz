@@ -1,19 +1,72 @@
 {% extends "base.html" %}
+{% import "parts.html" as parts with context %}
+{#- The panel (11c-2b): the five views of the approved design as ARIA tabs (panel.js: roving
+    tabindex, arrows by orientation, Home/End, keys 1-5), each with its empty block for now.
+    «Salir» in the sidebar foot and, on a phone, in the top bar. -#}
+{#- (name, tab icon, empty-block icon, tab label, intro, empty text): the keys written out, so a
+    test can tell that every key of the catalogs is used. -#}
+{% set views = [
+  ("playground", "i-play", "i-eye-off", t("tab.playground"), t("view.playground.intro"), t("view.playground.empty")),
+  ("live", "i-live", "i-live", t("tab.live"), t("view.live.intro"), t("view.live.empty")),
+  ("keys", "i-key", "i-key", t("tab.keys"), t("view.keys.intro"), t("view.keys.empty")),
+  ("policies", "i-policy", "i-policy", t("tab.policies"), t("view.policies.intro"), t("view.policies.empty")),
+  ("status", "i-status", "i-status", t("tab.status"), t("view.status.intro"), t("view.status.empty")),
+] %}
 {% block meta %}<meta name="{{ csrf_meta }}" content="{{ csrf_token }}">
 {% endblock %}
-{% block title %}Panel{% endblock %}
+{% block title %}{{ t("panel.title") }}{% endblock %}
+{% block script %}{{ static['panel.js'] }}{% endblock %}
 {% block body %}
 <div class="app-window"><div class="app-shell">
-<div class="app-sidebar"><nav class="app-sidebar-inner" aria-label="Panel">
-<div class="app-brand"><span class="app-wordmark">Antifaz</span></div>
+<div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
+<div class="app-brand">{{ parts.logo() }}<span class="app-wordmark">{{ t("app.name") }}</span><span class="app-version ident">{{ t("app.version", version=version) }}</span>
+<span class="app-bar-tools">{{ parts.languages_nav() }}{{ parts.theme_button() }}<button class="btn quiet logout logout-bar" type="button" data-logout>{{ t("logout") }}</button></span>
+</div>
+<p class="app-nav-label" id="nav-label">{{ t("nav.label") }}</p>
+<div class="app-nav">
+<div class="app-tablist" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
+{%- for name, icon, _, label, _, _ in views %}
+<button class="app-tab" role="tab" id="tab-{{ name }}" aria-controls="panel-{{ name }}" aria-selected="{{ 'true' if loop.first else 'false' }}" aria-keyshortcuts="{{ loop.index }}" tabindex="{{ '0' if loop.first else '-1' }}"><svg class="ic" aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="app-tab-label">{{ label }}</span><kbd aria-hidden="true">{{ loop.index }}</kbd></button>
+{%- endfor %}
+</div>
+</div>
+<div class="app-sidebar-foot">
+<p>{{ t("sidebar.privacy") }}</p>
+<span class="app-local"><span class="dot" aria-hidden="true"></span>{{ t("sidebar.local") }}</span>
+<button class="btn quiet logout" type="button" data-logout><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg>{{ t("logout") }}</button>
+</div>
 </nav></div>
 <div class="app-main">
+<header class="app-header">
+<p class="app-crumb">{{ t("app.name") }} · <b id="crumb-name">{{ t("tab.playground") }}</b></p>
+{{ parts.languages_nav() }}{{ parts.theme_button() }}
+</header>
 <main class="app-content" id="main" tabindex="-1">
+<div class="alerts">
+<div class="callout danger" id="logout-alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("logout.error.title") }}</strong><p id="logout-alert-text"></p></div>
+</div>
+{%- for name, _, orb, label, intro, empty in views %}
+<section class="view" id="panel-{{ name }}" role="tabpanel" aria-labelledby="tab-{{ name }}" tabindex="0"{% if not loop.first %} hidden{% endif %}>
 <div class="vh"><div>
-<h1>Panel de Antifaz</h1>
-<p>Has entrado. Las vistas del panel llegan con su interfaz (11c-2).</p>
+<h1>{{ label }}</h1>
+<p>{{ intro }}</p>
 </div></div>
+<div class="empty">
+<span class="orb"><svg class="ic" aria-hidden="true"><use href="#{{ orb }}"/></svg></span>
+<p><b>{{ t("view.soon") }}</b> {{ empty }}</p>
+{%- if name == "status" %}
+<p class="empty-cli">{{ t("view.status.cli") }} <code class="code ident">{{ t("view.status.command") }}</code></p>
+{%- endif %}
+</div>
+</section>
+{%- endfor %}
 </main>
 </div>
 </div></div>
+{% endblock %}
+{% block templates %}
+<template id="panel-messages">
+<span data-msg="refused">{{ t("logout.error.refused") }}</span>
+<span data-msg="network">{{ t("logout.error.network") }}</span>
+</template>
 {% endblock %}
