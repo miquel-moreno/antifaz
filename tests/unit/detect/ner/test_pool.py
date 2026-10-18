@@ -269,7 +269,7 @@ def test_repeated_failures_open_the_circuit_and_it_closes_after_the_backoff(
             breaker.predict([CARMEN], ["person"], 0.5)  # blocked at once: circuit open
         assert len(calls) == reached  # no worker was asked
         assert waited == []  # nor waited for: refused before taking a worker
-        monkeypatch.undo()  # the next request takes a worker again
+        monkeypatch.setattr(breaker._idle, "get", real_get)  # only the queue spy goes away
         give_up = time.monotonic() + READY_WITHIN_SECONDS
         while breaker.status() == "circuit_open" and time.monotonic() < give_up:
             time.sleep(0.05)  # until the 5 s backoff has passed (long, so no check races it)

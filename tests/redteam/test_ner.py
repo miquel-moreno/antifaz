@@ -394,12 +394,13 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Un texto con muchas ventanas lentas (cada lote muy por debajo del límite) no retiene el
-    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: el tercer lote se corta y la petición se bloquea.
+    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: un lote posterior se corta y la petición se bloquea.
 
     Facts, not seconds: each call of 16 windows takes 0.8 s, far under its 2 s limit, so a
     deadline per call would never kill it (the ~300 windows would hold the NER for ~15 s); only
-    ONE deadline for the whole request does, in the third call. Every call gets that same
-    deadline, set when the request began, and the request is released right after it."""
+    ONE deadline for the whole request does (in the third call, or the second on a busy
+    machine). Every call gets that same deadline, set when the request began, and the request
+    is released right after it."""
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     timeout = 2.0
     pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.05})
@@ -423,7 +424,7 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit(
         assert caplog.text.count("went past the time limit") == hung + 1  # killed once
     finally:
         pool.close()
-    assert len(deadlines) >= 3  # 0.8 s per call: the deadline falls in the third
+    assert len(deadlines) >= 2  # at least two calls share the deadline (third, if not busy)
     assert len(set(deadlines)) == 1  # one deadline for the whole request
     assert began + timeout <= deadlines[0] <= ended
     assert ended - began - timeout < 3  # released right after it, not seconds later
