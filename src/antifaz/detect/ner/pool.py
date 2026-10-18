@@ -246,17 +246,22 @@ class NerPool:
         labels: Sequence[str],
         threshold: float,
         deadline: float,
-    ) -> list[object] | None:
-        """The results, or None for a backend error (worker kept). Raises _NotReadyError or
-        _LostError (the worker must be replaced)."""
+    ) -> tuple[list[object] | None, bool]:
+        """The results (None for a backend error) and whether the watchdog killed the worker
+        after its whole reply was read (then the worker is replaced, not counted as a
+        failure). Raises _NotReadyError or _LostError (the worker must be replaced)."""
         if not self._wait_ready(worker, deadline):
             raise _NotReadyError()
         request = {"op": "predict", "texts": list(texts), "labels": list(labels)}
         payload = json.dumps({**request, "threshold": threshold}).encode()
         # The watchdog kills the worker at the deadline: a reply that stops half-way breaks
         # the pipe and recv_bytes returns, so the request never waits past the deadline.
-        # It aims at the same deadline as poll and usually wins: the broken pipe is then
-        # logged as the time limit, because `expired` says the watchdog killed it.
+        # `expired` records that it fired, for two races with the same deadline:
+        # - it fires first and the pipe breaks before poll's own timeout: the broken pipe is
+        #   logged as the time limit, not as a death;
+        # - it fires after the whole reply was read (cancel() cannot stop a watchdog already
+        #   running): join() waits for its kill, the request keeps the reply and the dead
+        #   worker is replaced instead of going back to the queue.
         expired = threading.Event()
 
         def expire() -> None:
@@ -267,24 +272,34 @@ class NerPool:
         watchdog.daemon = True
         watchdog.start()
         try:
-            worker.conn.send_bytes(payload)
-            if not worker.conn.poll(max(0.0, deadline - time.monotonic())):
-                logger.warning(HUNG_LOG)
-                raise _LostError()
-            reply = json.loads(worker.conn.recv_bytes(MAX_REPLY_BYTES))
-        except (EOFError, OSError, ValueError, RecursionError):
-            logger.warning(HUNG_LOG if expired.is_set() else DIED_LOG)
-            raise _LostError() from None
+            try:
+                worker.conn.send_bytes(payload)
+                if not worker.conn.poll(max(0.0, deadline - time.monotonic())):
+                    logger.warning(HUNG_LOG)
+                    raise _LostError()
+                raw = worker.conn.recv_bytes(MAX_REPLY_BYTES)
+            except (EOFError, OSError):
+                logger.warning(HUNG_LOG if expired.is_set() else DIED_LOG)
+                raise _LostError() from None
         finally:
             watchdog.cancel()
-        if reply == {"status": "error", "code": "predict_failed"}:
-            return None
-        ok = isinstance(reply, dict) and reply.get("status") == "ok"
-        results = reply.get("results") if ok else None
-        if not isinstance(results, list) or len(results) != len(texts):
-            logger.warning(MALFORMED_LOG)
-            raise _LostError()
-        return results
+            watchdog.join()
+        killed = expired.is_set()
+        try:
+            reply = json.loads(raw)
+        except (ValueError, RecursionError):
+            logger.warning(DIED_LOG)  # a complete reply that is not JSON: the worker's fault
+            raise _LostError() from None
+        results = None
+        if reply != {"status": "error", "code": "predict_failed"}:
+            ok = isinstance(reply, dict) and reply.get("status") == "ok"
+            results = reply.get("results") if ok else None
+            if not isinstance(results, list) or len(results) != len(texts):
+                logger.warning(MALFORMED_LOG)
+                raise _LostError()
+        if killed:
+            logger.warning(HUNG_LOG)
+        return results, killed
 
     def _failed(self) -> None:
         """One more failure in a row; open the circuit past the threshold. Lock held."""
@@ -307,15 +322,18 @@ class NerPool:
         self._failures = 0
         self._open_until = 0.0
 
-    def _release(self, worker: _Worker, lost: bool) -> None:
+    def _release(self, worker: _Worker, lost: bool, killed: bool = False) -> None:
+        """Back to the queue, or replaced if `lost` (a failure) or `killed` (by a watchdog
+        that fired after the reply arrived: not a failure)."""
         with self._lock:
             self._busy.discard(worker)
             if self._closed:
                 self._dispose(worker)
                 return
-            if lost:
+            if lost or killed:
                 self._dispose(worker)
-                self._failed()
+                if lost:
+                    self._failed()
                 worker = self._spawn()  # it loads in the background
             self._idle.put(worker)
 
@@ -353,15 +371,16 @@ class NerPool:
             raise DetectorFailed()
         results: list[object] | None = None
         lost = True
+        killed = False
         try:
-            results = self._call(worker, texts, labels, threshold, deadline)
+            results, killed = self._call(worker, texts, labels, threshold, deadline)
             lost = False
         except _NotReadyError:
             lost = False
         except _LostError:
             pass
         finally:
-            self._release(worker, lost)
+            self._release(worker, lost, killed)
         if results is None:  # raised here, outside any except block: nothing is chained
             raise DetectorFailed()
         with self._lock:
