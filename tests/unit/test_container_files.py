@@ -386,6 +386,20 @@ def test_every_ci_job_has_a_time_limit() -> None:
             assert 5 <= limit <= 30, f"{path.name}: job {name} has timeout-minutes {limit}"
 
 
+def test_codeql_analyses_python_the_workflows_and_the_panel_scripts() -> None:
+    """PR 11c-2b ships the panel's JavaScript (web/static/*.js): CodeQL reads it too, with the
+    same least-privilege job (nothing by default, three permissions in the job)."""
+    codeql = yaml.safe_load((REPO / ".github/workflows/codeql.yml").read_text(encoding="utf-8"))
+    (job,) = codeql["jobs"].values()
+    assert job["strategy"]["matrix"]["language"] == ["python", "actions", "javascript-typescript"]
+    assert codeql["permissions"] == {}
+    assert job["permissions"] == {
+        "contents": "read",
+        "security-events": "write",
+        "actions": "read",
+    }
+
+
 def test_the_same_uv_version_everywhere() -> None:
     """The image, CI and `make audit` use one uv version: a bump changes all three at once."""
     image = re.findall(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", DOCKERFILE, re.MULTILINE)
