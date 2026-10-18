@@ -163,7 +163,7 @@ Antifaz speaks two provider APIs: OpenAI Chat Completions and Anthropic Messages
 | Status | Tool | Notes |
 |---|---|---|
 | Works | Your own code and apps on the OpenAI Chat Completions API or the Anthropic Messages API: official SDKs, curl, n8n, or any tool where you can set the base URL and an API key | See the examples above. |
-| Works | Claude Code | `ANTHROPIC_BASE_URL` pointing at Antifaz and your Antifaz key in `ANTHROPIC_AUTH_TOKEN`; `antifaz setup claude-code` sets the URL for you (v0.2.0, above). Billed to the Anthropic API key in Antifaz, not to a Claude Pro or Max subscription. Not tested yet with a real Claude Code session against the real API. |
+| Should work (not yet tested) | Claude Code | `ANTHROPIC_BASE_URL` pointing at Antifaz and your Antifaz key in `ANTHROPIC_AUTH_TOKEN`; `antifaz setup claude-code` sets the URL for you (v0.2.0, above). Billed to the Anthropic API key in Antifaz, not to a Claude Pro or Max subscription. Not tested yet with a real Claude Code session against the real API. |
 | Not yet | Codex CLI | It needs the OpenAI Responses API, planned for v1.0 (with an API key only). |
 | Not supported | Signing in with a ChatGPT (Plus, Pro) or Claude (Pro, Max) subscription in Codex or Claude Code | Antifaz does not forward or store those logins. |
 | Not covered | The ChatGPT website and apps (chatgpt.com, desktop, mobile) and the Claude website and apps (claude.ai, desktop, mobile) | They talk to OpenAI or Anthropic directly and cannot be sent through Antifaz. |
