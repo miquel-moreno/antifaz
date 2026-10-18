@@ -14,6 +14,7 @@ import anyio.to_thread
 import httpx
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
+from fastapi.telemetry import TelemetryConfig
 from starlette.types import ASGIApp
 
 from antifaz import __version__
@@ -35,6 +36,20 @@ from antifaz.providers.http import build_client
 # Threads that can mask at the same time (detection and waiting for the NER). A limiter of our
 # own: masking never takes the threads of anyio's shared default limiter from other work.
 MASK_THREADS = 8
+
+# FastAPI's native OpenTelemetry (0.142+), off whatever the environment says. Left on, it would
+# wrap every request as soon as some library registered a global provider: the path, the query,
+# exception messages and stack traces, the request body kept in memory and an incoming
+# `traceparent` joined. `auto_configure` False ignores FASTAPI_OTEL_AUTO_CONFIGURE and the OTLP
+# variables; `exclude` skips every request in case a future FastAPI turns a signal back on.
+TELEMETRY_OFF: TelemetryConfig = {
+    "tracing": False,
+    "metrics": False,
+    "logs": False,
+    "operation_spans": False,
+    "auto_configure": False,
+    "exclude": lambda scope: True,
+}
 
 
 def registered_paths(app: FastAPI) -> frozenset[str]:
@@ -119,6 +134,7 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
         redirect_slashes=False,
+        telemetry=TELEMETRY_OFF,
     )
     app.state.settings = settings
     app.state.detector = detector or (Scanner(ner) if ner is not None else scan_text)

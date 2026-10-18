@@ -144,7 +144,6 @@ EXPECTED_MISSING: dict[str, str] = {
     "pygments": "colours of the httpx command line, which the image never runs",
     "mypy": "pydantic's mypy plugin, a development tool",
     "hypothesis": "pydantic v1's Hypothesis plugin, a test tool",
-    "opentelemetry": "starlette's optional OpenTelemetry middleware, not used",
     "itsdangerous": "starlette's session middleware; the panel has its own sessions",
     "zuvloop": "an experimental uvicorn event loop; Antifaz uses uvloop",
     "zttp": "uvicorn's experimental HTTP implementations; Antifaz uses httptools",

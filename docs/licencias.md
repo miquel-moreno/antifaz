@@ -20,6 +20,12 @@ Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que
 | jinja2 | BSD-3-Clause (sus metadatos: «BSD License») | Plantillas del panel (ADR-0018, PR 11c-1), con autoescape. Versión 3.1.6 en `uv.lock`. Antes solo llegaba con el extra `ner` (por torch); ahora es directa y se distribuye siempre, así que sale de `RECORDED_EXTRA` y se comprueba con sus metadatos instalados. |
 | markupsafe | BSD-3-Clause | Llega con jinja2 (el escape de las plantillas). Versión 3.0.3 en `uv.lock`. Igual que jinja2: ya no es solo del extra `ner`. |
 
+## Dependencias transitivas nuevas
+
+| Paquete | Licencia | Por qué llega |
+|---|---|---|
+| opentelemetry-api | Apache-2.0 (metadatos leídos el 2026-10-17) | FastAPI la exige desde 0.142 para su telemetría nativa. Versión 1.45.1 en `uv.lock`. Es solo la API, sin SDK ni exportadores: no envía nada, y Antifaz además apaga la telemetría de FastAPI (`src/antifaz/api/app.py`, `tests/integration/test_fastapi_telemetry_off.py`). |
+
 ## Solo para desarrollo: los SDK oficiales de los tests de contrato
 
 Los tests de `tests/contract/` usan los SDK oficiales de OpenAI y Anthropic contra Antifaz (issue 5, parte 5d). Están en el grupo `dev` de `pyproject.toml`: **no se distribuyen** (ni en la librería ni en la imagen) y `scripts/check_licenses.py` no los mira porque no son de ejecución. Se comprobaron a mano en sus metadatos el 2026-09-30, con las versiones de `uv.lock`:
