@@ -130,6 +130,36 @@ def test_every_catalog_key_is_used_by_a_template() -> None:
     assert reference - used == set()  # and no key is dead
 
 
+# No visible text in the CSS either: a `content:` is empty, `none`, or copies a data-text-*
+# attribute, which the page check above already requires to come from a catalog.
+CSS_CONTENT = re.compile(r"(?<![\w-])content\s*:\s*([^;}]*)")
+CONTENT_OK = re.compile(r'""|none|attr\(data-text-[a-z-]+\)')
+
+
+def _content_values(css: str) -> list[str]:
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    return [value.strip() for value in CSS_CONTENT.findall(css)]
+
+
+def test_the_css_shows_no_text_of_its_own() -> None:
+    for name, url in ASSETS.urls.items():
+        if name.endswith(".css"):
+            css = ASSETS.files[url.rsplit("/", 1)[1]].body.decode("utf-8")
+            bad = [v for v in _content_values(css) if not CONTENT_OK.fullmatch(v)]
+            assert bad == [], name
+
+
+def test_the_css_content_check_sees_text() -> None:
+    css = (
+        '.a::before{content:"Salir"}.b::after{content:attr(title)}.c{align-content:center}'
+        '.d::before{content:""}.e:focus{outline:0}.f::after{content:none}'
+        ".g::before{content:attr(data-text-label)}"
+    )
+    values = _content_values(css)
+    assert values == ['"Salir"', "attr(title)", '""', "none", "attr(data-text-label)"]
+    assert [v for v in values if not CONTENT_OK.fullmatch(v)] == ['"Salir"', "attr(title)"]
+
+
 # The login form lets password managers keep the token on purpose (autocomplete=current-password
 # and a hidden username): no text may promise that the browser never keeps or saves it.
 UNTRUE_PROMISES = re.compile(

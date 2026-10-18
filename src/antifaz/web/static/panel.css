@@ -378,7 +378,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
   .keys tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:start;gap:8px 16px;padding:14px 20px;border-top:1px solid var(--color-line)}
   .keys tbody tr:first-child{border-top:0}
   .keys td,.keys td:first-child,.keys td:last-child{display:block;border:0;padding:0;text-align:left;font-size:var(--text-sm);letter-spacing:var(--tracking-small);min-width:0}
-  .keys td[data-label]::before{content:attr(data-label);display:block;font-size:var(--text-2xs);color:var(--color-text-muted)}
+  .keys td[data-text-label]::before{content:attr(data-text-label);display:block;font-size:var(--text-2xs);color:var(--color-text-muted)}
   .keys td:first-child{grid-column:1/3;font-size:14px}
   .keys td.k-state{grid-column:3;grid-row:1;align-self:center}
   .keys td.k-state::before{display:none}
@@ -490,7 +490,7 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
 .composer label.cap,.bar .lbl,.kh,.hint,.seg label,.eyebrow,.mcap,.flight,.rm-note,.pfoot,.note .sub,.found dt,.found dd,.found dd b,
 .meta,.sh .aside,.tag,.foot,.live-pill,.stat-sub,.bars li,.ev-what,.keys th,.pol-bar .lbl,.help dt,.help dd,.rules .fixed,
-.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.num,
+.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-text-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.num,
 .pswitch button{letter-spacing:var(--tracking-small)}
 
 /* ---------- Medium: one pane at a time, grids stack ---------- */
