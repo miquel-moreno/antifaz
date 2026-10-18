@@ -3,11 +3,12 @@
 A fake clock drives the window: no test sleeps. The addresses are documentation ranges.
 """
 
-import time
+import ipaddress
 
 import pytest
 
 from antifaz.web.login_limit import FailureLimiter, bucket
+from tests.timing import Work, assert_linear
 
 IP = "198.51.100.7"
 OTHER = "203.0.113.9"
@@ -175,18 +176,27 @@ def test_each_address_keeps_at_most_max_failures_times(limiter: FailureLimiter) 
     assert limiter.allowed(IP) == (False, 60)
 
 
-def test_a_full_table_costs_little_per_new_address(clock: Clock) -> None:
-    # Generous bound: the old linear scan took seconds here; this takes milliseconds.
-    limiter = FailureLimiter(clock=clock)
-    for n in range(10_000):
-        limiter.record_failure(f"10.0.{n // 256}.{n % 256}")
-    started = time.perf_counter()
-    for n in range(10_000):
-        limiter.record_failure(f"10.1.{n // 256}.{n % 256}")
-    elapsed = time.perf_counter() - started
+FULL = ipaddress.IPv4Address("10.0.0.0")
+NEW = ipaddress.IPv4Address("10.128.0.0")
 
-    assert len(limiter) == 10_000
-    assert elapsed < 2.0
+
+def test_a_full_table_costs_little_per_new_address(clock: Clock) -> None:
+    # The old linear scan per new address made n new addresses on a full table of n cost n * n:
+    # with a table 4 times bigger, 4 times as many new addresses must cost about 4 times as much.
+    def prepare(n: int) -> Work:
+        limiter = FailureLimiter(clock=clock, max_ips=n)
+        for k in range(n):
+            limiter.record_failure(str(FULL + k))
+        new = [str(NEW + k) for k in range(n)]
+
+        def work() -> None:
+            for address in new:
+                limiter.record_failure(address)
+            assert len(limiter) == n
+
+        return work
+
+    assert_linear(prepare, start=10_000 // 4)  # 4n: the old full table
 
 
 def test_ipv6_clients_count_per_64_and_ipv4_per_address(limiter: FailureLimiter) -> None:

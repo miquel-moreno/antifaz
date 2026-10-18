@@ -887,7 +887,7 @@ def test_the_timeout_is_a_total_deadline_for_healthz(
     elapsed = time.monotonic() - started
     assert result.code == 1
     assert "gateway: no answer within 1 s" in result.out
-    assert elapsed < 4
+    assert elapsed < 6  # well under the 10 s of drip: one deadline, not one per read
 
 
 @pytest.mark.parametrize("in_headers", [False, True])
@@ -910,7 +910,7 @@ def test_the_timeout_is_a_total_deadline_for_providers(
         assert "OpenAI: no answer within 1 s" in result.out
     else:  # the status line came in time; the body is never read
         assert "OpenAI: the key works" in result.out
-    assert elapsed < 4
+    assert elapsed < 6  # well under the 10 s of drip: one deadline, not one per read
 
 
 @pytest.mark.parametrize(

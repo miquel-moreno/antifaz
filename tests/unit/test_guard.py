@@ -8,6 +8,7 @@ from antifaz import EgressBlocked, mask
 from antifaz.detect.types import EntityType
 from antifaz.guard import check
 from antifaz.vault import Vault
+from tests.timing import Work, assert_linear, cpu_budget
 
 DNI = "12345678Z"  # synthetic, valid check letter
 EMAIL = "ana@example.com"
@@ -121,17 +122,24 @@ def test_json_numbers_are_checked() -> None:
 
 
 def test_one_megabyte_with_200_values_is_fast() -> None:
-    # Generous bound (measured well under it) so a slow CI runner does not make it flaky.
-    import time
-
+    # 200 values against a payload of n messages (200 of them are about 1 MB): 4 times the
+    # payload costs about 4 times as much, never 16 (the shape of tests/timing.py).
     values = [f"{n:08d}" + "TRWAGMYFPDXBNJZSQVHLCKE"[n % 23] for n in range(10_000_000, 10_000_200)]
     vault = vault_with(*((EntityType.ES_DNI, v) for v in values))
     filler = "texto de relleno sin datos " * 190
-    payload = json.dumps({"messages": [{"content": filler} for _ in range(200)]})
-    assert len(payload) > 1_000_000
-    start = time.perf_counter()
-    check(payload, vault)
-    assert time.perf_counter() - start < 2.0
+    one_mb = json.dumps({"messages": [{"content": filler} for _ in range(200)]})
+    assert len(one_mb) > 1_000_000
+    # A CPU-time limit (a loaded machine does not inflate it, unlike the old 2 s of wall time):
+    # about 6 times the 0.17 s it costs under coverage with every core busy (0.09 s idle) on a
+    # desktop (2026-10-18).
+    with cpu_budget(1, "checking 1 MB against 200 values"):
+        check(one_mb, vault)
+
+    def prepare(n: int) -> Work:
+        payload = json.dumps({"messages": [{"content": filler} for _ in range(n)]})
+        return lambda: check(payload, vault)
+
+    assert_linear(prepare, start=200 // 4)  # 4n: the old 1 MB
 
 
 def test_word_boundary_for_short_values() -> None:

@@ -23,6 +23,7 @@ jobs:
     # Written as "== false" so that a missing value (e.g. on scheduled runs) also skips.
     if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read # check out the code
       security-events: write # upload the results to the Security tab

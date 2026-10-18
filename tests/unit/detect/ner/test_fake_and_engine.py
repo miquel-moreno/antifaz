@@ -231,10 +231,13 @@ def test_the_whole_request_shares_one_deadline() -> None:
     detector = NerDetector(slow, window=2, overlap=0, batch_chunks=1)  # type: ignore[arg-type]
     began = time.monotonic()
     with pytest.raises(DetectorFailed):
-        detector.find_many([" ".join(["palabra"] * 20)])  # 10 calls of 0.2 s
-    assert time.monotonic() - began < 1.0
+        detector.find_many([" ".join(["palabra"] * 20)])  # 10 calls of at least 0.2 s
+    ended = time.monotonic()
+    # Facts, not seconds: each call sleeps at least 0.2 s, so at most 3 start within 0.5 s (a
+    # deadline per call would let all 10 run), all with the same deadline, set when it began.
+    assert len(slow.deadlines) <= 3
     assert len(set(slow.deadlines)) == 1  # the same deadline for every call
-    assert slow.deadlines[0] - began <= 0.5 + 0.05
+    assert began <= slow.deadlines[0] - 0.5 <= ended
 
 
 def test_an_explicit_request_timeout_wins_over_the_predictor() -> None:
@@ -242,7 +245,7 @@ def test_an_explicit_request_timeout_wins_over_the_predictor() -> None:
     detector = NerDetector(slow, timeout=1.0)  # type: ignore[arg-type]
     began = time.monotonic()
     detector.find_many([CARMEN])
-    assert slow.deadlines[0] - began <= 1.05
+    assert began <= slow.deadlines[0] - 1.0 <= time.monotonic()  # 1 s from the request, not 100
 
 
 @pytest.mark.parametrize("options", [{"timeout": 0}, {"max_chunks": 0}])

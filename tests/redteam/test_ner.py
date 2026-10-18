@@ -6,8 +6,8 @@ Tests marked xfail(strict=True) are findings: they turn red (XPASS) once fixed. 
 phones and emails are invented.
 """
 
-import contextlib
 import json
+import logging
 import time
 import unicodedata
 from collections.abc import Sequence
@@ -31,7 +31,7 @@ from antifaz.errors import UnmaskableField
 from antifaz.providers.openai_chat import mask_request
 from tests.integration import test_proxy_openai as oai
 from tests.integration.fakes import FakeUpstream
-from tests.nerfakes import ANA, CARMEN, FAKE_FACTORY, JORDI, NAMES, InProcess
+from tests.nerfakes import ANA, CARMEN, FAKE_FACTORY, JORDI, NAMES, InProcess, when_ready
 from tests.redteam.conftest import OPENAI_AUTH, PHONE, assert_not_sent
 
 # --- helpers -----------------------------------------------------------------------------
@@ -363,9 +363,10 @@ def test_workers_never_write_names_and_failures_block(capfd: pytest.CaptureFixtu
     pool.start()
     try:
         for trigger in ("FAKE_PRINT FAKE_RAISE", "FAKE_SLEEP", "FAKE_CRASH", "FAKE_MALFORMED"):
+            when_ready(lambda: pool.predict(["calentar"], ["person"], 0.5))  # a loaded worker
             with pytest.raises(DetectorFailed):
                 mask([f"{trigger} {CARMEN} {PHONE}"], detector=detector)
-        (ok,) = mask([f"FAKE_PRINT {CARMEN}"], detector=detector).texts
+        (ok,) = when_ready(lambda: mask([f"FAKE_PRINT {CARMEN}"], detector=detector)).texts
         assert CARMEN not in ok
     finally:
         pool.close()
@@ -383,28 +384,50 @@ def test_a_crash_in_a_late_window_blocks_the_whole_text() -> None:
         text = f"{CARMEN} " + " ".join(["relleno"] * 5000) + " FAKE_CRASH"
         with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
-        (after,) = mask([f"Soy {CARMEN}"], detector=detector).texts
+        (after,) = when_ready(lambda: mask([f"Soy {CARMEN}"], detector=detector)).texts
         assert after == "Soy [[PERSON_1]]"
     finally:
         pool.close()
 
 
-def test_a_huge_text_is_bounded_by_the_ner_time_limit() -> None:
-    """Un texto con muchas ventanas lentas (cada lote justo por debajo del límite) no debería
-    retener el NER mucho más que ANTIFAZ_NER_TIMEOUT_SECONDS."""
-    timeout = 1.0
+def test_a_huge_text_is_bounded_by_the_ner_time_limit(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un texto con muchas ventanas lentas (cada lote muy por debajo del límite) no retiene el
+    NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: un lote posterior se corta y la petición se bloquea.
+
+    Facts, not seconds: each call of 16 windows takes 0.8 s, far under its 2 s limit, so a
+    deadline per call would never kill it (the ~300 windows would hold the NER for ~15 s); only
+    ONE deadline for the whole request does (in the third call, or the second on a busy
+    machine). Every call gets that same deadline, set when the request began, and the request
+    is released right after it."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    timeout = 2.0
     pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.05})
     detector = Scanner(NerDetector(pool))
     pool.start()
+    deadlines: list[float] = []
+    real_call = pool._call
+
+    def spy(*args: Any) -> Any:
+        deadlines.append(args[-1])  # _call(worker, texts, labels, threshold, deadline)
+        return real_call(*args)
+
+    monkeypatch.setattr(pool, "_call", spy)
     try:
-        text = ("FAKE_SLEEP " + "palabra " * 99) * 150  # ~100 windows, 16 per call
+        hung = caplog.text.count("went past the time limit")
+        text = ("FAKE_SLEEP " + "palabra " * 99) * 450  # ~300 windows, 16 per call
         began = time.monotonic()
-        with contextlib.suppress(DetectorFailed):
+        with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
-        elapsed = time.monotonic() - began
+        ended = time.monotonic()
+        assert caplog.text.count("went past the time limit") == hung + 1  # killed once
     finally:
         pool.close()
-    assert elapsed < 2 * timeout
+    assert len(deadlines) >= 2  # at least two calls share the deadline (third, if not busy)
+    assert len(set(deadlines)) == 1  # one deadline for the whole request
+    assert began + timeout <= deadlines[0] <= ended
+    assert ended - began - timeout < 3  # released right after it, not seconds later
 
 
 # --- 8. configuration --------------------------------------------------------------------------

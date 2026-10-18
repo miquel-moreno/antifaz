@@ -1,7 +1,6 @@
 """Finding identifiers in free text. All values are synthetic."""
 
 import logging
-import time
 
 import pytest
 
@@ -9,6 +8,7 @@ from antifaz.detect.patterns.identifiers import find_identifiers
 from antifaz.detect.scan import scan
 from antifaz.detect.types import Confidence, EntityType, Layer
 from tests.conftest import SENTINEL_DNI
+from tests.timing import Work, assert_linear
 
 T = EntityType
 
@@ -125,27 +125,33 @@ def test_scanning_the_sentinel_dni_writes_nothing_to_the_logs(
         assert SENTINEL_DNI not in repr(record.args)
 
 
-# ADR-0008: internal patterns must not backtrack. Long adversarial inputs must be scanned in
-# linear time; the limit is generous so the test is not flaky on a slow CI machine.
+# ADR-0008: internal patterns must not backtrack. Long adversarial inputs (a head, a unit
+# repeated n times and the size of the old fixed-time test) must be scanned in linear time,
+# measured by its shape (tests/timing.py): 4n repetitions, at least the old size, cost well under
+# 8 times n, never the 16 times of a quadratic pattern.
 ADVERSARIAL = [
-    "1" * 50_000,
-    "1 " * 25_000,
-    "1-" * 25_000,
-    "1." * 25_000,
-    "1/" * 25_000,
-    "X" + "1" * 50_000,
-    "ES" * 25_000,
-    "ES07 " * 10_000,
-    "12.345." * 7_000,
-    "A1" * 25_000,
+    ("", "1", 50_000),
+    ("", "1 ", 25_000),
+    ("", "1-", 25_000),
+    ("", "1.", 25_000),
+    ("", "1/", 25_000),
+    ("X", "1", 50_000),
+    ("", "ES", 25_000),
+    ("", "ES07 ", 10_000),
+    ("", "12.345.", 7_000),
+    ("", "A1", 25_000),
 ]
 
 
-@pytest.mark.parametrize("text", ADVERSARIAL, ids=lambda t: repr(t[:8]))
-def test_scan_of_long_adversarial_input_is_fast(text: str) -> None:
-    started = time.perf_counter()
-    scan(text)
-    assert time.perf_counter() - started < 2.0
+@pytest.mark.parametrize(
+    ("head", "unit", "size"), ADVERSARIAL, ids=[repr(h + u) for h, u, _ in ADVERSARIAL]
+)
+def test_scan_of_long_adversarial_input_is_fast(head: str, unit: str, size: int) -> None:
+    def prepare(n: int) -> Work:
+        text = head + unit * n
+        return lambda: scan(text)
+
+    assert_linear(prepare, start=size // 4)
 
 
 def test_a_truncated_iban_is_not_reported() -> None:
@@ -211,12 +217,14 @@ def test_a_false_iban_start_does_not_hide_a_real_iban(text: str, values: list[st
 
 
 def test_many_valid_identifiers_are_resolved_quickly() -> None:
-    # A large prompt full of valid DNIs must not be a way to block the gateway.
-    text = f"{SENTINEL_DNI} " * 20_000
-    started = time.perf_counter()
-    spans = scan(text)
-    assert time.perf_counter() - started < 2.0
-    assert len(spans) == 20_000
+    # A large prompt full of valid DNIs must not be a way to block the gateway: 4 times as many
+    # cost about 4 times as much, and every one is found.
+    def prepare(n: int) -> Work:
+        text = f"{SENTINEL_DNI} " * n
+        return lambda: scan(text)
+
+    assert_linear(prepare, start=20_000 // 4)
+    assert len(scan(f"{SENTINEL_DNI} " * 20_000)) == 20_000
 
 
 # Found by the synthetic benchmark: an accented letter before a value is part of a word.

@@ -8,10 +8,12 @@ import base64
 import hashlib
 import random
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from antifaz.detect.ner.view import ner_view
+from tests.timing import Work, assert_linear
 
 NAME = "Jordi Inventat Puig"
 
@@ -70,14 +72,19 @@ def test_the_view_keeps_the_length_and_only_blanks_characters(text: str) -> None
     assert all(v == t or v == " " for v, t in zip(view, text, strict=True))
 
 
-def test_long_runs_take_linear_time() -> None:
-    """ADR-0008: no pattern here retries a long run from every position."""
-    import time
+@pytest.mark.parametrize(
+    ("unit", "tail", "size"),
+    [("1", "", 200_000), ("a", "://", 200_000), ("ab", "", 100_000), ("1", " x", 200_000)],
+    ids=repr,
+)
+def test_long_runs_take_linear_time(unit: str, tail: str, size: int) -> None:
+    """ADR-0008: no pattern here retries a long run from every position (tests/timing.py)."""
 
-    for text in ("1" * 200_000, "a" * 200_000 + "://", "ab" * 100_000, "1" * 200_000 + " x"):
-        started = time.perf_counter()
-        ner_view(text)
-        assert time.perf_counter() - started < 1.0
+    def prepare(n: int) -> Work:
+        text = unit * n + tail
+        return lambda: ner_view(text)
+
+    assert_linear(prepare, start=size // 4)  # 4n: the old size
 
 
 def test_the_engine_sends_the_view_and_spans_keep_their_place() -> None:
