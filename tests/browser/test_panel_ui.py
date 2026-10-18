@@ -333,14 +333,36 @@ def test_salir_logs_out_and_the_back_button_shows_no_panel(
     assert server.door_headers("/panel/logout").get("x-antifaz-csrf") == "present"
 
     tab.page.go_back(wait_until="load", timeout=TIMEOUT_MS)  # to /panel?lang=es
-    # The door answers the old panel URL with the login page (from the back-forward cache,
-    # panel.js reloads first).
+    # The door answers the old panel URL with the login page (the HTML is no-store). This is what
+    # keeps the panel away; panel.js's bfcache reload is tested apart (Playwright's Chromium has
+    # no back-forward cache).
     tab.page.wait_for_url(re.compile(re.escape(server.origin) + r"/panel/login$"))
     tab.page.wait_for_load_state("load")
     assert tab.page.locator('[role="tablist"]').count() == 0, "the panel came back"
     assert tab.page.locator("meta[name=antifaz-csrf]").count() == 0
     _assert_nothing_stored(tab)
     assert tab.blocked == []
+
+
+PAGESHOW_JS = """(persisted) => window.dispatchEvent(
+  new PageTransitionEvent('pageshow', {persisted}))"""
+
+
+def test_a_page_restored_from_the_back_forward_cache_reloads(tab: Tab, server: PanelServer) -> None:
+    """Defence in depth: Playwright's Chromium runs without the back-forward cache and the pages
+    are no-store, so the back-button test above passes on the door alone. Here the restore event
+    is dispatched by hand: persisted=true reloads the page, persisted=false does nothing."""
+    _goto(tab, "/panel/login")
+    _log_in_with_the_form(tab, server)
+    tab.page.evaluate("() => { window.__notReloaded = true; }")
+
+    tab.page.evaluate(PAGESHOW_JS, False)
+    assert tab.page.evaluate("() => window.__notReloaded === true")  # no reload
+
+    with tab.page.expect_navigation(wait_until="load"):
+        tab.page.evaluate(PAGESHOW_JS, True)
+    assert tab.page.evaluate("() => window.__notReloaded === undefined")  # a new document
+    assert tab.page.url == f"{server.origin}/panel"
 
 
 # --- everything clicked: CSP and console stay clean -----------------------------------------------
