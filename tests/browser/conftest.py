@@ -143,6 +143,7 @@ def new_tab(
         width: int = 1280,
         locale: str | None = None,
         scale: int = 1,
+        height: int | None = None,
         extra_origin: str | None = None,
     ) -> Tab:
         tab = Tab(
@@ -153,6 +154,7 @@ def new_tab(
             width=width,
             locale=locale,
             scale=scale,
+            height=height,
             extra_origin=extra_origin,
         )
         tabs.append(tab)

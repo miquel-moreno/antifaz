@@ -464,7 +464,9 @@ def test_comments_are_stripped_before_hashing(tmp_path: Path) -> None:
 # Chromium draws such a wide, faint blur in visible rectangular bands: a lighter box stood out
 # below the login card and the panel (checked by switching the shadow, the backdrop blur, the
 # grain and the ambient light off one by one; only the shadow made it). A visual test would be
-# flaky; this keeps every blur of the shadow tokens at or under MAX_SHADOW_BLUR.
+# flaky; this keeps every blur of the shadow tokens at or under MAX_SHADOW_BLUR. It covers only
+# the `--shadow-*` custom properties of tokens.css, with lengths in px: a box-shadow written
+# directly in panel.css, or in another unit, is not checked.
 MAX_SHADOW_BLUR = 64
 SHADOW_TOKEN = re.compile(r"(--shadow-[a-z-]+)\s*:\s*([^;]+);")
 LENGTHS = re.compile(r"(-?\d+(?:\.\d+)?)px|(?<![\w.])0(?![\w.])")
@@ -488,6 +490,33 @@ def test_no_shadow_token_has_a_blur_that_bands() -> None:
     assert any(name == "--shadow-window" for name, _ in found)
     for name, value in found:
         assert max(_blurs(value), default=0) <= MAX_SHADOW_BLUR, name
+
+
+PANEL_CSS = STATIC / "panel.css"
+
+
+def _hide_on_scroll_rules(css: str) -> list[str]:
+    return re.findall(
+        r"[^{}]*chrome-hidden[^{}]*\{[^}]*\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    )
+
+
+def test_nothing_moves_the_phone_bars_with_a_transform() -> None:
+    """Review of 11c-2b: the prototype's "hide on scroll" (chrome-hidden) is never set by the
+    panel's script, and a transform on the phone's sidebar would make it the containing block
+    of the fixed tab bar."""
+    assert _hide_on_scroll_rules(PANEL_CSS.read_text("utf-8")) == []
+
+
+def test_the_page_keeps_clear_of_the_safe_areas() -> None:
+    """viewport-fit=cover lets the page reach under a notch: the gutters and the bottom bar take
+    the safe-area insets."""
+    css = PANEL_CSS.read_text("utf-8")
+    page = re.search(r"\n\.page\{([^}]*)\}", css)
+    assert page and "env(safe-area-inset-left)" in page.group(1)
+    assert "env(safe-area-inset-right)" in page.group(1)
+    assert "env(safe-area-inset-bottom)" in css
+    assert "viewport-fit=cover" in (STATIC.parent / "templates" / "base.html").read_text("utf-8")
 
 
 def test_the_blur_reader_reads_each_layer() -> None:

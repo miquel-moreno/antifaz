@@ -25,7 +25,7 @@ pytestmark = pytest.mark.browser
 
 CATALOGS = load_catalogs()
 TABS = ("playground", "live", "keys", "policies", "status")
-PHONES = [360, 390, 430]
+PHONES = [320, 360, 390, 430]
 STORAGE_JS = """() => ({cookieVisible: document.cookie !== '', local: localStorage.length,
                      session: sessionStorage.length})"""
 NOTHING_STORED = {"cookieVisible": False, "local": 0, "session": 0}
@@ -96,19 +96,97 @@ def test_the_tabs_are_a_bar_fixed_at_the_bottom(
     no_overflow = "() => document.documentElement.scrollWidth <= window.innerWidth"
     assert tab.page.evaluate(no_overflow)
 
-    # it stays at the bottom when the page scrolls, and the content ends above it
+
+@pytest.mark.parametrize(("width", "height"), [(320, 480), (390, 500)])
+def test_the_bar_stays_at_the_bottom_when_the_page_scrolls(
+    new_tab: NewTab, server: PanelServer, width: int, height: int
+) -> None:
+    """A short screen, so the page really scrolls: the bar stays at the bottom and the end of the
+    view stops above it."""
+    tab = new_tab(width=width, height=height)
+    _log_in(tab, server)
     tab.page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+    assert tab.page.evaluate("() => window.scrollY") > 0
     bar = _box(tab, "[role=tablist]")
     assert bar["bottom"] == pytest.approx(bar["vh"], abs=1)
     last = _box(tab, "#panel-playground > :last-child")
     assert last["bottom"] <= bar["top"] + 0.5
 
 
+# A stand-in for a classic Windows scrollbar (17 px), so the window is narrower than the viewport
+# by the same amount (the headless browsers draw overlay scrollbars).
+SCROLLBAR_CSS = "body{margin-right:17px}"
+
+
+@pytest.mark.parametrize("width", [640, 660, 680, 688, 700])
+def test_one_width_decides_both_the_phone_bar_and_the_window_look(
+    new_tab: NewTab, server: PanelServer, width: int
+) -> None:
+    """Review of 11c-2b: at 673-688 px with a classic scrollbar the window kept its card look
+    (and its backdrop filter, which held the fixed bar) while the phone rules already applied.
+    Whatever layout a width gets, it must be whole: the phone bar at the bottom of the screen,
+    or the desktop sidebar inside the card."""
+    tab = new_tab(width=width, bypass_csp=True)
+    tab.goto("/panel/login")
+    tab.page.add_style_tag(content=SCROLLBAR_CSS)
+    tab.page.fill("#login-token", server.admin_token)
+    tab.page.click("#login-form button[type=submit]")
+    tab.page.wait_for_url(f"{server.origin}/panel")
+    tab.page.add_style_tag(content=SCROLLBAR_CSS)
+    orientation = tab.page.get_attribute("[role=tablist]", "aria-orientation")
+    bar = _box(tab, "[role=tablist]")
+    if orientation == "horizontal":  # the phone layout
+        assert bar["bottom"] == pytest.approx(bar["vh"], abs=1)
+        assert bar["left"] == pytest.approx(0, abs=1)
+        assert bar["right"] == pytest.approx(bar["vw"], abs=1)
+        for label in tab.page.evaluate(LABELS_JS):
+            assert label["shown"] and label["whole"] and label["inside"], label
+    else:  # the desktop layout: the bar is in the sidebar
+        side = _box(tab, ".app-sidebar")
+        assert bar["left"] >= side["left"] and bar["right"] <= side["right"]
+    if width == 640:
+        assert orientation == "horizontal"
+    if width == 700:
+        assert orientation == "vertical"
+
+
+def test_a_focused_element_is_never_hidden_under_the_bars(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """WCAG 2.4.11 (focus not obscured): scroll-padding keeps a focused element clear of the
+    bottom tab bar and of the sticky top bar. A test-only button at the end of the view is
+    reached with Tab on a short screen."""
+    tab = new_tab(width=390, height=500)
+    _log_in(tab, server)
+    tab.page.evaluate(
+        "() => { const b = document.createElement('button'); b.id = 'probe-end';"
+        " b.className = 'btn'; b.textContent = 'x';"
+        " document.querySelector('#panel-playground').appendChild(b); }"
+    )
+    tab.page.focus("#panel-playground")
+    tab.page.keyboard.press("Tab")
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
+    probe = _box(tab, "#probe-end")
+    bar = _box(tab, "[role=tablist]")
+    top_bar = _box(tab, ".app-sidebar")
+    assert probe["bottom"] <= bar["top"] + 0.5
+    assert probe["top"] >= top_bar["bottom"] - 0.5
+
+
+def test_the_short_names_survive_twice_the_text_size(new_tab: NewTab, server: PanelServer) -> None:
+    """Text resized to 200 % (WCAG 1.4.4): the short names wrap instead of spilling out."""
+    tab = new_tab(width=390, bypass_csp=True)
+    _log_in(tab, server, "es")
+    tab.page.add_style_tag(content="html{font-size:200%}")
+    for label in tab.page.evaluate(LABELS_JS):
+        assert label["shown"] and label["whole"] and label["inside"] and label["tabWhole"], label
+
+
 @pytest.mark.parametrize("lang", ["es", "en"])
 def test_no_short_name_is_cut_at_the_narrowest_phone(
     new_tab: NewTab, server: PanelServer, lang: str
 ) -> None:
-    tab = new_tab(width=360)
+    tab = new_tab(width=320)
     _log_in(tab, server, lang)
     for label in tab.page.evaluate(LABELS_JS):
         assert label["shown"] and label["whole"] and label["inside"] and label["tabWhole"], label
@@ -151,7 +229,9 @@ def test_the_top_bar_holds_only_the_logo_and_the_settings_button(
     assert button.get_attribute("aria-controls") == "settings-menu"
     assert not tab.page.locator("#settings-menu").is_visible()
     top_bar = _box(tab, ".app-sidebar")
-    assert top_bar["height"] <= 72  # one row: no empty band under the logo
+    assert top_bar["height"] <= 80  # one row: no empty band under the logo
+    size = _box(tab, "#settings-btn")
+    assert size["width"] >= 40 and size["height"] >= 40  # a comfortable touch target
     for hidden in (
         ".app-header",
         ".app-sidebar-foot",
@@ -187,6 +267,58 @@ def test_the_settings_menu_opens_closes_and_gives_the_focus_back(
     assert not tab.page.locator("#settings-menu").is_visible()
     assert tab.page.get_attribute("#settings-btn", "aria-expanded") == "false"
     assert tab.page.evaluate(STORAGE_JS) == NOTHING_STORED
+
+
+def test_the_menu_theme_row_says_its_name_and_the_name_is_the_text(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """WCAG 2.5.3 (label in name): in the menu the theme row shows a word from the catalog, and
+    that word is its accessible name (no aria-label of its own)."""
+    tab = new_tab(width=390, locale="es-ES")
+    _log_in(tab, server, "es")
+    _open_menu(tab)
+    row = tab.page.locator("#settings-menu .theme-btn")
+    assert row.get_attribute("aria-label") is None
+    assert row.inner_text().strip() == CATALOGS["es"].text("theme.dark")  # light scheme
+    desktop_button = tab.page.locator(".app-header .theme-btn")  # icon only, named by aria-label
+    assert desktop_button.get_attribute("aria-label") == CATALOGS["es"].text("theme.to_dark")
+    row.click()
+    assert row.inner_text().strip() == CATALOGS["es"].text("theme.light")
+
+
+def test_the_menu_closes_when_the_phone_layout_goes(new_tab: NewTab, server: PanelServer) -> None:
+    tab = new_tab(width=390)
+    _log_in(tab, server)
+    _open_menu(tab)
+    tab.page.set_viewport_size({"width": 1280, "height": 800})
+    tab.page.wait_for_function(
+        "() => document.getElementById('settings-btn').getAttribute('aria-expanded') === 'false'"
+    )
+    assert not tab.page.locator("#settings-menu").is_visible()
+    tab.page.focus("#tab-live")
+    tab.page.keyboard.press("Escape")  # no hidden button takes the focus
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "tab-live"
+
+
+def test_leaving_the_button_backwards_closes_the_menu(new_tab: NewTab, server: PanelServer) -> None:
+    tab = new_tab(width=390)
+    _log_in(tab, server)
+    # A focusable element just before the button: WebKit's Tab skips links, so without it the
+    # focus would leave the page (no relatedTarget), which deliberately keeps the menu open
+    # (Safari does not focus a clicked button, and a click in the menu must not close it).
+    tab.page.evaluate(
+        "() => { const b = document.createElement('button'); b.id = 'probe-before';"
+        " b.textContent = 'x'; const s = document.getElementById('settings-btn');"
+        " s.parentNode.insertBefore(b, s); }"
+    )
+    _open_menu(tab)
+    tab.page.keyboard.press("Shift+Tab")  # to the button: still open
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "settings-btn"
+    assert tab.page.locator("#settings-menu").is_visible()
+    tab.page.keyboard.press("Shift+Tab")  # out of the button and the menu: closed
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-before"
+    assert not tab.page.locator("#settings-menu").is_visible()
+    assert tab.page.get_attribute("#settings-btn", "aria-expanded") == "false"
 
 
 def test_the_settings_menu_changes_theme_and_language_and_logs_out(

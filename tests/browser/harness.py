@@ -88,6 +88,7 @@ class Tab:
         width: int = 1280,
         locale: str | None = None,
         scale: int = 1,
+        height: int | None = None,
         extra_origin: str | None = None,
     ) -> None:
         self.origin = origin
@@ -106,7 +107,7 @@ class Tab:
             color_scheme=color_scheme,  # type: ignore[arg-type]
             reduced_motion="reduce",
             service_workers="block",
-            viewport={"width": width, "height": 844 if width < 768 else 800},
+            viewport={"width": width, "height": height or (844 if width < 768 else 800)},
             device_scale_factor=scale,
             locale=locale or DEFAULT_LOCALE,
         )
@@ -243,5 +244,6 @@ class NewTab(Protocol):
         width: int = 1280,
         locale: str | None = None,
         scale: int = 1,
+        height: int | None = None,
         extra_origin: str | None = None,
     ) -> Tab: ...
