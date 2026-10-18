@@ -17,6 +17,10 @@
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
 html{background:var(--color-bg)}
+/* The phone's bottom tab bar is this tall (11c-3a): the fixed parts in px (border 1, bar padding
+   6 + 6, tab padding 7 + 6, icon 20, gap 3 = 49) plus the one line of the short name in rem, so
+   it grows with the text size. The room under the content and the scroll padding both use it. */
+:root{--tabbar-h:calc(49px + .8rem);--tabbar-fade:36px}
 body{margin:0;background:transparent;color:var(--color-text);font-family:var(--font-sans);font-optical-sizing:auto;font-size:var(--text-md);line-height:var(--leading-body);letter-spacing:var(--tracking-tight);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:var(--font-features)}
 button,input,textarea,select{font:inherit;color:inherit;letter-spacing:inherit}
 h1,h2,h3,p,ol,ul,dl,dd,figure{margin:0}
@@ -28,7 +32,8 @@ h1,h2,h3{text-wrap:balance}
 .mono{font-family:var(--font-mono);letter-spacing:0}
 .code{font-family:var(--font-mono);font-size:12.5px;background:var(--color-surface-3);color:var(--color-text);padding:1px 6px;border-radius:var(--radius-xs);letter-spacing:0}
 
-.skip{position:absolute;left:16px;top:12px;transform:translateY(-72px);z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:transform var(--duration-fast) var(--ease-out)}
+/* Off screen by its own height plus a margin, so no sliver shows whatever the text size. */
+.skip{position:absolute;left:16px;top:12px;transform:translateY(calc(-100% - 16px));z-index:50;padding:8px 14px;border-radius:var(--radius-pill);background:var(--color-accent);color:var(--color-on-accent);font-weight:var(--weight-semibold);text-decoration:none;transition:transform var(--duration-fast) var(--ease-out)}
 .skip:focus{transform:none}
 
 .page{max-width:1180px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left)) max(16px,env(safe-area-inset-right));padding-block:22px 64px;display:flex;flex-direction:column;gap:18px}
@@ -644,6 +649,18 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .login-note{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:var(--text-xs);color:var(--color-text-muted);letter-spacing:var(--tracking-small)}
 .login-note .ic{width:14px;height:14px}
 
+/* The theme switch of the phone's settings menu (11c-3a): a fixed word («Tema oscuro»), which is
+   its accessible name, and a track whose thumb sits right and turns indigo when the dark theme
+   is the one in effect (aria-checked). The track is decoration (aria-hidden). */
+.theme-switch{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 9px;border:0;border-radius:var(--radius-control-sm);background:transparent;color:var(--color-text);font-size:var(--text-sm);font-weight:550;letter-spacing:var(--tracking-small);text-align:left;cursor:pointer;transition:background var(--duration-fast)}
+.theme-switch:hover{background:var(--color-surface-3)}
+.theme-switch .ic{width:15px;height:15px}
+.switch-text{flex:1;min-width:0}
+.switch-track{position:relative;flex:none;width:34px;height:20px;border-radius:var(--radius-pill);background:var(--color-control);transition:background var(--duration-fast) var(--ease-out)}
+.switch-thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--color-on-accent);box-shadow:var(--shadow-pop);transition:transform var(--duration-base) var(--ease-out)}
+.theme-switch[aria-checked="true"] .switch-track{background:var(--color-accent)}
+.theme-switch[aria-checked="true"] .switch-thumb{transform:translateX(14px)}
+
 /* The short tab names only show in the phone's bottom bar. */
 .app-tab-short{display:none}
 /* The page's width (the viewport without its scrollbar) decides the phone look of the window
@@ -663,14 +680,21 @@ body{container:page/inline-size}
   .settings-btn .ic{width:20px;height:20px}
   .settings-menu{position:absolute;top:calc(100% + 10px);right:0;z-index:30;display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:210px;padding:10px;border-radius:16px;background:var(--color-surface);box-shadow:var(--shadow-card),var(--shadow-pop)}
   .settings-menu .langs-list{justify-content:space-between}
-  .settings-menu .theme-btn{display:flex;align-items:center;width:auto;height:auto;justify-content:flex-start;gap:8px;padding:0 9px;min-height:32px;font-size:var(--text-sm);font-weight:550}
   .settings-menu .logout-bar{justify-content:flex-start;gap:8px;min-height:32px;padding:0 9px}
-  .app-tablist{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;margin:0;padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));overflow:visible;background:var(--color-window);border-top:1px solid var(--color-line)}
-  .app-tab{flex-direction:column;justify-content:center;gap:3px;width:auto;min-width:0;padding:7px 2px 6px;border-radius:12px;font-size:.6875rem;line-height:1.15;letter-spacing:0;text-align:center;white-space:normal}
+  /* The bar is the nav box (background and hairline); the tab list inside it scrolls sideways
+     when the names do not fit (large text): whole words, never broken, and a fade on the side
+     that has more (is-more-start / is-more-end, set by panel.js on scroll and resize). The fade
+     is a mask (alpha only) over the list, so the tabs fade into the bar's own background. */
+  .app-nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--color-window);border-top:1px solid var(--color-line)}
+  .app-tablist{position:relative;display:grid;grid-template-columns:repeat(5,minmax(max-content,1fr));gap:2px;margin:0;padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));overflow-x:auto;overflow-y:hidden}
+  .app-tablist.is-more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - var(--tabbar-fade)),transparent);mask-image:linear-gradient(to right,#000 calc(100% - var(--tabbar-fade)),transparent)}
+  .app-tablist.is-more-start{-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade));mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade))}
+  .app-tablist.is-more-start.is-more-end{-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade),#000 calc(100% - var(--tabbar-fade)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade),#000 calc(100% - var(--tabbar-fade)),transparent)}
+  .app-tab{flex-direction:column;justify-content:center;gap:3px;width:auto;min-width:0;padding:7px 6px 6px;border-radius:12px;font-size:.6875rem;line-height:1.15;letter-spacing:0;text-align:center;white-space:nowrap}
   .app-tab .ic{width:20px;height:20px}
   .app-tab-label{display:none}
-  .app-tab-short{display:block;max-width:100%;overflow-wrap:anywhere}
-  .app-content{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+  .app-tab-short{display:block;line-height:.8rem;white-space:nowrap;overflow-wrap:normal}
+  .app-content{padding-bottom:calc(var(--tabbar-h) + 24px + env(safe-area-inset-bottom))}
   .app-shell{min-height:100vh;min-height:100dvh;grid-template-rows:auto minmax(0,1fr)}
 }
 /* On a phone the window is the screen: no card, no gutter, no space below. The window is the
@@ -684,12 +708,16 @@ body{container:page/inline-size}
   .login{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:stretch;gap:0;background:var(--color-window)}
   .login-tools{align-self:flex-end;padding:12px 12px 0}
   .login-card{flex:1;width:100%;padding:16px 20px 28px}
+  /* Centred in the screen while it fits; taller (large text), auto margins drop to zero and it
+     starts at the top and scrolls, never clipped. */
+  .login-card>:first-child{margin-top:auto}
+  .login-note{margin-bottom:auto}
 }
 /* WCAG 2.4.11 (focus not obscured): a focused element scrolls clear of the sticky top bar and
    of the fixed tab bar. On the root, so a media query (generous: 704 px covers a 672 px page
    plus a classic scrollbar; the extra padding is harmless where the bars are not there). */
 @media (max-width: 704px){
-  html{scroll-padding-top:72px;scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+  html{scroll-padding-top:72px;scroll-padding-bottom:calc(var(--tabbar-h) + 32px + env(safe-area-inset-bottom))}
 }
 
 /* No "hide on scroll" for the header or the phone bar (the prototype's chrome-hidden): no

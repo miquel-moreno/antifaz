@@ -4,7 +4,7 @@
     tabindex, arrows by orientation, Home/End, keys 1-5), each with its empty block for now.
     «Salir» in the sidebar foot. On a phone (panel.css) the tabs are a bar fixed at the bottom
     with short names, and the top bar holds only the logo and a settings button that opens a
-    menu (disclosure) with the language, the theme and «Salir». -#}
+    menu (disclosure) with the language, the theme switch and «Salir». -#}
 {#- (name, tab icon, empty-block icon, tab label, short label, intro, empty text): the keys
     written out, so a test can tell that every key of the catalogs is used. -#}
 {% set views = [
@@ -24,7 +24,7 @@
 <div class="app-brand">{{ parts.logo() }}<span class="app-wordmark">{{ t("app.name") }}</span><span class="app-version ident">{{ t("app.version", version=version) }}</span>
 <div class="app-bar-tools">
 <button class="app-iconbtn settings-btn" id="settings-btn" type="button" aria-label="{{ t('settings.label') }}" aria-expanded="false" aria-controls="settings-menu"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></button>
-<div class="settings-menu" id="settings-menu" hidden>{{ parts.languages_nav(landmark=false) }}{{ parts.theme_button(with_text=true) }}<button class="btn quiet logout logout-bar" type="button" data-logout><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg>{{ t("logout") }}</button></div>
+<div class="settings-menu" id="settings-menu" hidden>{{ parts.languages_nav(landmark=false) }}{{ parts.theme_switch() }}<button class="btn quiet logout logout-bar" type="button" data-logout><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg>{{ t("logout") }}</button></div>
 </div>
 </div>
 <p class="app-nav-label" id="nav-label">{{ t("nav.label") }}</p>

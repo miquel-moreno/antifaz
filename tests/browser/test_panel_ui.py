@@ -535,3 +535,31 @@ def test_another_site_cannot_log_out(
     assert tab.page.locator('[role="tablist"]').count() == 1
     assert tab.cookie_names() == [SESSION_COOKIE]
     assert tab.blocked == []
+
+
+# --- 11c-3a: the skip link leaves no sliver -------------------------------------------------------
+
+SKIP_JS = """() => { const r = document.querySelector('.skip').getBoundingClientRect();
+  return {top: r.top, bottom: r.bottom, vh: window.innerHeight}; }"""
+
+
+def _skip_link_hidden_then_shown(tab: Tab, where: str, text: str) -> None:
+    tab.page.add_style_tag(content=f"html{{font-size:{text}}}")
+    box = tab.page.evaluate(SKIP_JS)
+    assert box["bottom"] <= 0, (where, box)  # not even a sliver above the page
+    tab.page.focus(".skip")
+    box = tab.page.evaluate(SKIP_JS)
+    assert box["top"] >= 0 and box["bottom"] <= box["vh"], (where, box)
+    tab.page.locator(".skip").blur()
+
+
+@pytest.mark.parametrize("text", ["100%", "200%"])
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_skip_link_is_off_screen_until_focused(
+    new_tab: NewTab, server: PanelServer, width: int, text: str
+) -> None:
+    tab = new_tab(width=width, bypass_csp=True)
+    tab.goto("/panel/login")
+    _skip_link_hidden_then_shown(tab, "login", text)
+    _log_in_with_the_form(tab, server)
+    _skip_link_hidden_then_shown(tab, "panel", text)

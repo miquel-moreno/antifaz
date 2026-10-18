@@ -91,8 +91,24 @@
     }
   });
 
-  syncOrientation();
-  new ResizeObserver(syncOrientation).observe(tablist);
+  function edges() {
+    var max = tablist.scrollWidth - tablist.clientWidth;
+    tablist.classList.toggle("is-more-start", max > 1 && tablist.scrollLeft > 1);
+    tablist.classList.toggle("is-more-end", max > 1 && tablist.scrollLeft < max - 1);
+  }
+
+  function layout() {
+    syncOrientation();
+    edges();
+  }
+
+  layout();
+  tablist.addEventListener("scroll", edges, {passive: true});
+  var sizes = new ResizeObserver(layout);
+  sizes.observe(tablist);
+  tabs.forEach(function (tab) {
+    sizes.observe(tab);
+  });
 
   var alertBox = document.getElementById("logout-alert");
   var alertText = document.getElementById("logout-alert-text");
@@ -215,16 +231,14 @@
   function paint() {
     var next = current() === "dark" ? "light" : "dark";
     document.querySelectorAll(".theme-btn").forEach(function (themeButton) {
-      var text = themeButton.querySelector(".theme-text");
-      if (text) {
-        text.textContent = text.getAttribute("data-text-" + next);
-      } else {
-        themeButton.setAttribute("aria-label", themeButton.getAttribute("data-text-" + next));
-      }
+      themeButton.setAttribute("aria-label", themeButton.getAttribute("data-text-" + next));
       themeButton.querySelector(".theme-icon").setAttribute("href", next === "dark" ? "#i-moon" : "#i-sun");
     });
+    document.querySelectorAll(".theme-switch").forEach(function (themeSwitch) {
+      themeSwitch.setAttribute("aria-checked", next === "light" ? "true" : "false");
+    });
   }
-  document.querySelectorAll(".theme-btn").forEach(function (themeButton) {
+  document.querySelectorAll(".theme-btn,.theme-switch").forEach(function (themeButton) {
     themeButton.addEventListener("click", function () {
       root.setAttribute("data-theme", current() === "dark" ? "light" : "dark");
       paint();

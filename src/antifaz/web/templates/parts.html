@@ -10,12 +10,17 @@
 </ul>{% if landmark %}</nav>{% else %}</div>{% endif %}
 {%- endmacro %}
 
-{#- with_text: a visible word that is also the accessible name (the phone menu, WCAG 2.5.3);
-    otherwise an icon button with an aria-label. panel.js and login.js fill either. -#}
-{% macro theme_button(with_text=false) -%}
-{% if with_text %}<button class="app-iconbtn theme-btn" type="button"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg><span class="theme-text" data-text-dark="{{ t('theme.dark') }}" data-text-light="{{ t('theme.light') }}">{{ t("theme.dark") }}</span></button>
-{%- else %}<button class="app-iconbtn theme-btn" type="button" aria-label="{{ t('theme.label') }}" data-text-dark="{{ t('theme.to_dark') }}" data-text-light="{{ t('theme.to_light') }}"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg></button>
-{%- endif %}
+{#- The icon button of the desktop header and of the login, named by its aria-label ("Switch to
+    the dark theme" / "... light theme"): panel.js and login.js swap that label and the icon. -#}
+{% macro theme_button() -%}
+<button class="app-iconbtn theme-btn" type="button" aria-label="{{ t('theme.label') }}" data-text-dark="{{ t('theme.to_dark') }}" data-text-light="{{ t('theme.to_light') }}"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg></button>
+{%- endmacro %}
+
+{#- The phone menu's switch (11c-3a): its visible word never changes and is its accessible name
+    (WCAG 2.5.3); panel.js sets aria-checked to whether the dark theme is the one in effect. The
+    track and its thumb are decoration. -#}
+{% macro theme_switch() -%}
+<button class="theme-switch" type="button" role="switch" aria-checked="false"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg><span class="switch-text">{{ t("theme.dark") }}</span><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span></button>
 {%- endmacro %}
 
 {% macro logo() -%}
