@@ -456,3 +456,42 @@ def test_comments_are_stripped_before_hashing(tmp_path: Path) -> None:
 
     assert commented.urls == plain.urls
     assert _body(commented, "a.css") == b"a{color:red}"
+
+
+# --- Review of the 11c-2b captures: the light rectangle under the window --------------------
+#
+# The window's shadow had layers with 100-120 px of blur. On the near-flat light background,
+# Chromium draws such a wide, faint blur in visible rectangular bands: a lighter box stood out
+# below the login card and the panel (checked by switching the shadow, the backdrop blur, the
+# grain and the ambient light off one by one; only the shadow made it). A visual test would be
+# flaky; this keeps every blur of the shadow tokens at or under MAX_SHADOW_BLUR.
+MAX_SHADOW_BLUR = 64
+SHADOW_TOKEN = re.compile(r"(--shadow-[a-z-]+)\s*:\s*([^;]+);")
+LENGTHS = re.compile(r"(-?\d+(?:\.\d+)?)px|(?<![\w.])0(?![\w.])")
+
+
+def _blurs(value: str) -> list[float]:
+    """The blur radius (third length) of each layer of a box-shadow value."""
+    blurs = []
+    for layer in re.split(r",(?![^(]*\))", value):
+        lengths = [
+            float(m.group(1) or 0) for m in LENGTHS.finditer(re.sub(r"rgb\([^)]*\)", "", layer))
+        ]
+        if len(lengths) >= 3:
+            blurs.append(lengths[2])
+    return blurs
+
+
+def test_no_shadow_token_has_a_blur_that_bands() -> None:
+    tokens = (STATIC / "tokens.css").read_text("utf-8")
+    found = SHADOW_TOKEN.findall(tokens)
+    assert any(name == "--shadow-window" for name, _ in found)
+    for name, value in found:
+        assert max(_blurs(value), default=0) <= MAX_SHADOW_BLUR, name
+
+
+def test_the_blur_reader_reads_each_layer() -> None:
+    assert _blurs("0 0 0 1px rgb(0 0 0 / 0.05), 0 60px 120px -40px rgb(30 24 80 / 0.22)") == [
+        0,
+        120,
+    ]
