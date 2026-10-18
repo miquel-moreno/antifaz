@@ -187,3 +187,27 @@ def test_the_ci_job_uploads_only_screenshots_and_redacted_logs_on_failure() -> N
     assert paths == ["test-results/panel-browser/*.png", "test-results/panel-browser/*.log"]
     for word in ("trace", "video", ".har", "har:"):
         assert word not in JOB_TEXT.lower(), word
+
+
+# --- make panel-captures (PR 11c-2b) ----------------------------------------------------------
+
+PANEL_CAPTURES = (
+    "uv run --frozen --group panel pytest tests/browser/test_panel_captures.py -vv --no-cov "
+    "--panel --panel-captures --panel-browser chromium -p no:cacheprovider"
+)
+
+
+def test_make_panel_captures_runs_only_the_capture_test_in_chromium() -> None:
+    recipe = _recipe("panel-captures")
+    assert PANEL_CAPTURES in recipe
+    phony = re.search(r"^\.PHONY:(.*)$", MAKEFILE, re.MULTILINE)
+    assert phony and "panel-captures" in phony.group(1).split()
+    assert re.search(r'^\t@echo "panel-captures ', MAKEFILE, re.MULTILINE)
+
+
+def test_the_captures_are_never_part_of_check_nor_versioned() -> None:
+    (check,) = re.findall(r"^check:(.*)$", MAKEFILE, re.MULTILINE)
+    assert "captures" not in check
+    assert "--panel-captures" not in _recipe("panel-check")
+    ignored = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "build/" in ignored  # build/panel-captures/ is never committed

@@ -17,6 +17,7 @@ Standard library, httpx, uvicorn and Antifaz only: no Playwright here.
 """
 
 import asyncio
+import http.server
 import secrets
 import socket
 import threading
@@ -24,7 +25,7 @@ import threading
 import httpx
 import uvicorn
 from pydantic import SecretStr
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from antifaz.api.app import create_app
 from antifaz.config import Settings
@@ -47,6 +48,7 @@ def isolated_variable(name: str) -> bool:
 
 # Only a guard against a hang (a broken startup or shutdown), never a limit on speed.
 HANG_GUARD_SECONDS = 120
+GRACEFUL_SHUTDOWN_SECONDS = 10
 
 
 class _NoProvider:
@@ -61,23 +63,34 @@ class _NoProvider:
 
 
 class _PostRecorder:
-    """ASGI wrapper: Origin, Sec-Fetch-Site and the presence of X-Antifaz-CSRF of every POST."""
+    """ASGI wrapper: Origin, Sec-Fetch-Site and the presence of X-Antifaz-CSRF of every POST,
+    and the status the gateway answered it with (PR 11c-2b: a browser may hide the answer from
+    the page and from Playwright, e.g. a no-cors answer blocked by its CORP header)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
         self.posts: list[tuple[str, dict[str, str]]] = []
+        self.statuses: list[tuple[str, int]] = []
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] == "POST":
-            seen = {
-                name.decode("latin-1"): value.decode("latin-1")
-                for name, value in scope["headers"]
-                if name in (b"origin", b"sec-fetch-site")
-            }
-            if any(name == b"x-antifaz-csrf" for name, _ in scope["headers"]):
-                seen["x-antifaz-csrf"] = "present"  # never the value
-            self.posts.append((scope["path"], seen))
-        await self.app(scope, receive, send)
+        if scope["type"] != "http" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        seen = {
+            name.decode("latin-1"): value.decode("latin-1")
+            for name, value in scope["headers"]
+            if name in (b"origin", b"sec-fetch-site")
+        }
+        if any(name == b"x-antifaz-csrf" for name, _ in scope["headers"]):
+            seen["x-antifaz-csrf"] = "present"  # never the value
+        self.posts.append((scope["path"], seen))
+
+        async def recording_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                self.statuses.append((scope["path"], message["status"]))
+            await send(message)
+
+        await self.app(scope, receive, recording_send)
 
 
 class _Server(uvicorn.Server):
@@ -118,6 +131,10 @@ class PanelServer:
             access_log=False,
             log_level="warning",
             server_header=False,
+            # A browser may keep a connection open whose request the door refused before
+            # reading its body (the cross-site tests of 11c-2b): without a limit, the graceful
+            # shutdown would wait for it forever. A hang guard, not a measure of speed.
+            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         )
         self._server = _Server(config)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -130,6 +147,10 @@ class PanelServer:
         """What the last POST to `path` brought: origin, sec-fetch-site, x-antifaz-csrf."""
         sent = [headers for posted, headers in self._recorder.posts if posted == path]
         return sent[-1] if sent else {}
+
+    def door_statuses(self, path: str) -> list[int]:
+        """The status of every POST to `path` the gateway answered, in order."""
+        return [status for posted, status in self._recorder.statuses if posted == path]
 
     @property
     def throwaway_tokens(self) -> tuple[str, str]:
@@ -173,3 +194,47 @@ class PanelServer:
     def closed(self) -> bool:
         """The thread ended (or never started), the socket and the HTTP client are closed."""
         return not self._thread.is_alive() and self._socket.fileno() == -1 and self._http.is_closed
+
+
+OTHER_SITE_PAGE = (
+    b"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>another site</title>"
+    b"<link rel='icon' href='data:,'></head><body><p>another site</p></body></html>"
+)
+
+
+class _OtherSiteHandler(http.server.BaseHTTPRequestHandler):
+    """Every GET is the same plain page, without any CSP; anything else is a 501."""
+
+    def do_GET(self) -> None:  # the name http.server calls
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(OTHER_SITE_PAGE)))
+        self.end_headers()
+        self.wfile.write(OTHER_SITE_PAGE)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+class OtherSite:
+    """Another site for the cross-site tests (PR 11c-2b): a fixed page on a free loopback port,
+    reached by the name localhost (a different site from 127.0.0.1, but the same loopback
+    address space, so the browsers' local-network rules do not step in first). Standard library
+    only; its page has no CSP, like an attacker's."""
+
+    def __init__(self) -> None:
+        self._httpd = http.server.ThreadingHTTPServer((HOST, 0), _OtherSiteHandler)
+        self._httpd.daemon_threads = True
+        self.origin = f"http://localhost:{self._httpd.server_address[1]}"
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever, name="other-site", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._thread.ident is not None:
+            self._httpd.shutdown()
+            self._thread.join(HANG_GUARD_SECONDS)
+        self._httpd.server_close()

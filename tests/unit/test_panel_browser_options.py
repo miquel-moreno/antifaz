@@ -75,3 +75,16 @@ def test_collecting_without_panel_never_imports_playwright() -> None:
     # is 2 or 3), and nothing of the panel group was imported.
     assert result.stdout.strip().splitlines()[-1] == "5 False False", result.stdout[-2000:]
     assert "error" not in result.stdout.lower(), result.stdout[-2000:]
+
+
+def test_the_captures_option_is_off_by_default() -> None:
+    """--panel-captures (PR 11c-2b, `make panel-captures`): without it the capture test skips."""
+    seen: dict[str, dict[str, object]] = {}
+
+    class Parser:
+        def addoption(self, name: str, **options: object) -> None:
+            seen[name] = options
+
+    conftest.pytest_addoption(Parser())  # type: ignore[arg-type]
+    assert seen["--panel-captures"]["action"] == "store_true"
+    assert seen["--panel-captures"]["default"] is False

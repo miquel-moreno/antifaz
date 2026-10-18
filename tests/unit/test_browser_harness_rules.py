@@ -201,5 +201,29 @@ def test_the_stored_same_site_is_reported_in_the_log() -> None:
     assert "def pytest_terminal_summary(" in conftest
 
 
+REFUSED_401 = (
+    "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+)
+REFUSED_429 = (
+    "[error] Failed to load resource: the server responded with a status of 429 (Too Many Requests)"
+)
+
+
+def test_a_refused_login_may_log_its_status_only_as_often_as_the_test_caused_it() -> None:
+    """PR 11c-2b: Chromium and WebKit log every 4xx answer to fetch. A test that types a wrong
+    token on purpose says how many refusals it caused; only those exact lines, at most that
+    many times, are allowed (Firefox logs none, and none is required)."""
+    for browser, platform in (("chromium", "win32"), ("webkit", "linux"), ("firefox", "linux")):
+        assert unexpected_console([REFUSED_401], browser, platform, refused=1) == []
+        assert unexpected_console([], browser, platform, refused=1) == []
+        assert unexpected_console([REFUSED_401, REFUSED_429], browser, platform, refused=2) == []
+        assert unexpected_console([REFUSED_401], browser, platform) == [REFUSED_401]
+        extra = unexpected_console([REFUSED_401, REFUSED_401], browser, platform, refused=1)
+        assert extra == [REFUSED_401]
+    other = REFUSED_401.replace("401 (Unauthorized)", "403 (Forbidden)")
+    assert unexpected_console([other], "chromium", "win32", refused=1) == [other]
+    assert unexpected_console([BLUETOOTH, REFUSED_401], "chromium", "linux", refused=1) == []
+
+
 def test_linux_is_any_linux_platform_string() -> None:
     assert unexpected_console([BLUETOOTH], "chromium", "linux2") == []

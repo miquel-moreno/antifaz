@@ -1,10 +1,13 @@
 """One browser context on the test gateway (PR 11c-2a): what the browser tests look at.
 
 A `Tab` is a new context (never shared between tests) with reduced motion, service workers
-blocked and:
+blocked, a browser locale (it sets Accept-Language, PR 11c-2b; en-US unless a test says
+otherwise, never the system's), a pixel ratio and:
 
-- a context route on every URL: a request to the gateway's own origin goes on; anything else
-  is aborted and recorded in `blocked` (the fixture fails the test if it is not empty);
+- a context route on every URL: a request to the gateway's own origin goes on (and to
+  `extra_origin`, the same gateway under another host name, only for the cross-site tests of
+  PR 11c-2b); anything else is aborted and recorded in `blocked` (the fixture fails the test
+  if it is not empty);
 - every request URL (`requests`), console error or warning (`console`), uncaught page error
   (`errors`) and failed request (`failed`); every console text too, to look for a token;
 - an init script that records every `securitypolicyviolation` of every document
@@ -42,6 +45,8 @@ from playwright.sync_api import (
 from antifaz.web.headers import CONTENT_SECURITY_POLICY
 from tests.browser.redact import redact
 
+# Playwright's default is the system's locale: fixed here, so every test says its language.
+DEFAULT_LOCALE = "en-US"
 # Hang guards only (a page that never loads), never a measure of speed.
 TIMEOUT_MS = 30_000
 
@@ -81,8 +86,12 @@ class Tab:
         bypass_csp: bool = False,
         color_scheme: str = "light",
         width: int = 1280,
+        locale: str | None = None,
+        scale: int = 1,
+        extra_origin: str | None = None,
     ) -> None:
         self.origin = origin
+        self.extra_origin = extra_origin
         self.requests: list[str] = []
         self.blocked: list[str] = []
         self.console: list[str] = []
@@ -97,6 +106,8 @@ class Tab:
             reduced_motion="reduce",
             service_workers="block",
             viewport={"width": width, "height": 844 if width < 768 else 800},
+            device_scale_factor=scale,
+            locale=locale or DEFAULT_LOCALE,
         )
         self.context.set_default_timeout(TIMEOUT_MS)
         self.context.set_default_navigation_timeout(TIMEOUT_MS)
@@ -113,7 +124,8 @@ class Tab:
 
     def _only_the_gateway(self, route: Route) -> None:
         url = route.request.url
-        if self._same_origin(url):
+        extra = self.extra_origin
+        if self._same_origin(url) or (extra and (url == extra or url.startswith(extra + "/"))):
             route.continue_()
         else:
             self.blocked.append(url)
@@ -222,5 +234,12 @@ class Tab:
 
 class NewTab(Protocol):
     def __call__(
-        self, *, bypass_csp: bool = False, color_scheme: str = "light", width: int = 1280
+        self,
+        *,
+        bypass_csp: bool = False,
+        color_scheme: str = "light",
+        width: int = 1280,
+        locale: str | None = None,
+        scale: int = 1,
+        extra_origin: str | None = None,
     ) -> Tab: ...

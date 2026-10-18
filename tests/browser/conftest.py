@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.browser.server import PanelServer, isolated_variable
+from tests.browser.server import OtherSite, PanelServer, isolated_variable
 from tests.conftest import forbid_network, panel_browsers
 
 if TYPE_CHECKING:
@@ -35,9 +35,12 @@ if TYPE_CHECKING:
     from tests.browser.harness import NewTab, Tab
 
 ARTIFACTS = Path(__file__).resolve().parents[2] / "test-results" / "panel-browser"
-# Chromium resolves no name but 127.0.0.1: an extra guard against browser-internal traffic
-# (the context route already aborts every request the page makes elsewhere).
-LAUNCH_ARGS = {"chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"]}
+# Chromium resolves no name but 127.0.0.1 and localhost (loopback too: the second site of the
+# cross-site tests, PR 11c-2b): an extra guard against browser-internal traffic (the context
+# route already aborts every request the page makes elsewhere).
+LAUNCH_ARGS = {
+    "chromium": ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost"]
+}
 FAILED = pytest.StashKey[str]()
 NOTES = pytest.StashKey[list[str]]()
 
@@ -109,6 +112,17 @@ def server(isolated: None) -> Iterator[PanelServer]:
 
 
 @pytest.fixture
+def other_site(isolated: None) -> Iterator[OtherSite]:
+    """Another site on loopback, named localhost (cross-site tests, PR 11c-2b)."""
+    site = OtherSite()
+    try:
+        site.start()
+        yield site
+    finally:
+        site.stop()
+
+
+@pytest.fixture
 def new_tab(
     request: pytest.FixtureRequest, browser: Browser, server: PanelServer
 ) -> Iterator[NewTab]:
@@ -116,9 +130,24 @@ def new_tab(
 
     tabs: list[Tab] = []
 
-    def make(*, bypass_csp: bool = False, color_scheme: str = "light", width: int = 1280) -> Tab:
+    def make(
+        *,
+        bypass_csp: bool = False,
+        color_scheme: str = "light",
+        width: int = 1280,
+        locale: str | None = None,
+        scale: int = 1,
+        extra_origin: str | None = None,
+    ) -> Tab:
         tab = Tab(
-            browser, server.origin, bypass_csp=bypass_csp, color_scheme=color_scheme, width=width
+            browser,
+            server.origin,
+            bypass_csp=bypass_csp,
+            color_scheme=color_scheme,
+            width=width,
+            locale=locale,
+            scale=scale,
+            extra_origin=extra_origin,
         )
         tabs.append(tab)
         return tab
