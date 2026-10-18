@@ -151,6 +151,76 @@ def test_a_crash_before_the_watchdog_fires_is_logged_as_a_death(
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
 
 
+class _LateTimer(threading.Timer):
+    """A watchdog that fires just as the request cancels it, after the whole reply was read:
+    `cancel()` cannot stop a watchdog that is already running."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(3600.0, *args, **kwargs)  # never on its own
+
+    def cancel(self) -> None:
+        self.function(*self.args, **self.kwargs)
+        super().cancel()
+
+
+class _FiredTimer(threading.Timer):
+    """A watchdog that has already fired when the request starts waiting for the reply."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(3600.0, *args, **kwargs)  # never on its own
+
+    def start(self) -> None:
+        self.function(*self.args, **self.kwargs)
+        super().start()
+
+
+class _Unkillable:
+    """Stands in for a worker process: killing it changes nothing."""
+
+    def kill(self) -> None:
+        pass
+
+
+def test_a_watchdog_that_fires_after_the_reply_replaces_the_killed_worker(
+    pool: NerPool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The request keeps the complete reply it read; the worker killed meanwhile never goes
+    back to the queue, so the next request is not blocked by a dead process."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the request must reach a loaded worker
+    before = _workers(pool)
+    hung, died = caplog.text.count(HUNG), caplog.text.count(DIED)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _LateTimer)
+        assert pool.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+    assert caplog.text.count(HUNG) == hung + 1
+    assert not _alive(before)  # the killed process is gone...
+    assert _workers(pool) and before.isdisjoint(_workers(pool))  # ...and replaced
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
+    assert caplog.text.count(DIED) == died  # no request met the dead worker
+
+
+def test_a_malformed_reply_breaks_the_protocol_even_after_the_watchdog_fired(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A complete reply that is not JSON is the worker's fault, not the deadline's."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    parent, child = multiprocessing.Pipe()
+    child.send_bytes(b"not json")  # the whole reply, already waiting in the pipe
+    worker = pool_module._Worker(_Unkillable(), parent, ready=True)  # type: ignore[arg-type]
+    unstarted = NerPool(FAKE_FACTORY, OPTIONS, timeout=TIMEOUT)
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(pool_module, "_TIMER", _FiredTimer)
+            with pytest.raises(pool_module._LostError):
+                unstarted._call(worker, ["hola"], ["person"], 0.5, time.monotonic() + TIMEOUT)
+    finally:
+        parent.close()
+        child.close()
+    assert caplog.text.count(DIED) == 1
+    assert caplog.text.count(HUNG) == 0
+
+
 def test_a_backend_error_blocks_without_its_text_and_keeps_the_worker(pool: NerPool) -> None:
     when_ready(_ask(pool, "calentar"))  # make sure the worker is loaded
     before = _workers(pool)
