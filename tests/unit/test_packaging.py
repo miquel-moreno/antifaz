@@ -1,7 +1,8 @@
 """What the built wheel ships for the panel (issue 53, ADR-0018, PR 11c-1).
 
 The wheel is built for real (`uv build --wheel`, into a temp folder) and read as a zip: every
-static file the panel serves, the OFL text next to each font, and the three templates. The
+static file the panel serves, the OFL text next to each font, the templates and every language
+catalog (web/i18n/, PR 11c-2b: a new catalog ships with no change here). The
 image (tests/e2e/test_panel_static_image.py, `make e2e`) installs this same package.
 """
 
@@ -13,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from antifaz.web.assets import LICENCE_TEXTS, SERVED
+from antifaz.web.i18n import I18N_DIR
 from antifaz.web.templating import TEMPLATES
 
 REPO = Path(__file__).resolve().parents[2]
@@ -65,3 +67,15 @@ def test_the_static_folder_in_the_wheel_holds_nothing_else(wheel: zipfile.ZipFil
         if name.startswith("antifaz/web/static/")
     }
     assert shipped == set(SERVED) | set(LICENCE_TEXTS)
+
+
+def test_the_wheel_ships_every_language_catalog_and_nothing_else_there(
+    wheel: zipfile.ZipFile,
+) -> None:
+    prefix = "antifaz/web/i18n/"
+    shipped = {name.removeprefix(prefix) for name in wheel.namelist() if name.startswith(prefix)}
+    catalogs = {path.name for path in I18N_DIR.iterdir()}
+    assert {"en.json", "es.json"} <= catalogs
+    assert shipped == catalogs
+    for name in catalogs:
+        assert wheel.read(prefix + name) == (I18N_DIR / name).read_bytes(), name
