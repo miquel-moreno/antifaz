@@ -69,11 +69,14 @@ XSITE_FORM = """([url, name, value]) => {
 }"""
 
 
-def _clean(tab: Tab, browser_name: str, refused: int = 0) -> None:
-    """No CSP violation, nothing in the console but the `refused` login refusals the test
-    caused on purpose (console_rules.py), no failed or foreign request."""
+def _clean(tab: Tab, browser_name: str, refused: int = 0, since: int = 0) -> None:
+    """No CSP violation, nothing in the console (from line `since` on) but the `refused` login
+    refusals the test caused on purpose, coming from /panel/login (console_rules.py), no failed
+    or foreign request."""
     assert tab.csp_violations() == []
-    assert unexpected_console(tab.console, browser_name, sys.platform, refused=refused) == []
+    lines = tab.console[since:]
+    where = tab.console_locations[since:]
+    assert unexpected_console(lines, browser_name, sys.platform, where, refused=refused) == []
     assert tab.errors == []
     assert tab.failed == []
     assert tab.blocked == []
@@ -376,9 +379,11 @@ def test_clicking_everything_keeps_the_csp_and_the_console_clean(
     _goto(tab, "/panel/login")
     for _ in range(2):
         tab.page.click(".login-tools .theme-btn")
+    _assert_nothing_stored(tab)
     _submit(tab, secrets.token_hex(32))
     _wait_for_alert(tab)
-    _clean(tab, browser_name, refused=1)
+    _clean(tab, browser_name, refused=1)  # the refusal is allowed in the login phase only
+    login_phase = len(tab.console)
 
     _log_in_with_the_form(tab, server)
     for name in TABS:
@@ -389,11 +394,11 @@ def test_clicking_everything_keeps_the_csp_and_the_console_clean(
         tab.page.click(".app-header .theme-btn")
     tab.page.click(".app-header a[aria-current=true]")
     tab.page.wait_for_load_state("load")
-    _clean(tab, browser_name, refused=1)  # the console keeps the login page's lines
+    _clean(tab, browser_name, since=login_phase)
 
     tab.page.click("[data-logout]:visible")
     tab.page.wait_for_url(re.compile(re.escape(server.origin) + r"/panel/login"))
-    _clean(tab, browser_name, refused=1)
+    _clean(tab, browser_name, since=login_phase)
 
 
 def test_the_theme_button_toggles_and_stores_nothing(tab: Tab, server: PanelServer) -> None:

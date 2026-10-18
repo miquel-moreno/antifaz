@@ -95,6 +95,7 @@ class Tab:
         self.requests: list[str] = []
         self.blocked: list[str] = []
         self.console: list[str] = []
+        self.console_locations: list[str] = []  # the URL of each line of `console`
         self.console_texts: list[str] = []
         self.errors: list[str] = []
         self.failed: list[str] = []
@@ -141,6 +142,7 @@ class Tab:
         self.console_texts.append(message.text)
         if message.type in ("error", "warning"):
             self.console.append(f"[{message.type}] {message.text}")
+            self.console_locations.append(str(message.location.get("url", "")))
 
     def _on_error(self, error: WebError) -> None:
         self.errors.append(str(error.error))

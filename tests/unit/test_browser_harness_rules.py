@@ -209,20 +209,46 @@ REFUSED_429 = (
 )
 
 
+LOGIN_URL = "http://127.0.0.1:50000/panel/login"
+
+
 def test_a_refused_login_may_log_its_status_only_as_often_as_the_test_caused_it() -> None:
     """PR 11c-2b: Chromium and WebKit log every 4xx answer to fetch. A test that types a wrong
-    token on purpose says how many refusals it caused; only those exact lines, at most that
-    many times, are allowed (Firefox logs none, and none is required)."""
+    token on purpose says how many refusals it caused; only those exact lines, coming from the
+    login URL, at most that many times, are allowed (Firefox logs none; none is required)."""
     for browser, platform in (("chromium", "win32"), ("webkit", "linux"), ("firefox", "linux")):
-        assert unexpected_console([REFUSED_401], browser, platform, refused=1) == []
-        assert unexpected_console([], browser, platform, refused=1) == []
-        assert unexpected_console([REFUSED_401, REFUSED_429], browser, platform, refused=2) == []
-        assert unexpected_console([REFUSED_401], browser, platform) == [REFUSED_401]
-        extra = unexpected_console([REFUSED_401, REFUSED_401], browser, platform, refused=1)
+        one = [LOGIN_URL]
+        assert unexpected_console([REFUSED_401], browser, platform, one, refused=1) == []
+        assert unexpected_console([], browser, platform, [], refused=1) == []
+        both = [REFUSED_401, REFUSED_429]
+        assert unexpected_console(both, browser, platform, one * 2, refused=2) == []
+        assert unexpected_console([REFUSED_401], browser, platform, one) == [REFUSED_401]
+        twice = [REFUSED_401, REFUSED_401]
+        extra = unexpected_console(twice, browser, platform, one * 2, refused=1)
         assert extra == [REFUSED_401]
     other = REFUSED_401.replace("401 (Unauthorized)", "403 (Forbidden)")
-    assert unexpected_console([other], "chromium", "win32", refused=1) == [other]
-    assert unexpected_console([BLUETOOTH, REFUSED_401], "chromium", "linux", refused=1) == []
+    assert unexpected_console([other], "chromium", "win32", [LOGIN_URL], refused=1) == [other]
+    lines = [BLUETOOTH, REFUSED_401]
+    assert unexpected_console(lines, "chromium", "linux", ["", LOGIN_URL], refused=1) == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:50000/panel/logout",
+        "http://127.0.0.1:50000/panel",
+        "http://127.0.0.1:50000/panel/login/x",
+        "http://127.0.0.1:50000/v1/chat/completions",
+        "",
+    ],
+)
+def test_a_refusal_counts_only_when_it_comes_from_the_login(url: str) -> None:
+    found = unexpected_console([REFUSED_401], "chromium", "win32", [url], refused=1)
+    assert found == [REFUSED_401]
+
+
+def test_without_locations_no_refusal_is_allowed() -> None:
+    assert unexpected_console([REFUSED_401], "chromium", "win32", refused=1) == [REFUSED_401]
 
 
 def test_linux_is_any_linux_platform_string() -> None:
