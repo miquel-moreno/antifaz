@@ -20,8 +20,9 @@ from typing import Any
 
 import pytest
 
+from antifaz.detect.ner import pool as pool_module
 from antifaz.detect.ner.engine import NerDetector
-from antifaz.detect.ner.pool import NerPool, NerUnavailableError
+from antifaz.detect.ner.pool import DIED_LOG, HUNG_LOG, NerPool, NerUnavailableError
 from antifaz.errors import DetectorFailed
 from tests.conftest import SENTINEL_DNI
 from tests.nerfakes import CARMEN, FAKE_FACTORY, READY_WITHIN_SECONDS, when_ready
@@ -32,8 +33,8 @@ FAR_BELOW_THE_HANG = 30.0  # seconds; FAKE_SLEEP would hold a worker for 60
 # How long a request may be held past its deadline: killing and replacing a worker took under
 # 0.2 s on a machine with 47 CPU burners; a slow kill or a late watchdog takes seconds more.
 OVERSHOOT = 3.0
-HUNG = "went past the time limit"
-DIED = "died or broke the protocol"
+HUNG = HUNG_LOG
+DIED = DIED_LOG
 
 
 @pytest.fixture(scope="module")
@@ -101,10 +102,7 @@ def test_a_worker_that_dies_blocks_the_request_and_is_replaced(
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
 
 
-_REAL_TIMER = threading.Timer
-
-
-class _EarlyTimer(_REAL_TIMER):
+class _EarlyTimer(threading.Timer):
     """The pool's watchdog, firing a little before the deadline it was given: the killed
     worker's pipe then closes while the reply wait is still running, so the parent reads an
     end of file instead of reaching its own timeout (the race seen in CI, made certain)."""
@@ -113,41 +111,41 @@ class _EarlyTimer(_REAL_TIMER):
         super().__init__(max(0.0, interval - 0.2), *args, **kwargs)
 
 
-class _SilentTimer(_REAL_TIMER):
+class _SilentTimer(threading.Timer):
     """A watchdog that never fires (the request ends before its deadline anyway)."""
 
-    def start(self) -> None:
+    def run(self) -> None:
         pass
 
 
 def test_a_worker_killed_by_the_watchdog_is_logged_as_past_the_time_limit(
-    pool: NerPool, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    pool: NerPool, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The log says what happened, whichever the parent notices first: the watchdog's kill
     (the pipe breaks) or its own wait for the reply running out."""
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the hang must reach a loaded worker
     hung, died = caplog.text.count(HUNG), caplog.text.count(DIED)
-    monkeypatch.setattr("antifaz.detect.ner.pool.threading.Timer", _EarlyTimer)
-    with pytest.raises(DetectorFailed):
-        pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _EarlyTimer)
+        with pytest.raises(DetectorFailed):
+            pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
     assert caplog.text.count(HUNG) == hung + 1
     assert caplog.text.count(DIED) == died
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]  # the replacement serves
 
 
 def test_a_crash_before_the_watchdog_fires_is_logged_as_a_death(
-    pool: NerPool, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    pool: NerPool, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Only the watchdog's own kill counts as the time limit, never how close the deadline is."""
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the crash must reach a loaded worker
     hung, died = caplog.text.count(HUNG), caplog.text.count(DIED)
-    monkeypatch.setattr("antifaz.detect.ner.pool.threading.Timer", _SilentTimer)
-    with pytest.raises(DetectorFailed):
-        pool.predict(["FAKE_CRASH"], ["person"], 0.5)
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _SilentTimer)
+        with pytest.raises(DetectorFailed):
+            pool.predict(["FAKE_CRASH"], ["person"], 0.5)
     assert caplog.text.count(DIED) == died + 1
     assert caplog.text.count(HUNG) == hung
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]

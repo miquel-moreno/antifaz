@@ -48,6 +48,12 @@ DEFAULT_LOAD_TIMEOUT_SECONDS = 300.0
 DEFAULT_FAILURE_THRESHOLD = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 DEFAULT_MAX_BACKOFF_SECONDS = 60.0
+# The watchdog's timer class: a seam for tests that move when it fires.
+_TIMER = threading.Timer
+# The pool's log lines about a replaced worker (tests count them by this exact text).
+HUNG_LOG = "NER worker went past the time limit: replaced"
+DIED_LOG = "NER worker died or broke the protocol: replaced"
+MALFORMED_LOG = "NER worker gave a malformed answer: replaced"
 
 
 class NerUnavailableError(Exception):
@@ -257,20 +263,17 @@ class NerPool:
             expired.set()
             self._kill(worker)
 
-        watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), expire)
+        watchdog = _TIMER(max(0.0, deadline - time.monotonic()), expire)
         watchdog.daemon = True
         watchdog.start()
         try:
             worker.conn.send_bytes(payload)
             if not worker.conn.poll(max(0.0, deadline - time.monotonic())):
-                logger.warning("NER worker went past the time limit: replaced")
+                logger.warning(HUNG_LOG)
                 raise _LostError()
             reply = json.loads(worker.conn.recv_bytes(MAX_REPLY_BYTES))
         except (EOFError, OSError, ValueError, RecursionError):
-            if expired.is_set():
-                logger.warning("NER worker went past the time limit: replaced")
-            else:
-                logger.warning("NER worker died or broke the protocol: replaced")
+            logger.warning(HUNG_LOG if expired.is_set() else DIED_LOG)
             raise _LostError() from None
         finally:
             watchdog.cancel()
@@ -279,7 +282,7 @@ class NerPool:
         ok = isinstance(reply, dict) and reply.get("status") == "ok"
         results = reply.get("results") if ok else None
         if not isinstance(results, list) or len(results) != len(texts):
-            logger.warning("NER worker gave a malformed answer: replaced")
+            logger.warning(MALFORMED_LOG)
             raise _LostError()
         return results
 
