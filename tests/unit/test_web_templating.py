@@ -2,7 +2,9 @@
 
 - jinja2.Environment with autoescape and StrictUndefined, no auto-reload, every template read
   and compiled once at startup (a DictLoader: serving a page never touches the disk).
-- Templates only receive server values: the manifest's URLs and the session's CSRF token.
+- Templates only receive server values: the manifest's URLs, the session's CSRF token, the
+  version and the texts of the loaded catalogs (11c-2b: one login page and one panel page per
+  language; every visible text comes from a catalog, tests/unit/test_web_page_texts.py).
 - Never Jinja2Templates nor request.url_for (they build URLs from the Host header): the static
   URLs are the fixed /panel/static/... of the manifest.
 - The served HTML holds nothing the CSP would block (tests/html_rules.py, with html.parser).
@@ -17,14 +19,17 @@ import jinja2
 import pytest
 
 import antifaz.web
+from antifaz import __version__
 from antifaz.web.assets import load_assets
+from antifaz.web.i18n import load_catalogs
 from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.templating import CSRF_META, TEMPLATES, TEMPLATES_DIR, Pages, environment
 from tests.html_rules import html_problems, html_urls
 
 WEB = Path(antifaz.web.__file__).parent
 ASSETS = load_assets()
-PAGES = Pages(ASSETS)
+CATALOGS = load_catalogs()
+PAGES = Pages(ASSETS, version=__version__)
 
 
 def _copy_templates(tmp_path: Path, **changed: str) -> Path:
@@ -34,8 +39,8 @@ def _copy_templates(tmp_path: Path, **changed: str) -> Path:
     return tmp_path
 
 
-def test_the_templates_folder_holds_exactly_the_three_templates() -> None:
-    assert TEMPLATES == ("base.html", "login.html", "panel.html")
+def test_the_templates_folder_holds_exactly_the_templates() -> None:
+    assert TEMPLATES == ("base.html", "parts.html", "login.html", "panel.html")
     assert {path.name for path in TEMPLATES_DIR.iterdir()} == set(TEMPLATES)
     assert TEMPLATES_DIR == WEB / "templates"
 
@@ -52,14 +57,14 @@ def test_the_environment_escapes_fails_on_undefined_and_never_reloads() -> None:
 
 
 def test_autoescape_escapes_markup_in_a_value() -> None:
-    page = PAGES.panel('<script>alert(1)</script>"&')
+    page = PAGES.panel("en", '<script>alert(1)</script>"&')
 
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;alert(1)&lt;/script&gt;&#34;&amp;" in page
 
 
 def test_the_panel_page_carries_the_csrf_token_in_its_meta_only() -> None:
-    page = PAGES.panel("csrf-token-x")
+    page = PAGES.panel("es", "csrf-token-x")
 
     assert f'<meta name="{CSRF_META}" content="csrf-token-x">' in page
     assert page.count("csrf-token-x") == 1
@@ -77,26 +82,35 @@ def test_the_login_page_is_rendered_once_and_has_no_csrf_meta(
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(jinja2.Template, "render", spy)
-    pages = Pages(ASSETS)
-    assert sorted(calls) == ["login.html", "panel.html"]  # both once, at startup
+    pages = Pages(ASSETS, version=__version__)
+    languages = len(CATALOGS.codes)
+    # both once per language, at startup
+    assert sorted(calls) == ["login.html"] * languages + ["panel.html"] * languages
     calls.clear()
 
-    assert pages.login and pages.login is pages.login
+    for code in CATALOGS.codes:
+        assert pages.login(code) and pages.login(code) is pages.login(code)
+        assert CSRF_META not in pages.login(code)
     assert calls == []  # serving the login page renders nothing
-    assert CSRF_META not in PAGES.login
-    assert "11c-2" in PAGES.login  # the real login screen comes with the next PR
 
 
-@pytest.mark.parametrize("page", [PAGES.login, PAGES.panel("csrf-token-x"), HTTPS_ONLY_PAGE])
+@pytest.mark.parametrize(
+    "page",
+    [
+        *(PAGES.login(code) for code in CATALOGS.codes),
+        *(PAGES.panel(code, "csrf-token-x") for code in CATALOGS.codes),
+        HTTPS_ONLY_PAGE,
+    ],
+)
 def test_served_pages_hold_nothing_the_csp_would_block(page: str) -> None:
     assert page.startswith("<!doctype html>")
-    assert '<html lang="es">' in page
+    assert '<html lang="' in page
     assert '<meta charset="utf-8">' in page
     assert html_problems(page, ASSETS.paths) == []
     assert "http://" not in page and "https://" not in page
 
 
-@pytest.mark.parametrize("page", [PAGES.login, PAGES.panel("csrf-token-x")])
+@pytest.mark.parametrize("page", [PAGES.login("en"), PAGES.panel("en", "csrf-token-x")])
 def test_the_pages_load_the_panel_styles_and_favicon_from_the_manifest(page: str) -> None:
     urls = html_urls(page)
     for logical in ("fonts.css", "tokens.css", "panel.css", "logo.svg"):
@@ -123,6 +137,8 @@ def test_the_html_rules_catch_what_they_forbid() -> None:
         '<a href="javascript:x">a</a><img src="data:image/png,x"><p style="x" onclick="y">p</p>'
         '<a href="https://example.invalid/">b</a><link href="/panel/static/nope.css">'
         '<base href="/"><meta http-equiv="refresh" content="0"><iframe src="#x"></iframe>'
+        '<a href="/panel?lang=<x>">c</a><a href="/panel?lang=es&x=1">d</a>'
+        '<a href="/panel/logout?lang=es">e</a>'
     )
 
     problems = html_problems(bad, frozenset())
@@ -140,8 +156,13 @@ def test_the_html_rules_catch_what_they_forbid() -> None:
         "<base>",
         "meta refresh",
         "<iframe>",
+        "/panel?lang=<x>",
+        "/panel?lang=es&x=1",
+        "/panel/logout?lang=es",
     ):
         assert any(expected in problem for problem in problems), expected
+    for fine in ("/panel?lang=es", "/panel/login?lang=pt-BR", "/panel", "#main"):
+        assert html_problems(f'<a href="{fine}">x</a>', frozenset()) == [], fine
 
 
 # --- What templates and the web code may never do ---------------------------------------------
@@ -176,7 +197,7 @@ def test_a_template_with_an_undefined_value_stops_the_startup(tmp_path: Path) ->
     folder = _copy_templates(tmp_path, panel='{% extends "base.html" %}' + body)
 
     with pytest.raises(jinja2.UndefinedError):
-        Pages(ASSETS, folder)
+        Pages(ASSETS, version=__version__, folder=folder)
 
 
 def test_a_template_asking_for_a_static_file_outside_the_manifest_stops_the_startup(
@@ -185,11 +206,11 @@ def test_a_template_asking_for_a_static_file_outside_the_manifest_stops_the_star
     folder = _copy_templates(tmp_path, login="{{ static['missing.css'] }}")
 
     with pytest.raises(jinja2.UndefinedError):
-        Pages(ASSETS, folder)
+        Pages(ASSETS, version=__version__, folder=folder)
 
 
 def test_rendering_never_touches_the_disk(monkeypatch: pytest.MonkeyPatch) -> None:
-    pages = Pages(ASSETS)
+    pages = Pages(ASSETS, version=__version__)
 
     def no_disk(*args: object, **kwargs: object) -> object:
         raise AssertionError("the disk was read while serving")
@@ -199,5 +220,5 @@ def test_rendering_never_touches_the_disk(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(Path, "open", no_disk)
     monkeypatch.setattr("builtins.open", no_disk)
 
-    assert "csrf-1" in pages.panel("csrf-1")
-    assert pages.login
+    assert "csrf-1" in pages.panel("es", "csrf-1")
+    assert pages.login("es")

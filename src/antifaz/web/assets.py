@@ -48,6 +48,8 @@ SERVED = (
     "fonts.css",
     "tokens.css",
     "panel.css",
+    "login.js",
+    "panel.js",
 )
 # Shipped next to the fonts (the OFL asks for it), never served.
 LICENCE_TEXTS = ("Inter-OFL.txt", "GeistMono-OFL.txt")

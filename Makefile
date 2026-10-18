@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.13.0 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures panel-check
+.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures panel-check panel-captures
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -33,6 +33,7 @@ help:
 	@echo "design-captures  Reference captures of the prototype into design/captures/ (same script)"
 	@echo "panel-check  The real panel in Chromium, Firefox and WebKit: CSP, console, cookies, axe"
 	@echo "           (panel group; PANEL_BROWSERS=chromium for one; browsers installed once, see CONTRIBUTING)"
+	@echo "panel-captures  Captures of the real panel (es, en; light, dark; 1280 and 390 px) into build/panel-captures/"
 
 install:
 	uv sync
@@ -131,6 +132,13 @@ design-check:
 # PANEL_BROWSERS=chromium (or a comma list) limits the run; CI runs Chromium only.
 panel-check:
 	uv run --frozen --group panel pytest tests/browser -vv --no-cov --panel -p no:cacheprovider $(if $(PANEL_BROWSERS),--panel-browser $(PANEL_BROWSERS),)
+
+# Captures of the real panel (tests/browser/test_panel_captures.py) into build/panel-captures/,
+# which git ignores: login empty, login with an error and the panel, in Spanish and English, light
+# and dark, at 1280x800 and 390x844 (2x), plus the phone settings menu open. Synthetic only: the
+# token field is checked empty before every capture. Chromium only. Not part of `check` nor of `panel-check`.
+panel-captures:
+	uv run --frozen --group panel pytest tests/browser/test_panel_captures.py -vv --no-cov --panel --panel-captures --panel-browser chromium -p no:cacheprovider
 
 # Reference captures of the prototype (design/captures/): the five views in light and dark, desktop
 # and mobile, plus the other states of the Playground. Same script and dependencies as design-check.

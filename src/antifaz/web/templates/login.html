@@ -1,13 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Entrar{% endblock %}
+{% import "parts.html" as parts with context %}
+{#- The login (11c-2b). The form posts nothing by itself: the token field has no name, and
+    login.js sends {"token": ...} as JSON and clears the field before it waits. The username
+    field is a fixed "admin" (no personal data) so that password managers can keep the token. -#}
+{% block title %}{{ t("login.title") }}{% endblock %}
+{% block script %}{{ static['login.js'] }}{% endblock %}
 {% block body %}
-<main class="app-window" id="main">
-<div class="app-content">
-<div class="vh"><div>
-<h1>Panel de Antifaz</h1>
-<p>La pantalla para entrar llega con la interfaz del panel (11c-2).</p>
-</div></div>
-<p>Mientras tanto, se entra con <code class="code">POST /panel/login</code> y el token de administrador (<code class="code">ANTIFAZ_ADMIN_TOKEN</code>) en JSON.</p>
+<main class="login" id="main">
+<div class="login-tools">{{ parts.languages_nav() }}{{ parts.theme_button() }}</div>
+<div class="app-window login-card">
+<div class="login-brand">{{ parts.logo() }}<span class="app-wordmark">{{ t("app.name") }}</span></div>
+<h1 class="login-title">{{ t("login.heading") }}</h1>
+<p class="login-intro">{{ t("login.intro") }}</p>
+<form class="login-form" id="login-form" method="post" action="/panel/login" novalidate>
+<input class="login-user" type="text" autocomplete="username" value="admin" hidden>
+<label class="login-label" for="login-token">{{ t("login.token.label") }}</label>
+<input class="login-input" id="login-token" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="login-help login-alert">
+<p class="login-help" id="login-help">{{ t("login.token.help") }}</p>
+<p class="login-alert" id="login-alert" role="alert"></p>
+<button class="btn primary login-submit" type="submit">{{ t("login.submit") }}</button>
+</form>
+<p class="login-note"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>{{ t("login.note") }}</p>
 </div>
 </main>
+{% endblock %}
+{% block templates %}
+<template id="login-messages">
+<span data-msg="empty">{{ t("login.error.empty") }}</span>
+<span data-msg="failed">{{ t("login.error.failed") }}</span>
+<span data-msg="too-many">{{ t("login.error.too_many") }}</span>
+<span data-msg="too-many-later">{{ t("login.error.too_many_later") }}</span>
+<span data-msg="refused">{{ t("login.error.refused") }}</span>
+<span data-msg="network">{{ t("login.error.network") }}</span>
+</template>
 {% endblock %}
