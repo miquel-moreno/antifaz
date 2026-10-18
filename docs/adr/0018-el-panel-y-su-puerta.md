@@ -139,6 +139,14 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Los archivos de diseño tienen un solo sitio, el paquete** (decisión de Miquel): `tokens.css`, `fonts.css`, las fuentes y sus licencias OFL viven en `src/antifaz/web/static/`, y el prototipo los carga desde ahí. El logo sigue en `docs/images/logo.svg` y el paquete lleva una copia idéntica (con test) para el favicon.
 - **«Comprobar ahora» pasa a 11e.** En 11c, la tarjeta «Estado» dirá «Desde la terminal: `antifaz doctor --providers`»; el botón que hace la misma comprobación desde el panel llega con 11e.
 
+**Nota (2026-10-18, PR 11c-2b).** El panel tiene idiomas, la pantalla para entrar y el esqueleto de las cinco vistas, sin cambiar la puerta, las rutas ni las cabeceras de arriba:
+
+- **Idiomas.** Los textos viven en catálogos `web/i18n/<código>.json` (texto plano, `en.json` es la referencia) que se leen y comprueban al arrancar; un catálogo roto no deja arrancar. El idioma de cada petición sale de `?lang=xx` solo si es un catálogo cargado (nunca se repite el valor que llega), si no de `Accept-Language` (con límite de tamaño y de entradas) y si no, inglés. Las dos páginas HTML añaden `Content-Language` y `Vary: Accept-Language`; siguen con `no-store`. Los estáticos no dependen del idioma.
+- **Entrar.** `login.js` (del manifiesto) envía el token como JSON a `POST /panel/login` y vacía el campo antes de esperar la respuesta. No envía `X-Antifaz-CSRF`: el login sigue siendo la única excepción a la capa del token. El campo del token no tiene `name`, así que el formulario no envía nada por sí solo.
+- **Salir.** `panel.js` envía `POST /panel/logout` con `X-Antifaz-CSRF` (del `<meta>`) y vuelve a la pantalla de entrar. Una página que vuelve de la caché de atrás y adelante se recarga, así que el botón de atrás no enseña el panel tras salir.
+- **Nada guardado en el navegador**: ni el idioma, ni el tema, ni el token. Los scripts no tienen texto visible (todo sale de la página) ni comentarios, y no usan `innerHTML`, `eval`, almacenamiento ni `document.cookie`.
+- **Otro sitio no puede entrar ni salir.** Un test con navegadores reales abre una página de `localhost` (otro sitio que `127.0.0.1`) que envía al login y al logout de `127.0.0.1` un `fetch` JSON, uno `no-cors` en `text/plain` y un formulario `text/plain` con cuerpo JSON: la puerta los rechaza todos (o el navegador ni los envía) en Chromium, Firefox y WebKit.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
