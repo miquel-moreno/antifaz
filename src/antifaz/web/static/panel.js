@@ -170,23 +170,43 @@
   settingsButton.addEventListener("click", function () {
     setMenu(!menuOpen(), false);
   });
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && menuOpen()) {
-      event.preventDefault();
-      setMenu(false, true);
+  function buttonShown() {
+    return settingsButton.offsetParent !== null;
+  }
+
+  function closeIfHidden() {
+    if (menuOpen() && !buttonShown()) {
+      setMenu(false, false);
     }
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !menuOpen()) {
+      return;
+    }
+    if (!buttonShown()) {
+      setMenu(false, false);
+      return;
+    }
+    event.preventDefault();
+    setMenu(false, true);
   });
   document.addEventListener("click", function (event) {
     if (menuOpen() && !settingsMenu.contains(event.target) && !settingsButton.contains(event.target)) {
       setMenu(false, false);
     }
   });
-  settingsMenu.addEventListener("focusout", function (event) {
+
+  function focusLeaves(event) {
     var next = event.relatedTarget;
-    if (next && !settingsMenu.contains(next) && next !== settingsButton) {
+    if (menuOpen() && next && !settingsMenu.contains(next) && next !== settingsButton) {
       setMenu(false, false);
     }
-  });
+  }
+
+  settingsMenu.addEventListener("focusout", focusLeaves);
+  settingsButton.addEventListener("focusout", focusLeaves);
+  new ResizeObserver(closeIfHidden).observe(document.documentElement);
 
   var dark = matchMedia("(prefers-color-scheme: dark)");
   function current() {
@@ -195,7 +215,12 @@
   function paint() {
     var next = current() === "dark" ? "light" : "dark";
     document.querySelectorAll(".theme-btn").forEach(function (themeButton) {
-      themeButton.setAttribute("aria-label", themeButton.getAttribute("data-text-" + next));
+      var text = themeButton.querySelector(".theme-text");
+      if (text) {
+        text.textContent = text.getAttribute("data-text-" + next);
+      } else {
+        themeButton.setAttribute("aria-label", themeButton.getAttribute("data-text-" + next));
+      }
       themeButton.querySelector(".theme-icon").setAttribute("href", next === "dark" ? "#i-moon" : "#i-sun");
     });
   }

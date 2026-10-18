@@ -7,6 +7,8 @@
   "theme.label": "Change theme",
   "theme.to_dark": "Switch to the dark theme",
   "theme.to_light": "Switch to the light theme",
+  "theme.dark": "Dark theme",
+  "theme.light": "Light theme",
   "login.title": "Sign in",
   "login.heading": "Antifaz panel",
   "login.intro": "Type the administrator token to open the panel.",

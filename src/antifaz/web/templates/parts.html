@@ -10,8 +10,12 @@
 </ul>{% if landmark %}</nav>{% else %}</div>{% endif %}
 {%- endmacro %}
 
-{% macro theme_button() -%}
-<button class="app-iconbtn theme-btn" type="button" aria-label="{{ t('theme.label') }}" data-text-dark="{{ t('theme.to_dark') }}" data-text-light="{{ t('theme.to_light') }}"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg></button>
+{#- with_text: a visible word that is also the accessible name (the phone menu, WCAG 2.5.3);
+    otherwise an icon button with an aria-label. panel.js and login.js fill either. -#}
+{% macro theme_button(with_text=false) -%}
+{% if with_text %}<button class="app-iconbtn theme-btn" type="button"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg><span class="theme-text" data-text-dark="{{ t('theme.dark') }}" data-text-light="{{ t('theme.light') }}">{{ t("theme.dark") }}</span></button>
+{%- else %}<button class="app-iconbtn theme-btn" type="button" aria-label="{{ t('theme.label') }}" data-text-dark="{{ t('theme.to_dark') }}" data-text-light="{{ t('theme.to_light') }}"><svg class="ic" aria-hidden="true"><use class="theme-icon" href="#i-moon"/></svg></button>
+{%- endif %}
 {%- endmacro %}
 
 {% macro logo() -%}
