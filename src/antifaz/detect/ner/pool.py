@@ -249,7 +249,15 @@ class NerPool:
         payload = json.dumps({**request, "threshold": threshold}).encode()
         # The watchdog kills the worker at the deadline: a reply that stops half-way breaks
         # the pipe and recv_bytes returns, so the request never waits past the deadline.
-        watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), self._kill, (worker,))
+        # It aims at the same deadline as poll and usually wins: the broken pipe is then
+        # logged as the time limit, because `expired` says the watchdog killed it.
+        expired = threading.Event()
+
+        def expire() -> None:
+            expired.set()
+            self._kill(worker)
+
+        watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), expire)
         watchdog.daemon = True
         watchdog.start()
         try:
@@ -259,7 +267,10 @@ class NerPool:
                 raise _LostError()
             reply = json.loads(worker.conn.recv_bytes(MAX_REPLY_BYTES))
         except (EOFError, OSError, ValueError, RecursionError):
-            logger.warning("NER worker died or broke the protocol: replaced")
+            if expired.is_set():
+                logger.warning("NER worker went past the time limit: replaced")
+            else:
+                logger.warning("NER worker died or broke the protocol: replaced")
             raise _LostError() from None
         finally:
             watchdog.cancel()
