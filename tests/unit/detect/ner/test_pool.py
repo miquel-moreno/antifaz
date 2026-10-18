@@ -20,8 +20,9 @@ from typing import Any
 
 import pytest
 
+from antifaz.detect.ner import pool as pool_module
 from antifaz.detect.ner.engine import NerDetector
-from antifaz.detect.ner.pool import NerPool, NerUnavailableError
+from antifaz.detect.ner.pool import DIED_LOG, HUNG_LOG, NerPool, NerUnavailableError
 from antifaz.errors import DetectorFailed
 from tests.conftest import SENTINEL_DNI
 from tests.nerfakes import CARMEN, FAKE_FACTORY, READY_WITHIN_SECONDS, when_ready
@@ -32,8 +33,6 @@ FAR_BELOW_THE_HANG = 30.0  # seconds; FAKE_SLEEP would hold a worker for 60
 # How long a request may be held past its deadline: killing and replacing a worker took under
 # 0.2 s on a machine with 47 CPU burners; a slow kill or a late watchdog takes seconds more.
 OVERSHOOT = 3.0
-HUNG = "went past the time limit"
-DIED = "died or broke the protocol"
 
 
 @pytest.fixture(scope="module")
@@ -75,12 +74,12 @@ def test_a_hung_worker_is_killed_at_the_time_limit_and_replaced(
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the hang must reach a loaded worker
     before = _workers(pool)
-    hung = caplog.text.count(HUNG)
+    hung = caplog.text.count(HUNG_LOG)
     started = time.monotonic()
     with pytest.raises(DetectorFailed):
         pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
     assert time.monotonic() - started < TIMEOUT + OVERSHOOT  # released at its deadline
-    assert caplog.text.count(HUNG) == hung + 1  # the deadline, not another failure
+    assert caplog.text.count(HUNG_LOG) == hung + 1  # the deadline, not another failure
     assert not _alive(before)  # the hung process is gone...
     assert _workers(pool) and before.isdisjoint(_workers(pool))  # ...and replaced
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]  # the replacement serves
@@ -92,13 +91,143 @@ def test_a_worker_that_dies_blocks_the_request_and_is_replaced(
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     when_ready(_ask(pool, "calentar"))  # the crash must reach a loaded worker
     before = _workers(pool)
-    died = caplog.text.count(DIED)
+    died = caplog.text.count(DIED_LOG)
     with pytest.raises(DetectorFailed):
         pool.predict(["FAKE_CRASH"], ["person"], 0.5)
-    assert caplog.text.count(DIED) == died + 1
+    assert caplog.text.count(DIED_LOG) == died + 1
     assert not _alive(before)
     assert _workers(pool) and before.isdisjoint(_workers(pool))
     assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
+
+
+class _EarlyTimer(threading.Timer):
+    """The pool's watchdog, firing a little before the deadline it was given: the killed
+    worker's pipe then closes while the reply wait is still running, so the parent reads an
+    end of file instead of reaching its own timeout (the race seen in CI, made certain)."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(max(0.0, interval - 0.2), *args, **kwargs)
+
+
+class _SilentTimer(threading.Timer):
+    """A watchdog that never fires (the request ends before its deadline anyway)."""
+
+    def run(self) -> None:
+        pass
+
+
+def test_a_worker_killed_by_the_watchdog_is_logged_as_past_the_time_limit(
+    pool: NerPool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The log says what happened, whichever the parent notices first: the watchdog's kill
+    (the pipe breaks) or its own wait for the reply running out."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the hang must reach a loaded worker
+    hung, died = caplog.text.count(HUNG_LOG), caplog.text.count(DIED_LOG)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _EarlyTimer)
+        with pytest.raises(DetectorFailed):
+            pool.predict([f"FAKE_SLEEP {CARMEN}"], ["person"], 0.5)
+    assert caplog.text.count(HUNG_LOG) == hung + 1
+    assert caplog.text.count(DIED_LOG) == died
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]  # the replacement serves
+
+
+def test_a_crash_before_the_watchdog_fires_is_logged_as_a_death(
+    pool: NerPool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Only the watchdog's own kill counts as the time limit, never how close the deadline is."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the crash must reach a loaded worker
+    hung, died = caplog.text.count(HUNG_LOG), caplog.text.count(DIED_LOG)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _SilentTimer)
+        with pytest.raises(DetectorFailed):
+            pool.predict(["FAKE_CRASH"], ["person"], 0.5)
+    assert caplog.text.count(DIED_LOG) == died + 1
+    assert caplog.text.count(HUNG_LOG) == hung
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
+
+
+class _LateTimer(threading.Timer):
+    """A watchdog that fires just as the request cancels it, after the whole reply was read:
+    `cancel()` cannot stop a watchdog that is already running."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(3600.0, *args, **kwargs)  # never on its own
+
+    def cancel(self) -> None:
+        self.function(*self.args, **self.kwargs)
+        super().cancel()
+
+
+class _FiredTimer(threading.Timer):
+    """A watchdog that has already fired when the request starts waiting for the reply."""
+
+    def __init__(self, interval: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(3600.0, *args, **kwargs)  # never on its own
+
+    def start(self) -> None:
+        self.function(*self.args, **self.kwargs)
+        super().start()
+
+
+class _Unkillable:
+    """Stands in for a worker process: killing it changes nothing."""
+
+    def kill(self) -> None:
+        pass
+
+
+def test_a_watchdog_that_fires_after_the_reply_replaces_the_killed_worker(
+    pool: NerPool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The request keeps the complete reply it read; the worker killed meanwhile never goes
+    back to the queue, so the next request is not blocked by a dead process."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    when_ready(_ask(pool, "calentar"))  # the request must reach a loaded worker
+    before = _workers(pool)
+    hung, died = caplog.text.count(HUNG_LOG), caplog.text.count(DIED_LOG)
+    failures: list[None] = []
+    real_failed = pool._failed
+
+    def failed() -> None:
+        failures.append(None)
+        real_failed()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pool_module, "_TIMER", _LateTimer)
+        patch.setattr(pool, "_failed", failed)
+        assert pool.predict([CARMEN], ["person"], 0.5) == [_person(CARMEN)]
+    # Not a failure: predict resets the count after a good reply, so `_failed` is spied.
+    assert failures == []
+    assert pool._failures == 0
+    assert caplog.text.count(HUNG_LOG) == hung + 1
+    assert not _alive(before)  # the killed process is gone...
+    assert _workers(pool) and before.isdisjoint(_workers(pool))  # ...and replaced
+    assert when_ready(_ask(pool, CARMEN)) == [_person(CARMEN)]
+    assert caplog.text.count(DIED_LOG) == died  # no request met the dead worker
+
+
+def test_a_malformed_reply_breaks_the_protocol_even_after_the_watchdog_fired(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A complete reply that is not JSON is the worker's fault, not the deadline's."""
+    caplog.set_level(logging.WARNING, logger="antifaz.ner")
+    parent, child = multiprocessing.Pipe()
+    child.send_bytes(b"not json")  # the whole reply, already waiting in the pipe
+    worker = pool_module._Worker(_Unkillable(), parent, ready=True)  # type: ignore[arg-type]
+    unstarted = NerPool(FAKE_FACTORY, OPTIONS, timeout=TIMEOUT)
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(pool_module, "_TIMER", _FiredTimer)
+            with pytest.raises(pool_module._LostError):
+                unstarted._call(worker, ["hola"], ["person"], 0.5, time.monotonic() + TIMEOUT)
+    finally:
+        parent.close()
+        child.close()
+    assert caplog.text.count(DIED_LOG) == 1
+    assert caplog.text.count(HUNG_LOG) == 0
 
 
 def test_a_backend_error_blocks_without_its_text_and_keeps_the_worker(pool: NerPool) -> None:
@@ -233,11 +362,11 @@ def _crash(pool: NerPool, caplog: pytest.LogCaptureFixture) -> None:
     A worker still loading only blocks the request, neither a failure nor a success, so this
     never resets the count the way a warm-up answer would."""
     give_up = time.monotonic() + READY_WITHIN_SECONDS
-    died = caplog.text.count(DIED)
+    died = caplog.text.count(DIED_LOG)
     while True:
         with pytest.raises(DetectorFailed):
             pool.predict([f"FAKE_CRASH {SENTINEL_DNI}"], ["person"], 0.5)
-        if caplog.text.count(DIED) > died:
+        if caplog.text.count(DIED_LOG) > died:
             return
         assert time.monotonic() < give_up, "the replacement worker never got ready"
 

@@ -21,10 +21,12 @@ from antifaz import DetectorFailed, guard, mask
 from antifaz.api.app import create_app
 from antifaz.config import UnsafeConfigError
 from antifaz.detect.ner.cache import SpanCache
-from antifaz.detect.ner.engine import NerDetector
+from antifaz.detect.ner.chunker import OVERLAP_TOKENS, WINDOW_TOKENS, chunk
+from antifaz.detect.ner.engine import DEFAULT_BATCH_CHUNKS, DEFAULT_MAX_CHUNKS, NerDetector
 from antifaz.detect.ner.fake import FakeBackend
-from antifaz.detect.ner.pool import NerPool
+from antifaz.detect.ner.pool import DIED_LOG, HUNG_LOG, NerPool
 from antifaz.detect.ner.setup import ner_from_settings
+from antifaz.detect.ner.view import ner_view
 from antifaz.detect.normalize import normalize
 from antifaz.detect.scan import Scanner
 from antifaz.errors import UnmaskableField
@@ -343,6 +345,11 @@ def test_another_threshold_or_model_misses_the_cache() -> None:
 # --- 7. the pool: not started, closed, crash, timeout, stderr -----------------------------------
 
 
+# How long a request may be held past its deadline (as in tests/unit/detect/ner/test_pool.py):
+# killing and replacing a worker takes well under a second; a slow kill takes seconds more.
+OVERSHOOT = 3.0
+
+
 def _pool(**options: Any) -> NerPool:
     backend = {"names": dict(NAMES), "triggers": True, **options.pop("backend", {})}
     return NerPool(FAKE_FACTORY, backend, workers=1, **{"timeout": 2.0, **options})
@@ -396,38 +403,58 @@ def test_a_huge_text_is_bounded_by_the_ner_time_limit(
     """Un texto con muchas ventanas lentas (cada lote muy por debajo del límite) no retiene el
     NER más que ANTIFAZ_NER_TIMEOUT_SECONDS: un lote posterior se corta y la petición se bloquea.
 
-    Facts, not seconds: each call of 16 windows takes 0.8 s, far under its 2 s limit, so a
-    deadline per call would never kill it (the ~300 windows would hold the NER for ~15 s); only
-    ONE deadline for the whole request does (in the third call, or the second on a busy
-    machine). Every call gets that same deadline, set when the request began, and the request
-    is released right after it."""
+    Facts, not seconds: each call of 16 windows sleeps 0.16 s, far under its 2 s limit, so a
+    deadline per call would never kill it (the 600 windows would hold the NER for over 6 s);
+    only ONE deadline for the whole request does. Every call gets that same deadline, set when
+    the request began, starts before it, and the request is released right after it.
+
+    How busy the machine is decides only where the cut falls: a call killed at the deadline
+    (one "time limit" line) or the engine refusing the next call (no line); never a death."""
     caplog.set_level(logging.WARNING, logger="antifaz.ner")
     timeout = 2.0
-    pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.05})
+    pool = _pool(timeout=timeout, backend={"sleep_seconds": 0.01})
     detector = Scanner(NerDetector(pool))
     pool.start()
+    text = ("FAKE_SLEEP " + "palabra " * 99) * 900  # 600 windows, each one sleeps
+    windows = chunk(ner_view(text), WINDOW_TOKENS, OVERLAP_TOKENS)
+    assert len(windows) <= DEFAULT_MAX_CHUNKS  # the NER is asked, not refused for the size
+    batches = -(-len(windows) // DEFAULT_BATCH_CHUNKS)
     deadlines: list[float] = []
+    starts: list[float] = []
+    returns: list[float] = []
     real_call = pool._call
+    real_predict = pool.predict
 
     def spy(*args: Any) -> Any:
         deadlines.append(args[-1])  # _call(worker, texts, labels, threshold, deadline)
-        return real_call(*args)
+        reply = real_call(*args)
+        returns.append(time.monotonic())
+        return reply
+
+    def ask(*args: Any, **kwargs: Any) -> Any:
+        starts.append(time.monotonic())  # where the engine hands a call to the pool
+        return real_predict(*args, **kwargs)
 
     monkeypatch.setattr(pool, "_call", spy)
+    monkeypatch.setattr(pool, "predict", ask)
     try:
-        hung = caplog.text.count("went past the time limit")
-        text = ("FAKE_SLEEP " + "palabra " * 99) * 450  # ~300 windows, 16 per call
+        hung, died = caplog.text.count(HUNG_LOG), caplog.text.count(DIED_LOG)
         began = time.monotonic()
         with pytest.raises(DetectorFailed):
             mask([text], detector=detector)
         ended = time.monotonic()
-        assert caplog.text.count("went past the time limit") == hung + 1  # killed once
+        assert caplog.text.count(HUNG_LOG) - hung in (0, 1)  # killed once, or refused before
+        assert caplog.text.count(DIED_LOG) == died
     finally:
         pool.close()
-    assert len(deadlines) >= 2  # at least two calls share the deadline (third, if not busy)
     assert len(set(deadlines)) == 1  # one deadline for the whole request
-    assert began + timeout <= deadlines[0] <= ended
-    assert ended - began - timeout < 3  # released right after it, not seconds later
+    deadline = deadlines[0]
+    assert began + timeout <= deadline <= ended
+    assert all(start < deadline for start in starts)  # no call starts after it
+    assert len(deadlines) < batches  # the text was cut short
+    if returns and returns[0] < deadline - 0.5:
+        assert len(deadlines) >= 2  # a first call that came back in time was not the last
+    assert ended - deadline < OVERSHOOT  # released right after it, not seconds later
 
 
 # --- 8. configuration --------------------------------------------------------------------------
