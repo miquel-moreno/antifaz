@@ -5,8 +5,8 @@ blocked, a browser locale (it sets Accept-Language, PR 11c-2b; en-US unless a te
 otherwise, never the system's), a pixel ratio and:
 
 - a context route on every URL: a request to the gateway's own origin goes on (and to
-  `extra_origin`, the same gateway under another host name, only for the cross-site tests of
-  PR 11c-2b); anything else is aborted and recorded in `blocked` (the fixture fails the test
+  `extra_origin`, the separate OtherSite server of the cross-site tests, PR 11c-2b; never the
+  gateway); anything else is aborted and recorded in `blocked` (the fixture fails the test
   if it is not empty);
 - every request URL (`requests`), console error or warning (`console`), uncaught page error
   (`errors`) and failed request (`failed`); every console text too, to look for a token;

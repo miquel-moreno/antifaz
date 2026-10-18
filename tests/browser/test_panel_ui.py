@@ -10,8 +10,9 @@ WebKit, on the harness of 11c-2a (one gateway and one context per test, nothing 
   desktop and on a phone, and the back button afterwards.
 - No CSP violation and a clean console after clicking everything, in both languages; the theme
   button stores nothing.
-- Cross-site: a page of http://localhost:<port> (another site than 127.0.0.1) posts to the
-  login and to the logout of the gateway on 127.0.0.1: the door refuses all of it.
+- Cross-site and same-site: a page of http://localhost:<port> (another site than 127.0.0.1)
+  and one of http://127.0.0.1:<other port> (the same site, so the session cookie travels) post
+  to the login and to the logout of the gateway on 127.0.0.1: the door refuses all of it.
 
 No token, cookie value or page HTML inside an assert (tests/unit/test_browser_harness_rules.py).
 """
@@ -449,9 +450,11 @@ def test_the_theme_button_toggles_and_stores_nothing(tab: Tab, server: PanelServ
 
 # --- cross-site: another site cannot log in or out --------------------------------------------
 #
-# The other site (server.OtherSite) is a plain page without CSP on another loopback port, named
-# localhost: a different site from 127.0.0.1, in the same loopback address space, so the
-# browsers' own local-network rules do not step in first.
+# The attacker (server.OtherSite) is a plain page without CSP on another loopback port, run
+# twice: named localhost (another site than 127.0.0.1) and as 127.0.0.1 on its own port (the
+# same site: the SameSite=Strict session cookie travels, only the door's origin check and the
+# CSRF token stop it). Same loopback address space, so the browsers' own local-network rules
+# do not step in first.
 #
 # Whether the JSON fetch's own POST leaves depends on the browser: with request interception on,
 # Playwright answers CORS preflights itself in some engines, so that POST may reach the door.
@@ -490,7 +493,9 @@ def _attack(tab: Tab, server: PanelServer, path: str, body: str, form_name: str)
 
 def _assert_every_post_refused(server: PanelServer, path: str) -> None:
     statuses = server.door_statuses(path)
-    assert len(statuses) >= 2  # the no-cors fetch and the form reached the door
+    # the no-cors fetch and the form always reach the door; the JSON fetch's own POST only
+    # where Playwright answered its preflight
+    assert len(statuses) in (2, 3)
     assert set(statuses) == {403}
 
 

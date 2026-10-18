@@ -101,20 +101,26 @@ def browser(playwright: Playwright, browser_name: str) -> Iterator[Browser]:
 
 
 @pytest.fixture
-def server(isolated: None) -> Iterator[PanelServer]:
+def server(
+    request: pytest.FixtureRequest, isolated: None, panel_notes: list[str]
+) -> Iterator[PanelServer]:
     gateway = PanelServer()
     try:
         gateway.start()
         yield gateway
     finally:
         gateway.stop()  # socket, thread and HTTP client, also when start() failed
+        if gateway.hit_shutdown_limit:
+            # Visible in the terminal summary: a real hang must not hide behind the limit.
+            panel_notes.append(f"graceful-shutdown limit hit: {request.node.nodeid}")
     assert gateway.provider_calls == [], "a browser test reached a provider"
 
 
-@pytest.fixture
-def other_site(isolated: None) -> Iterator[OtherSite]:
-    """Another site on loopback, named localhost (cross-site tests, PR 11c-2b)."""
-    site = OtherSite()
+@pytest.fixture(params=["localhost", "127.0.0.1"], ids=["cross-site", "same-site"])
+def other_site(request: pytest.FixtureRequest, isolated: None) -> Iterator[OtherSite]:
+    """Another origin on loopback (PR 11c-2b): named localhost (another site) or 127.0.0.1 on
+    its own port (the same site, so the session cookie travels)."""
+    site = OtherSite(request.param)
     try:
         site.start()
         yield site

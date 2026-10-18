@@ -145,7 +145,7 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Entrar.** `login.js` (del manifiesto) envía el token como JSON a `POST /panel/login` y vacía el campo antes de esperar la respuesta. No envía `X-Antifaz-CSRF`: el login sigue siendo la única excepción a la capa del token. El campo del token no tiene `name`, así que el formulario no envía nada por sí solo.
 - **Salir.** `panel.js` envía `POST /panel/logout` con `X-Antifaz-CSRF` (del `<meta>`) y vuelve a la pantalla de entrar. El botón de atrás no enseña el panel tras salir gracias a la puerta y a `no-store`; además, como defensa añadida, una página que vuelve de la caché de atrás y adelante se recarga.
 - **Nada guardado en el navegador**: ni el idioma, ni el tema, ni el token. Los scripts no tienen texto visible (todo sale de la página) ni comentarios, y no usan `innerHTML`, `eval`, almacenamiento ni `document.cookie`.
-- **Otro sitio no puede entrar ni salir.** Un test con navegadores reales abre una página de `localhost` (otro sitio que `127.0.0.1`) que envía al login y al logout de `127.0.0.1` un `fetch` JSON, uno `no-cors` en `text/plain` y un formulario `text/plain` con cuerpo JSON: la puerta los rechaza todos (o el navegador ni los envía) en Chromium, Firefox y WebKit.
+- **Otro sitio no puede entrar ni salir.** Un test con navegadores reales abre una página de `localhost` (otro sitio que `127.0.0.1`) que envía al login y al logout de `127.0.0.1` un `fetch` JSON, uno `no-cors` en `text/plain` y un formulario `text/plain` con cuerpo JSON: la puerta los rechaza todos (o el navegador ni los envía) en Chromium, Firefox y WebKit. Lo mismo desde `127.0.0.1` en otro puerto, el mismo sitio con otro origen, donde la cookie sí viaja.
 
 ## Alternativas descartadas
 

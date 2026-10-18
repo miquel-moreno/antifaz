@@ -18,6 +18,7 @@ Standard library, httpx, uvicorn and Antifaz only: no Playwright here.
 
 import asyncio
 import http.server
+import logging
 import secrets
 import socket
 import threading
@@ -93,6 +94,21 @@ class _PostRecorder:
         await self.app(scope, receive, recording_send)
 
 
+SHUTDOWN_LIMIT_MESSAGE = "timeout graceful shutdown exceeded"
+
+
+class _ShutdownLimitWatch(logging.Handler):
+    """Notes when uvicorn had to cut connections at GRACEFUL_SHUTDOWN_SECONDS."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.ERROR)
+        self.hit = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if SHUTDOWN_LIMIT_MESSAGE in record.getMessage():
+            self.hit = True
+
+
 class _Server(uvicorn.Server):
     """uvicorn's server with an Event set once its startup ran (successful or not)."""
 
@@ -137,6 +153,7 @@ class PanelServer:
             timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         )
         self._server = _Server(config)
+        self._watch = _ShutdownLimitWatch()
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.bind((HOST, 0))
         self.port: int = self._socket.getsockname()[1]
@@ -168,6 +185,7 @@ class PanelServer:
             self._server.ready.set()  # a crash before startup must not leave start() waiting
 
     def start(self) -> None:
+        logging.getLogger("uvicorn.error").addHandler(self._watch)
         self._thread.start()
         if not self._server.ready.wait(HANG_GUARD_SECONDS):
             raise RuntimeError("the panel test server did not start (hang guard)")
@@ -187,8 +205,14 @@ class PanelServer:
                 closer = threading.Thread(target=asyncio.run, args=(self._http.aclose(),))
                 closer.start()
                 closer.join(HANG_GUARD_SECONDS)
+        logging.getLogger("uvicorn.error").removeHandler(self._watch)
         if self._thread.is_alive():
             raise RuntimeError("the panel test server did not stop (hang guard)")
+
+    @property
+    def hit_shutdown_limit(self) -> bool:
+        """Whether stop() had to cut a connection at the graceful-shutdown limit."""
+        return self._watch.hit
 
     @property
     def closed(self) -> bool:
@@ -217,15 +241,17 @@ class _OtherSiteHandler(http.server.BaseHTTPRequestHandler):
 
 
 class OtherSite:
-    """Another site for the cross-site tests (PR 11c-2b): a fixed page on a free loopback port,
-    reached by the name localhost (a different site from 127.0.0.1, but the same loopback
-    address space, so the browsers' local-network rules do not step in first). Standard library
-    only; its page has no CSP, like an attacker's."""
+    """Another origin for the cross-site tests (PR 11c-2b): a fixed page on a free loopback port.
+    Reached by the name localhost, it is another site than the gateway's 127.0.0.1 (the session
+    cookie, SameSite=Strict, does not travel); reached as 127.0.0.1 on its own port, it is the
+    same site on another origin (the cookie travels). Both in the same loopback address space,
+    so the browsers' local-network rules do not step in first. Standard library only; its page
+    has no CSP, like an attacker's."""
 
-    def __init__(self) -> None:
+    def __init__(self, name: str = "localhost") -> None:
         self._httpd = http.server.ThreadingHTTPServer((HOST, 0), _OtherSiteHandler)
         self._httpd.daemon_threads = True
-        self.origin = f"http://localhost:{self._httpd.server_address[1]}"
+        self.origin = f"http://{name}:{self._httpd.server_address[1]}"
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="other-site", daemon=True
         )
