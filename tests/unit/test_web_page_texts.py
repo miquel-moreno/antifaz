@@ -130,6 +130,17 @@ def test_every_catalog_key_is_used_by_a_template() -> None:
     assert reference - used == set()  # and no key is dead
 
 
+def test_the_sidebar_says_what_happens_on_your_network() -> None:
+    """Miquel's wording (review of the 11c-2b captures): not everything is processed on the
+    user's network (the masked text does go to the AI), the personal data is."""
+    assert CATALOGS["es"].text("sidebar.local") == (
+        "Los datos personales se detectan y se cambian en tu red"
+    )
+    assert CATALOGS["en"].text("sidebar.local") == (
+        "Personal data is detected and replaced on your network"
+    )
+
+
 # No visible text in the CSS either: a `content:` is empty, `none`, or copies a data-text-*
 # attribute, which the page check above already requires to come from a catalog.
 CSS_CONTENT = re.compile(r"(?<![\w-])content\s*:\s*([^;}]*)")

@@ -41,7 +41,7 @@
   "view.status.cli": "Meanwhile, from the terminal:",
   "view.status.command": "antifaz doctor --providers",
   "sidebar.privacy": "Outside «Try a text», the panel never shows personal data: only types and counts.",
-  "sidebar.local": "Everything is processed on your network",
+  "sidebar.local": "Personal data is detected and replaced on your network",
   "logout": "Sign out",
   "logout.error.title": "Could not sign out",
   "logout.error.refused": "The request was refused. Reload the page and try again.",

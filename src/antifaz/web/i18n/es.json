@@ -41,7 +41,7 @@
   "view.status.cli": "Mientras tanto, desde la terminal:",
   "view.status.command": "antifaz doctor --providers",
   "sidebar.privacy": "Fuera de «Prueba un texto», el panel nunca muestra datos personales: solo tipos y cantidades.",
-  "sidebar.local": "Todo se procesa en tu red",
+  "sidebar.local": "Los datos personales se detectan y se cambian en tu red",
   "logout": "Salir",
   "logout.error.title": "No se ha podido salir",
   "logout.error.refused": "Se ha rechazado la petición. Recarga la página y vuelve a probar.",
