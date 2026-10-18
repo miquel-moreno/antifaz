@@ -223,6 +223,36 @@ def test_the_panel_has_two_logout_buttons_and_the_token_once(client: TestClient)
     assert session not in page
 
 
+class _Landmarks(HTMLParser):
+    """Each <nav> with the number of <nav> elements around it."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.depth = 0
+        self.navs: list[int] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "nav":
+            self.navs.append(self.depth)
+            self.depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "nav":
+            self.depth -= 1
+
+
+def test_no_navigation_landmark_is_nested(client: TestClient) -> None:
+    """The phone bar's language selector sits inside the sidebar's <nav>: it is a labelled
+    group there, not a second landmark inside the first."""
+    for page in (client.get("/panel/login").text, _panel(client).text):  # type: ignore[attr-defined]
+        landmarks = _Landmarks()
+        landmarks.feed(str(page))
+        assert landmarks.navs and set(landmarks.navs) == {0}
+    groups = _all(_panel(client).text, "div", role="group")  # type: ignore[attr-defined]
+    assert [group["class"] for group in groups] == ["langs"]
+    assert groups[0]["aria-label"] == CATALOGS["en"].text("language.label")
+
+
 def test_the_language_selector_only_links(client: TestClient) -> None:
     login = client.get("/panel/login?lang=es").text
     panel: str = _panel(client, "?lang=es").text  # type: ignore[attr-defined]

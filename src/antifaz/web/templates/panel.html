@@ -20,7 +20,7 @@
 <div class="app-window"><div class="app-shell">
 <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
 <div class="app-brand">{{ parts.logo() }}<span class="app-wordmark">{{ t("app.name") }}</span><span class="app-version ident">{{ t("app.version", version=version) }}</span>
-<span class="app-bar-tools">{{ parts.languages_nav() }}{{ parts.theme_button() }}<button class="btn quiet logout logout-bar" type="button" data-logout>{{ t("logout") }}</button></span>
+<div class="app-bar-tools">{{ parts.languages_nav(landmark=false) }}{{ parts.theme_button() }}<button class="btn quiet logout logout-bar" type="button" data-logout>{{ t("logout") }}</button></div>
 </div>
 <p class="app-nav-label" id="nav-label">{{ t("nav.label") }}</p>
 <div class="app-nav">

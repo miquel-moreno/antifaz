@@ -1,11 +1,13 @@
 {#- Pieces shared by the login and the panel page (11c-2b). Imported "with context": they use
     t, lang, languages and here, all server values. -#}
-{% macro languages_nav() -%}
-<nav class="langs" aria-label="{{ t('language.label') }}"><ul class="langs-list">
+{#- landmark=false inside another landmark (the phone bar is inside the sidebar's <nav>): a
+    labelled group instead of a nested <nav>. -#}
+{% macro languages_nav(landmark=true) -%}
+{% if landmark %}<nav class="langs" aria-label="{{ t('language.label') }}">{% else %}<div class="langs" role="group" aria-label="{{ t('language.label') }}">{% endif %}<ul class="langs-list">
 {%- for code, name in languages %}
 <li><a class="langs-link" href="{{ here }}?lang={{ code }}" lang="{{ code }}" hreflang="{{ code }}"{% if code == lang %} aria-current="true"{% endif %}>{{ name }}</a></li>
 {%- endfor %}
-</ul></nav>
+</ul>{% if landmark %}</nav>{% else %}</div>{% endif %}
 {%- endmacro %}
 
 {% macro theme_button() -%}
