@@ -81,6 +81,9 @@
     if (event.target.closest("input,textarea,select,[contenteditable]")) {
       return;
     }
+    if (!event.target.closest("[role=tablist],#main")) {
+      return;
+    }
     var number = ["1", "2", "3", "4", "5"].indexOf(event.key);
     if (number !== -1 && tabs[number]) {
       event.preventDefault();

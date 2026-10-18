@@ -280,6 +280,33 @@ def test_the_tabs_follow_the_keyboard_on_the_desktop(tab: Tab, server: PanelServ
     assert "#" not in tab.page.url  # no URL hash
 
 
+def test_the_number_keys_work_only_in_the_tabs_and_the_views(tab: Tab, server: PanelServer) -> None:
+    """WCAG 2.1.4 (character key shortcuts): 1-5 act only while the focus is in the tab list or
+    in the view area, never page-wide and never in a field."""
+    _goto(tab, "/panel/login")
+    _log_in_with_the_form(tab, server)
+
+    tab.page.focus(".app-header a[hreflang=en]")  # the language selector
+    tab.page.keyboard.press("3")
+    assert _selected(tab) == "playground"
+    tab.page.focus(".app-header .theme-btn")
+    tab.page.keyboard.press("3")
+    assert _selected(tab) == "playground"
+    tab.page.evaluate("() => document.activeElement.blur()")  # the focus on the body
+    tab.page.keyboard.press("3")
+    assert _selected(tab) == "playground"
+    tab.page.focus("[data-logout]:visible")
+    tab.page.keyboard.press("3")
+    assert _selected(tab) == "playground"
+
+    tab.page.focus("#tab-playground")  # in the tab list
+    tab.page.keyboard.press("3")
+    assert _selected(tab) == "keys"
+    tab.page.focus("#panel-keys")  # in the view area
+    tab.page.keyboard.press("5")
+    assert _selected(tab) == "status"
+
+
 def test_the_tabs_go_sideways_on_a_phone(
     new_tab: NewTab, server: PanelServer, browser_name: str
 ) -> None:
