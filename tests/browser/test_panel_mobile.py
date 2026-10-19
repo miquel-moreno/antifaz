@@ -18,7 +18,7 @@ import re
 import pytest
 
 from antifaz.web.i18n import load_catalogs
-from tests.browser.harness import NewTab, Tab
+from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer
 
 pytestmark = pytest.mark.browser
@@ -510,6 +510,8 @@ FADE_JS = """() => {
 SELECTED_INSIDE_JS = """(id) => { const t = document.getElementById(id).getBoundingClientRect();
   const l = document.querySelector('[role=tablist]').getBoundingClientRect();
   return t.left >= l.left - 0.5 && t.right <= l.right + 0.5; }"""
+STATUS_IDLE_JS = """() => !document.getElementById('status-refresh').disabled &&
+  document.getElementById('status-time').textContent !== ''"""
 HAS_CLASS_JS = "(name) => document.querySelector('[role=tablist]').classList.contains(name)"
 # A hang guard only (about ten seconds of frames), never a measure of speed.
 CLASS_SET_JS = """(name) => new Promise((done) => {
@@ -540,6 +542,8 @@ def test_at_twice_the_text_size_the_end_of_the_view_clears_the_bar(
     _log_in(tab, server, "es")
     _text_200(tab)
     tab.page.click("#tab-status")
+    # 11c-3b: the view fills itself in from /panel/api/status; measure once it is idle.
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
     tab.page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
     tab.page.evaluate(TWO_FRAMES_JS)
     bar = _box(tab, "[role=tablist]")
@@ -552,7 +556,7 @@ def test_at_twice_the_text_size_the_end_of_the_view_clears_the_bar(
         " document.querySelector('#panel-status').appendChild(b); }"
     )
     tab.page.evaluate("() => window.scrollTo(0, 0)")
-    tab.page.focus("#panel-status")
+    tab.page.focus("#status-refresh")  # the view's last focusable before the probe (11c-3b)
     tab.page.keyboard.press("Tab")
     assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
     tab.page.evaluate(TWO_FRAMES_JS)
