@@ -31,7 +31,7 @@ from antifaz.web.sessions import MemorySessionStore
 from antifaz.web.status import NER_OFF, StatusFacts
 
 WEB = Path(antifaz.web.__file__).parent
-LOCK_FREE = ("sessions.py", "login_limit.py")
+LOCK_FREE = ("sessions.py", "login_limit.py", "try_limit.py")
 
 
 def _tree(name: str) -> ast.Module:
