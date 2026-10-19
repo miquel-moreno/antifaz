@@ -123,8 +123,11 @@ def _panel(
     runs web/try_text.run_try() with the gateway's policy and detector in a worker thread, behind
     the Try limiter (one, never queued: 503 try_busy) and then the proxy's mask limiter. With the
     NER, each Try gets its own Scanner over `ner.for_try()`: same model and workers, no span
-    cache (no membership oracle, nothing evicted or left behind), a TRY_NER_SECONDS deadline, a
-    worker only if one is idle (else 503 ner_busy) and no effect on the circuit breaker.
+    cache (no membership oracle, nothing evicted or left behind), TRY_NER_MAX_CHUNKS windows at
+    most (else 413 text_too_long_for_ner, before any worker is asked), one per batch, under a
+    TRY_NER_SECONDS deadline; a worker only if no proxy request waits for one (checked before
+    every batch; else 503 ner_busy), no effect on the circuit breaker and a Try-only cooldown
+    after a Try breaks a worker. The proxy waits for one Try batch at most.
     run_try never calls a provider; the runner holds no client.
     """
     if settings.admin_token is None:

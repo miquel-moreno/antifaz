@@ -57,7 +57,9 @@ CSRF again.
      worker thread, no AI) and the closed schema of web/try_response.py, with the NER state at
      that moment. Any error there is a fixed 500 and one log line with the error's type only:
      an exception's message could hold the text. Busy is a fixed 503 with Retry-After: 1 and
-     never a queue: `try_busy` (another Try is running) or `ner_busy` (no NER worker is free).
+     never a queue: `try_busy` (another Try is running) or `ner_busy` (the NER would make a
+     proxy request wait, has no free loaded worker, or is in the Try-only cooldown). A text that
+     needs more NER windows than a Try may use is 413 text_too_long_for_ner.
      No response_model: the answer is validated once, here, and FastAPI never re-validates it.
   The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
   values come back only in it (the scoped exception to invariant 15); the original text never.
