@@ -88,12 +88,14 @@ from starlette.requests import ClientDisconnect
 
 from antifaz import __version__
 from antifaz.http_errors import (
+    AppError,
     InvalidTryBodyError,
     PanelInternalError,
     PanelLoginFailedError,
     PanelNotFoundError,
     PanelUnauthorizedError,
     TextTooLargeError,
+    TextTooLongForNerError,
     TooManyAttemptsError,
     TooManyTriesError,
     TryBodyTimeoutError,
@@ -284,18 +286,18 @@ def build_router(state: PanelState) -> APIRouter:
             raise TooManyTriesError(wait)
         text, lang = _try_input(await _try_body(request), pages.languages)
         answer: bytes | None = None
-        busy: TryBusyError | None = None
+        refused: AppError | None = None
         failure = ""
         try:
             result = await state.try_runner(text, lang)
             ner = ner_state(state.status.ner_state())
             answer = TryResponse.model_validate({**result, "ner": ner}).model_dump_json().encode()
-        except TryBusyError as error:
-            busy = error  # a fixed 503 with Retry-After: never queued
+        except (TryBusyError, TextTooLongForNerError) as error:
+            refused = error  # a fixed 503 (Retry-After, never queued) or 413: nothing of the text
         except Exception as error:
             failure = type(error).__name__  # only the type: the message could hold the text
-        if busy is not None:
-            raise busy
+        if refused is not None:
+            raise refused
         if answer is None:
             logger.error("panel try failed: %s", failure)
             raise PanelInternalError()

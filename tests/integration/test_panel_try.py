@@ -526,3 +526,43 @@ def test_the_route_has_no_response_model_so_fastapi_never_revalidates() -> None:
         response.content
         == TryResponse.model_validate_json(response.content).model_dump_json(by_alias=True).encode()
     )
+
+
+# --- second review: work sized to the Try's NER budget ----------------------------------------
+
+
+def test_the_try_ner_budget_constants() -> None:
+    from antifaz.api import app as app_module
+
+    # Declared bounds (TECNICO «Prueba un texto»): 2 windows of 200 tokens, one per batch, under a
+    # 5 s deadline; the proxy waits at most one batch (one window).
+    assert app_module.TRY_NER_SECONDS == 5.0
+    assert app_module.TRY_NER_MAX_CHUNKS == 2
+    assert app_module.TRY_NER_BATCH_CHUNKS == 1
+
+
+def test_a_text_too_long_for_the_ner_budget_is_413_without_touching_the_model() -> None:
+    ner, predictor = fake_detector(NAMES)
+    long_text = f"{CARMEN} " + "palabra " * 600 + SENTINEL_DNI  # far more than 2 windows
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+        calls = predictor.calls
+
+        response = post_try(client, session_id, token, body(long_text))
+        short = post_try(client, session_id, token, body(f"Soy {CARMEN}"))
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "text_too_long_for_ner"
+    assert response.headers["cache-control"] == NO_STORE
+    assert SENTINEL_DNI not in response.text and CARMEN not in response.text
+    assert short.status_code == 200
+    assert predictor.calls == calls + 1  # only the short text reached the model
+
+
+def test_without_the_ner_the_byte_limit_is_the_only_one() -> None:
+    with panel_client(HTTPS_URL) as client:
+        session_id, token = logged_in(client)
+
+        response = post_try(client, session_id, token, body("palabra " * 2500))
+
+    assert response.status_code == 200

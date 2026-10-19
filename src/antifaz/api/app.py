@@ -43,11 +43,20 @@ if TYPE_CHECKING:  # antifaz.web is imported only when the panel is on (_panel)
 MASK_THREADS = 8
 # «Prueba un texto» (11d-a): one Try at a time, never queued (a second one is 503 try_busy), and
 # taken BEFORE the mask limiter, so the panel holds at most one of the MASK_THREADS. With the NER
-# on, a Try also takes a NER worker only if one is idle right now (else 503 ner_busy), never
-# counts toward the NER circuit breaker and gives up after TRY_NER_SECONDS: the proxy may wait
-# for the worker a running Try holds, at most that long (NerPool.try_predict).
+# on, the proxy goes first (NerPool.try_predict): a Try is 503 ner_busy at once if a proxy request
+# is waiting for a worker, if no worker is idle and loaded, or during the Try-only cooldown after
+# a Try broke a worker; it never counts toward the circuit breaker. Its work is sized to its
+# deadline: at most TRY_NER_MAX_CHUNKS windows (else 413 text_too_long_for_ner, before any worker
+# is asked), one per batch, and the pool checks for waiting proxy requests before every batch, so
+# a proxy request that arrives mid-Try waits for ONE window at most, never the whole Try.
+# How the budget was chosen (TECNICO «Prueba un texto»): the bench measured GLiNER at p95 3.8 s
+# per MEDDOCAN document, several 200-token windows each, on the reference CPU; 1.5 s per window
+# is a conservative bound, so 2 windows take about 3 s, under a 5 s deadline. Measure on the
+# target machine before raising them.
 TRY_THREADS = 1
-TRY_NER_SECONDS = 3.0
+TRY_NER_SECONDS = 5.0
+TRY_NER_MAX_CHUNKS = 2
+TRY_NER_BATCH_CHUNKS = 1
 
 
 @dataclass
@@ -120,7 +129,7 @@ def _panel(
     """
     if settings.admin_token is None:
         return None
-    from antifaz.http_errors import TryBusyError
+    from antifaz.http_errors import TextTooLongForNerError, TryBusyError
     from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelDoor, PanelState
     from antifaz.web.forwarded import parse_networks
@@ -164,7 +173,13 @@ def _panel(
             taken = False
         if not taken:
             raise TryBusyError("try_busy")
-        isolated = None if try_ner is None else try_ner.for_try(TRY_NER_SECONDS)
+        isolated = (
+            None
+            if try_ner is None
+            else try_ner.for_try(
+                TRY_NER_SECONDS, max_chunks=TRY_NER_MAX_CHUNKS, batch_chunks=TRY_NER_BATCH_CHUNKS
+            )
+        )
         try:
             answer = await anyio.to_thread.run_sync(
                 functools.partial(
@@ -178,6 +193,8 @@ def _panel(
             )
         finally:
             try_limiter.release()
+        if isolated is not None and isolated.was_too_long():
+            raise TextTooLongForNerError()
         if isolated is not None and isolated.was_busy():
             raise TryBusyError("ner_busy")
         return answer

@@ -108,6 +108,17 @@ class TextTooLargeError(AppError):
         super().__init__("the text is too long")
 
 
+class TextTooLongForNerError(AppError):
+    """«Prueba un texto» with the NER on: the text needs more NER windows than a Try may use
+    (its budget fits its deadline). Refused before any NER worker is asked."""
+
+    status_code = 413
+    code = "text_too_long_for_ner"
+
+    def __init__(self) -> None:
+        super().__init__("the text is too long to try with the name detector: try a shorter one")
+
+
 class TryBodyTimeoutError(AppError):
     """«Prueba un texto»: the body did not arrive in time."""
 
