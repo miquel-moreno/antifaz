@@ -16,9 +16,9 @@ a base URL or any other free text (tests/unit/test_web_status.py).
   ever shown, so a host name must not carry a secret.
 - `ner_state(raw)`: NER_OFF (no NER) is "off"; the NER pool's four states pass; anything else is
   "unknown", never the raw value.
-- `overall(ner, providers)`: "danger" if the NER is closed; "warn" if it is starting, paused
-  after failures (circuit_open) or unknown, if no provider has a key or if a provider URL has a
-  user part; else "ok".
+- `overall(ner, providers)`: "danger" if the NER is closed or no provider has a key (nothing
+  can be forwarded); "warn" if the NER is starting, paused after failures (circuit_open) or
+  unknown, or a provider URL has a user part; else "ok".
 - `snapshot(facts, scheme)`: the JSON of GET /panel/api/status (its closed schema is
   web/status_response.py). The NER state is read at that moment; the uptime comes from the
   injected clock and counts from `mark_started()`, which the gateway calls once its start-up
@@ -152,11 +152,11 @@ class ProviderFacts:
 
 
 def overall(ner: NerState, providers: tuple[ProviderFacts, ...]) -> Overall:
-    if ner == "closed":
-        return "danger"
+    if ner == "closed" or not any(p.has_key for p in providers):
+        return "danger"  # names are blocked, or nothing can be forwarded at all
     if ner in ("starting", "circuit_open", "unknown"):
         return "warn"
-    if not any(p.has_key for p in providers) or any(p.has_credentials for p in providers):
+    if any(p.has_credentials for p in providers):
         return "warn"
     return "ok"
 

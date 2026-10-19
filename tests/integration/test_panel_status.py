@@ -297,11 +297,11 @@ def test_providers_with_and_without_keys_on_the_default_addresses() -> None:
     assert body["overall"] == "ok"
 
 
-def test_no_provider_key_is_a_warning() -> None:
+def test_no_provider_key_is_danger() -> None:
     body = _status_of(openai_api_key=None, anthropic_api_key=None)
 
     assert [p["has_key"] for p in body["providers"]] == [False, False]
-    assert body["overall"] == "warn"
+    assert body["overall"] == "danger"  # without a key nothing can be forwarded
 
 
 def test_custom_addresses_show_only_the_host() -> None:

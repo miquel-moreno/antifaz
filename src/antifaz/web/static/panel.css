@@ -84,8 +84,10 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
 .app-tab-dot+kbd{margin-left:6px}
 .app-sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;padding:0 8px}
 .app-sidebar-foot p{font-size:var(--text-xs);color:var(--color-text-muted);line-height:1.5}
-.app-local{display:flex;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
-.app-local .dot{color:var(--color-ok)}
+/* The dot goes with the FIRST line of the text, which may wrap (Miquel's review): aligned to the
+   top and moved down half a line minus half its own size, so it follows the text size too. */
+.app-local{display:flex;align-items:flex-start;gap:8px;font-size:var(--text-xs);color:var(--color-text-muted)}
+.app-local .dot{color:var(--color-ok);margin-top:calc(.5lh - 3.5px)}
 
 /* Status in the header and the phone bar: a dot with a ring that pulses three times when it
    appears or the state changes (the script restarts it), then stays still; and always a word

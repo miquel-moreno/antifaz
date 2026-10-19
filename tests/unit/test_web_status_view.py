@@ -190,6 +190,18 @@ def test_the_messages_template_holds_every_label_the_script_needs(lang: str) -> 
     assert all(value.strip() for value in inside.values())
 
 
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_the_ner_states_show_no_technical_code(lang: str) -> None:
+    """Miquel's review: only the approved labels and descriptions, never ok/starting/... codes."""
+    texts = [
+        str(e["text"])
+        for e in _tree(lang)
+        if any(str(p).startswith("panel-status") for p in e["parents"])  # type: ignore[union-attr]
+    ]
+    for code in ("circuit_open", "starting", "closed"):
+        assert not any(code in text for text in texts), code
+
+
 def test_the_loading_dim_keeps_the_text_contrast() -> None:
     """While it reads, the cards may dim, but never below opacity .8 (AA text stays AA)."""
     from antifaz.web.assets import STATIC_DIR
