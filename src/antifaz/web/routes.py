@@ -56,7 +56,9 @@ CSRF again.
   4. PanelState.try_runner (the gateway's: mask -> guard -> simulated reply -> restore, in a
      worker thread, no AI) and the closed schema of web/try_response.py, with the NER state at
      that moment. Any error there is a fixed 500 and one log line with the error's type only:
-     an exception's message could hold the text.
+     an exception's message could hold the text. Busy is a fixed 503 with Retry-After: 1 and
+     never a queue: `try_busy` (another Try is running) or `ner_busy` (no NER worker is free).
+     No response_model: the answer is validated once, here, and FastAPI never re-validates it.
   The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
   values come back only in it (the scoped exception to invariant 15); the original text never.
   When a session closes, its entry in the rate limit goes too (SessionStore.on_close).

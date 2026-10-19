@@ -1,7 +1,8 @@
 """«Prueba un texto» without the AI (issue 53, PR 11d-a, ADR-0018): the body, the pipeline and the
 simulated reply. No framework: the route (web/routes.py) reads the body and answers; the gateway
-(api/app.py `_panel`) runs run_try() in a worker thread, behind the Try limiter (one thread)
-and then the proxy's mask limiter.
+(api/app.py `_panel`) runs run_try() in a worker thread, behind the Try limiter (one Try at a
+time, never queued) and then the proxy's mask limiter; with the NER on, over a Try-only NER
+detector (no span cache, no waiting for a worker, no effect on the circuit breaker).
 
 - parse_body(raw, languages): exactly {"text": str, "lang": a loaded catalog code}, no repeated
   key, no NaN or Infinity, no lone surrogate, valid UTF-8 without BOM; anything else is
@@ -10,9 +11,10 @@ and then the proxy's mask limiter.
   TextTooLongError. The raw body itself is capped by the route at MAX_BODY_BYTES (enough for the
   largest text written as \\u escapes) and read within BODY_SECONDS.
 - run_try(text, lang, detector, policy): the REAL pipeline, the same functions as the proxy, no
-  copy: antifaz.mask.mask() with the gateway's detector (the NER too when it is on) and its
-  policy, antifaz.guard.check() on the masked text, a simulated reply built ONLY from the
-  emitted marker tokens, and antifaz.restore.restore() of that reply. No AI is called and this
+  copy: antifaz.mask.mask() with the detector the gateway hands it (the same validators,
+  patterns and NER model; the NER without the proxy's span cache) and the gateway's policy,
+  antifaz.guard.check() on the masked text, a simulated reply built ONLY from the emitted
+  marker tokens, and antifaz.restore.restore() of that reply. No AI is called and this
   module cannot reach one: it never imports antifaz.providers, antifaz.api, httpx, socket or ssl
   (tests/unit/test_web_try_text.py walks the import closure) and takes no client. The answer is
   a dict for the closed schema of web/try_response.py; the original text is never in it.
@@ -39,7 +41,11 @@ entity never starts or ends inside a surrogate pair because both offsets come fr
 
 Memory: the text and the values live in Python strings for the request only. Python cannot wipe
 a string; it is freed when nothing refers to it any more and the allocator may reuse the memory
-later. Nothing here keeps a reference after the answer, writes to disk or logs.
+later, so its bytes may stay in the process memory (and in a memory dump, or in swap if the
+system pages it out) until then. With the NER on, the text is also sent as JSON over a pipe to a
+NER worker process: it passes through the pipe's buffers and lives in that process's memory too,
+under the same rules. A Try never uses the NER span cache, so no digest or span of the text is
+kept after the answer. Nothing here keeps a reference after the answer, writes to disk or logs.
 
 Forbidden: logging anything of the text, the values or the vault. Passing the text or the vault
 to simulate_reply. Importing a provider client or an HTTP library.
