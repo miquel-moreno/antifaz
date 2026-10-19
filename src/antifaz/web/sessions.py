@@ -15,6 +15,8 @@ looked up (no timers, no thread).
   it was made over. The cookie names already keep the two apart; this covers an id copied by hand
   from one cookie to the other. Presented over the other scheme, the session is CLOSED (reason
   "scheme_mismatch"), not only refused: whoever holds that id is not following the rules.
+- seconds_left() (11d-b) says how long a live session has before each limit, without counting
+  a use, for the panel's expiry warning (POST /panel/api/session and the panel page).
 - The CSRF token is its own random value (`secrets.token_urlsafe(32)`): neither the id nor
   anything computed from it. It only ever travels in the <meta> of the panel page (no-store).
 
@@ -38,9 +40,9 @@ and nothing awaits in the middle of a call, so the panel routes that use it must
 block: the SSE side only signals (asyncio.Event.set or loop.call_soon) and returns.
 
 Forbidden: keeping the raw session id in any attribute. Logging an id, a fingerprint or a CSRF
-token. Calling is_active(), touch() or watch() with a value the client sent (they take a
-fingerprint, which only the server computes: a client value would skip the id-to-fingerprint
-step). Deriving the CSRF token from the session id.
+token. Calling is_active(), touch(), seconds_left() or watch() with a value the client sent
+(they take a fingerprint, which only the server computes: a client value would skip the
+id-to-fingerprint step). Deriving the CSRF token from the session id.
 """
 
 import dataclasses
@@ -119,6 +121,13 @@ class SessionStore(Protocol):
         Forbidden: calling it with a client-supplied value."""
         ...
 
+    def seconds_left(self, key: str) -> tuple[float, float] | None:
+        """(seconds before the inactivity limit, seconds before the 8 hours) of the live session
+        with this fingerprint, on the store's own clock and WITHOUT counting a use; None if it
+        is not live. Raw values: near the end the first may pass the second (the caller caps).
+        Forbidden: calling it with a client-supplied value."""
+        ...
+
     def on_close(self, callback: CloseCallback) -> Callable[[], None]:
         """Call `callback(fingerprint, reason)` whenever a session closes. Returns unsubscribe."""
         ...
@@ -191,6 +200,13 @@ class MemorySessionStore:
 
     def is_active(self, key: str) -> bool:
         return self._live(key, self._clock()) is not None
+
+    def seconds_left(self, key: str) -> tuple[float, float] | None:
+        now = self._clock()  # once: the check and both differences see the same instant
+        session = self._live(key, now)
+        if session is None:
+            return None
+        return IDLE_SECONDS - (now - session.last_used), MAX_AGE_SECONDS - (now - session.created)
 
     def on_close(self, callback: CloseCallback) -> Callable[[], None]:
         self._callbacks.append(callback)

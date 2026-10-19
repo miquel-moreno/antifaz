@@ -70,8 +70,11 @@ class Pages:
             code: login.render(**self._context(code, LOGIN_PATH)) for code in self.catalogs.codes
         }
         self._panel = env.get_template("panel.html")
-        for code in self.catalogs.codes:
-            self.panel(code, "")  # rendered once at startup: a missing value stops it here
+        for code in self.catalogs.codes:  # rendered at startup: a missing value stops it here
+            for words in (None, 1):  # the NER off and on
+                self.panel(
+                    code, "", idle_seconds=0, max_seconds=0, ner_words=words, max_text_bytes=1
+                )
 
     @property
     def languages(self) -> tuple[str, ...]:
@@ -92,8 +95,25 @@ class Pages:
         """The login page in `lang` (one of `languages`), rendered at startup."""
         return self._login[lang]
 
-    def panel(self, lang: str, csrf_token: str) -> str:
-        """The panel in `lang` for a live session: its CSRF token in the meta, and nowhere else."""
+    def panel(
+        self,
+        lang: str,
+        csrf_token: str,
+        *,
+        idle_seconds: int = 0,
+        max_seconds: int = 0,
+        ner_words: int | None = None,
+        max_text_bytes: int = 0,
+    ) -> str:
+        """The panel in `lang` for a live session: its CSRF token in the meta, and nowhere else;
+        the seconds it has left (11d-b, session.js), the words a Try may give the name detector
+        (None: the NER is off) and the bytes a Try text may have, all server values."""
         return self._panel.render(
-            **self._context(lang, PANEL_PATH), csrf_meta=CSRF_META, csrf_token=csrf_token
+            **self._context(lang, PANEL_PATH),
+            csrf_meta=CSRF_META,
+            csrf_token=csrf_token,
+            idle_seconds=idle_seconds,
+            max_seconds=max_seconds,
+            ner_words=ner_words,
+            max_text_bytes=max_text_bytes,
         )

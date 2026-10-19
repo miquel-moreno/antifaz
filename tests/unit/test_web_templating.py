@@ -84,8 +84,8 @@ def test_the_login_page_is_rendered_once_and_has_no_csrf_meta(
     monkeypatch.setattr(jinja2.Template, "render", spy)
     pages = Pages(ASSETS, version=__version__)
     languages = len(CATALOGS.codes)
-    # both once per language, at startup
-    assert sorted(calls) == ["login.html"] * languages + ["panel.html"] * languages
+    # at startup: the login once per language, the panel twice (11d-b: the NER off and on)
+    assert sorted(calls) == ["login.html"] * languages + ["panel.html"] * 2 * languages
     calls.clear()
 
     for code in CATALOGS.codes:

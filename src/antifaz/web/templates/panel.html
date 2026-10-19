@@ -69,7 +69,11 @@
 </div>
 <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>{{ t("status.foot") }}</p>
 {%- endmacro %}
+{#- 11d-b: the whole seconds the session has left before the inactivity limit (already capped by
+    the end) and before the 8 hours from the login; session.js warns from them. -#}
 {% block meta %}<meta name="{{ csrf_meta }}" content="{{ csrf_token }}">
+<meta name="antifaz-session-idle" content="{{ idle_seconds }}">
+<meta name="antifaz-session-max" content="{{ max_seconds }}">
 {% endblock %}
 {% block title %}{{ t("panel.title") }}{% endblock %}
 {% block script %}{{ static['panel.js'] }}{% endblock %}

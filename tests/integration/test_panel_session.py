@@ -198,8 +198,10 @@ def test_after_the_inactivity_limit_it_is_401(client: TestClient, clock: Clock) 
 def test_the_panel_page_renders_both_times(client: TestClient, clock: Clock) -> None:
     session_id = log_in(client)
     cookie = {"Cookie": f"{cookie_of(client)}={session_id}"}
-    clock.advance(3600)
-    client.get("/panel/api/status", headers={**cookie, "Sec-Fetch-Site": "same-origin"})
+    for _ in range(3):  # an hour of use, a request every 20 minutes
+        clock.advance(1200)
+        used = client.get("/panel/api/status", headers={**cookie, "Sec-Fetch-Site": "same-origin"})
+        assert used.status_code == 200
     clock.advance(600)
 
     page = client.get("/panel", headers=cookie).text

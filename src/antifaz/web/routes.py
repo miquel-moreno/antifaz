@@ -27,7 +27,14 @@ CSRF again.
   5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
      session bound to the request's scheme is made and the cookie of that scheme is set.
 - GET /panel: the panel (templates/panel.html, 11c-2b) in the request's language, with the
-  session's CSRF token in a meta.
+  session's CSRF token in a meta, and (11d-b) the whole seconds the session has left before the
+  inactivity limit (capped by the end) and before the 8 hours, in two metas, and the words a Try
+  may give the name detector (PanelState.try_ner_words; none when the NER is off).
+- POST /panel/api/session (11d-b): «Seguir» before the session expires (static/session.js), for
+  a live session with its CSRF token (the door). The door counted the request as a use, as any
+  panel request: so it extends the inactivity part only, and never past the 8 hours from the
+  login (it never touches `created`). The answer is the closed SessionResponse, exactly
+  {"idle_seconds", "max_seconds"}, the first capped by the second. The body is not read.
 - POST /panel/logout: the door let it through with a live session and its CSRF token. The
   session is closed in the store (reason "logout"; its subscribers are told before the answer
   leaves), and the answer is {"ok": true} with exactly one Set-Cookie, the expired cookie of the
@@ -73,7 +80,7 @@ CSRF again.
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
 in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
-`logout` never awaits; `try_a_text` takes its try before its first await.
+`logout` and `session_times` never await; `try_a_text` takes its try before its first await.
 tests/unit/test_web_concurrency.py checks it: every route is a coroutine function, no await,
 async for or async with comes after `limiter.allowed(` in `login`, `logout` has none at all, and
 none comes before `.take(` in `try_a_text`.
@@ -87,6 +94,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 
 import anyio
 from fastapi import APIRouter, Request
@@ -111,14 +119,15 @@ from antifaz.http_errors import (
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
-from antifaz.web.sessions import CloseReason
+from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
-from antifaz.web.status_response import StatusResponse
+from antifaz.web.status_response import SessionResponse, StatusResponse
 from antifaz.web.templating import Pages
 from antifaz.web.try_response import TryResponse
 from antifaz.web.try_text import (
     BODY_SECONDS,
     MAX_BODY_BYTES,
+    MAX_TEXT_BYTES,
     TextTooLongError,
     TryBodyError,
     TryInput,
@@ -204,6 +213,16 @@ def _try_input(raw: bytes, languages: tuple[str, ...]) -> TryInput:
     return parsed
 
 
+def _times(sessions: SessionStore, key: str) -> tuple[int, int] | None:
+    """(idle, max) whole seconds left of the live session `key` (a server fingerprint): the idle
+    part capped by the end, never more than the server allows. None if it is not live."""
+    left = sessions.seconds_left(key)
+    if left is None:
+        return None
+    idle, end = (max(0, math.floor(value)) for value in left)
+    return min(idle, end), end
+
+
 def _fingerprint(token: str) -> bytes:
     return hashlib.sha256(token.encode("utf-8", "surrogatepass")).digest()
 
@@ -272,7 +291,19 @@ def build_router(state: PanelState) -> APIRouter:
         if session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         lang = _language(request, pages)
-        return _page(pages.panel(lang, session.csrf_token), lang)
+        times = _times(state.sessions, session.fingerprint)
+        if times is None:  # pragma: no cover - the door found it live a moment ago, no await
+            raise PanelUnauthorizedError()
+        idle, end = times
+        page = pages.panel(
+            lang,
+            session.csrf_token,
+            idle_seconds=idle,
+            max_seconds=end,
+            ner_words=state.try_ner_words,
+            max_text_bytes=MAX_TEXT_BYTES,
+        )
+        return _page(page, lang)
 
     @router.get("/panel/api/status")
     async def status(request: Request) -> StatusResponse:
@@ -310,6 +341,19 @@ def build_router(state: PanelState) -> APIRouter:
             logger.error("panel try failed: %s", failure)
             raise PanelInternalError()
         return Response(answer, media_type="application/json")
+
+    @router.post("/panel/api/session")
+    async def session_times(request: Request) -> Response:
+        # The door already counted this request as a use (it extends the inactivity part, as
+        # any panel request does); this only says what is left. The body is never read.
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        times = _times(state.sessions, context.session.fingerprint)
+        if times is None:  # pragma: no cover - the door found it live, and nothing awaited
+            raise PanelUnauthorizedError()
+        answer = SessionResponse(idle_seconds=times[0], max_seconds=times[1])
+        return Response(answer.model_dump_json().encode(), media_type="application/json")
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:
