@@ -751,16 +751,23 @@ body{container:page/inline-size}
    system's colours in place of ours. The focus ring is then the transparent outline that every
    :focus-visible already has (the browser paints it in a system colour; WCAG 2.4.7), and what
    told a state by background or shadow gets a system colour or a border instead: the dots are
-   drawn in the text's colour (each one sits with its word), the selected tab, the current
-   language, tags and buttons have a border (not SelectedItem: Firefox's own palette pairs it
-   with a text of 2.9:1), the theme switch keeps a bordered track and a thumb (swapped when on), and
-   the tab bar's fade is off (a mask would fade the system's colours too). Only system colours
-   here, so the browser keeps them; no forced-color-adjust. */
+   drawn in the text's colour (each one sits with its word), the selected tab and the current
+   language have a CanvasText border (every tab and link has a Canvas one, so nothing moves when
+   the selection does; not SelectedItem: Firefox's own palette pairs it with a text of 2.9:1),
+   buttons a ButtonText border (GrayText while aria-disabled), tags a squarer CanvasText one (so
+   «Ahora» does not look like a button), the logo's mark is CanvasText, the theme switch keeps a
+   bordered track and a thumb (swapped when on), and the tab bar's fade is off (a mask would fade
+   the system's colours too). Only system colours here, so the browser keeps them; no
+   forced-color-adjust. */
 @media (forced-colors: active){
   .dot{background:CanvasText}
-  .tag,.btn{border:1px solid ButtonText}
+  .btn{border:1px solid ButtonText}
+  .btn[aria-disabled="true"]{color:GrayText;border-color:GrayText}
+  .tag{border:1px solid CanvasText;border-radius:var(--radius-xs)}
   .surface,.login-card{outline:1px solid CanvasText;outline-offset:-1px}
-  .app-tab[aria-selected="true"],.langs-link[aria-current="true"]{border:1px solid CanvasText}
+  .app-tab,.langs-link{border:1px solid Canvas}
+  .app-tab[aria-selected="true"],.langs-link[aria-current="true"]{border-color:CanvasText}
+  .app-logo svg{fill:CanvasText}
   .switch-track{border:1px solid CanvasText}
   .switch-thumb{top:1px;left:1px;background:CanvasText}
   .theme-switch[aria-checked="true"] .switch-track{background:CanvasText}

@@ -58,22 +58,60 @@ FOCUS_JS = """(i) => {
   const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
     (typeof el.className === 'string' && el.className ? '.' + el.className.trim()
       .split(/\\s+/).join('.') : '') + ' "' + (el.textContent || '').trim().slice(0, 16) + '"';
+  // The ring (the element's box grown by 3 px) must fit inside every ancestor that clips.
+  const r = el.getBoundingClientRect();
+  const clippedBy = [];
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    const as = getComputedStyle(a);
+    if (as.overflowX === 'visible' && as.overflowY === 'visible') continue;
+    const b = a.getBoundingClientRect();
+    if (r.left - 3 < b.left - 0.5 || r.top - 3 < b.top - 0.5 ||
+        r.right + 3 > b.right + 0.5 || r.bottom + 3 > b.bottom + 0.5) {
+      clippedBy.push(a.tagName.toLowerCase() + (a.id ? '#' + a.id : '') + '.' +
+        String(a.className).trim().split(/\\s+/).join('.'));
+    }
+  }
   return {name, visible: el.matches(':focus-visible'), active: document.activeElement === el,
           outlineStyle: s.outlineStyle, outlineWidth: parseFloat(s.outlineWidth) || 0,
-          outlineColor: s.outlineColor, boxShadow: s.boxShadow};
+          outlineColor: s.outlineColor, boxShadow: s.boxShadow, clippedBy};
 }"""
-ALPHA = re.compile(r"rgba?\(([^)]*)\)")
+RGB = re.compile(r"rgba?\(([^)]*)\)")
+SRGB = re.compile(r"color\(srgb ([^)]*)\)")
+# Whether the page can see a cookie or holds anything in storage (as in test_panel_ui.py).
+STORAGE_JS = """() => ({cookieVisible: document.cookie !== '', local: localStorage.length,
+                     session: sessionStorage.length})"""
+NOTHING_STORED = {"cookieVisible": False, "local": 0, "session": 0}
 
 
 def _alpha(colour: str) -> float:
-    """The alpha of a computed rgb()/rgba() colour; "transparent" is 0."""
+    """The alpha of a computed colour: rgb()/rgba(), color(srgb ... / a) or "transparent".
+    Any other format fails: it must never pass as opaque by default."""
     if colour == "transparent":
         return 0.0
-    match = ALPHA.match(colour)
-    if not match:
-        return 1.0
-    parts = [part.strip() for part in re.split(r"[,/ ]+", match.group(1)) if part.strip()]
-    return float(parts[3]) if len(parts) > 3 else 1.0
+    if match := RGB.fullmatch(colour):
+        parts = [part for part in re.split(r"[,/ ]+", match.group(1)) if part]
+        return float(parts[3]) if len(parts) > 3 else 1.0
+    if match := SRGB.fullmatch(colour):
+        _, slash, alpha = match.group(1).partition("/")
+        return float(alpha) if slash else 1.0
+    raise AssertionError(f"unknown colour format: {colour!r}")
+
+
+def test_the_alpha_reader_knows_the_formats() -> None:
+    assert _alpha("transparent") == 0.0
+    assert _alpha("rgb(0, 0, 0)") == 1.0
+    assert _alpha("rgba(0, 0, 0, 0)") == 0.0
+    assert _alpha("rgba(1, 2, 3, 0.5)") == 0.5
+    assert _alpha("color(srgb 0 0 0 / 0)") == 0.0
+    assert _alpha("color(srgb 1 0.5 0)") == 1.0
+    with pytest.raises(AssertionError):
+        _alpha("oklch(0.5 0.1 200)")
+
+
+def _assert_clean(tab: Tab) -> None:
+    """No CSP violation and nothing stored (the forced-colours contexts keep the real CSP)."""
+    assert tab.csp_violations() == []
+    assert tab.page.evaluate(STORAGE_JS) == NOTHING_STORED
 
 
 @pytest.fixture
@@ -133,6 +171,8 @@ def _missing_forced_ring(rings: list[dict[str, object]], browser_name: str) -> l
             bad.append(f"{ring['name']}: transparent outline {ring['outlineColor']}")
         elif browser_name not in FORCING and ring["boxShadow"] == "none":
             bad.append(f"{ring['name']}: no ring at all")
+        elif ring["clippedBy"]:
+            bad.append(f"{ring['name']}: its ring is clipped by {ring['clippedBy']}")
     return bad
 
 
@@ -153,11 +193,13 @@ def _walk_every_control(tab: Tab, server: PanelServer, lang: str, width: int) ->
     tab.goto(f"/panel/login?lang={lang}")
     _keyboard_start(tab)
     rings = [{**ring, "name": "login " + str(ring["name"])} for ring in _rings(tab)]
+    _assert_clean(tab)
     _log_in(tab, server, lang)
     _keyboard_start(tab)
     rings += [{**ring, "name": "panel " + str(ring["name"])} for ring in _rings(tab)]
     _open_status_by_keyboard(tab)
     rings += [{**ring, "name": "status " + str(ring["name"])} for ring in _rings(tab)]
+    _assert_clean(tab)
     if width < 768:
         _open_menu_by_keyboard(tab)
         # Only the menu's own controls: the menu closes when the focus leaves it.
@@ -192,7 +234,9 @@ CUES_JS = """() => {
   const shown = (el) => !el.closest('[hidden]') && el.getClientRects().length > 0;
   const own = (el) => [...el.childNodes].filter((n) => n !== el.querySelector('.dot'))
     .map((n) => n.textContent).join('').trim();
-  const look = (el) => { const s = getComputedStyle(el); return [s.backgroundColor,
+  // Border, outline and decoration only: under forced colours every background is Canvas, so a
+  // background that differs only in its alpha would be an invisible difference.
+  const look = (el) => { const s = getComputedStyle(el); return [
     s.borderTopStyle + ' ' + s.borderTopWidth + ' ' + s.borderTopColor,
     s.outlineStyle + ' ' + s.outlineWidth + ' ' + s.outlineColor,
     s.textDecorationLine].join('|'); };
@@ -216,9 +260,27 @@ CUES_JS = """() => {
   const ls = getComputedStyle(list);
   const mask = [ls.maskImage, ls.webkitMaskImage].filter((v) => v !== undefined);
   list.classList.remove('is-more-start', 'is-more-end');
+  const tag = document.querySelector('.ner .tag:not([hidden])');
+  const btn = document.getElementById('status-refresh');
+  const logo = document.querySelector('.app-logo svg');
   return {pills, dots, now: now.length,
           tab: [look(selected), look(other)], lang: current ? [look(current), look(plain)] : null,
-          mask};
+          mask, tagRadius: getComputedStyle(tag).borderTopLeftRadius,
+          btnRadius: getComputedStyle(btn).borderTopLeftRadius,
+          tagBorder: getComputedStyle(tag).borderTopStyle,
+          logoFill: getComputedStyle(logo).fill, text: getComputedStyle(document.body).color,
+          langWidths: [...new Set(links.map((a) => getComputedStyle(a).borderTopWidth))]};
+}"""
+# The box of every tab and of its icon, to compare before and after the selection moves.
+# Relative to the tab list's content (its scroll position added back).
+BOXES_JS = """() => {
+  const list = document.querySelector('[role=tablist]'), l = list.getBoundingClientRect();
+  const dx = list.scrollLeft - l.x, dy = list.scrollTop - l.y;
+  return [...list.querySelectorAll('[role=tab]')].map((t) => {
+    const r = t.getBoundingClientRect(), i = t.querySelector('.ic').getBoundingClientRect();
+    return [t.id, r.x + dx, r.y + dy, r.width, r.height, i.x + dx, i.y + dy].map((v) =>
+      typeof v === 'number' ? Math.round(v * 100) / 100 : v).join(' ');
+  });
 }"""
 SWITCH_JS = """() => {
   const track = getComputedStyle(document.querySelector('.settings-menu .switch-track'));
@@ -236,10 +298,32 @@ def test_every_state_keeps_a_cue_that_is_not_colour(
     new_tab: NewTab, server: PanelServer, browser_name: str, lang: str, width: int
 ) -> None:
     tab = new_tab(width=width, locale=_locale(lang), forced_colors="active")
+    tab.goto(f"/panel/login?lang={lang}")
+    _assert_clean(tab)
     _log_in(tab, server, lang)
     _open_status_by_keyboard(tab)
+    _assert_clean(tab)
     tab.page.evaluate("() => document.activeElement && document.activeElement.blur()")
     cues = tab.page.evaluate(CUES_JS)
+
+    # The «Ahora» tag is not shaped like a button; every language link has the same border.
+    assert cues["tagBorder"] != "none"
+    assert cues["tagRadius"] != cues["btnRadius"], cues
+    if browser_name in FORCING:  # the logo's mark is drawn in the text's colour
+        assert cues["logoFill"] == cues["text"], cues
+    # Moving the selection moves no tab and no icon (the selected border takes no room).
+    boxes = tab.page.evaluate(BOXES_JS)
+    tab.page.focus("#tab-status")
+    tab.page.keyboard.press("Home")
+    tab.page.wait_for_function(
+        "() => document.getElementById('tab-playground').getAttribute('aria-selected') === 'true'"
+    )
+    assert tab.page.evaluate(BOXES_JS) == boxes
+    assert len(cues["langWidths"]) == (0 if cues["lang"] is None else 1), cues["langWidths"]
+    tab.page.focus("#tab-playground")
+    tab.page.keyboard.press("End")
+    tab.page.wait_for_function(IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.evaluate("() => document.activeElement && document.activeElement.blur()")
 
     assert len(cues["pills"]) >= 4  # the gateway, the NER and both providers
     assert [pill for pill in cues["pills"] if not pill["label"]] == []
@@ -258,6 +342,7 @@ def test_every_state_keeps_a_cue_that_is_not_colour(
         _open_menu_by_keyboard(tab)
         menu = tab.page.evaluate(CUES_JS)
         assert menu["lang"] is not None and menu["lang"][0] != menu["lang"][1]
+        assert len(menu["langWidths"]) == 1, menu["langWidths"]
         states = []
         for _ in ("off", "on"):  # the switch as it is, then pressed (Enter keeps the focus)
             switch = tab.page.evaluate(SWITCH_JS)
