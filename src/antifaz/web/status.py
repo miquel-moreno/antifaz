@@ -6,10 +6,14 @@ reach antifaz.web. StatusFacts holds only booleans, counts, enums, the version, 
 host of a custom provider address and a callable that reads the NER state: never a key, a token,
 a base URL or any other free text (tests/unit/test_web_status.py).
 
-- `provider_address(url, default)`: "default" if the URL is the shipped one (a trailing "/"
-  aside); else only the host name and port of a custom URL (lowercased, IDNA in ASCII, an IPv4
-  or a bracketed IPv6) that passes HOST; else "custom". Never the user part, path, query or
-  fragment. `has_credentials` is True when the URL has a user part (the view warns about it).
+- `provider_address(parts, default=...)`: "default" if the URL is the shipped one
+  (`is_default`, a trailing "/" aside); else only the host and port httpx will contact, as
+  api/app.py `base_url_parts()` read them with httpx.URL (its IDNA2008 ASCII host, an IPv4 or an
+  IPv6, which gets brackets here), if they pass HOST; else "custom" (also when httpx refused the
+  URL: `parts` is None). A label longer than MAX_LABEL_CHARACTERS (32) or starting with "sk-"
+  looks like a key and is "custom" too. Never the user part, path, query or fragment;
+  `has_credentials` (httpx's userinfo is not empty) makes the view warn. Only host[:port] is
+  ever shown, so a host name must not carry a secret.
 - `ner_state(raw)`: NER_OFF (no NER) is "off"; the NER pool's four states pass; anything else is
   "unknown", never the raw value.
 - `overall(ner, providers)`: "danger" if the NER is closed; "warn" if it is starting, paused
@@ -30,7 +34,6 @@ import typing
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 NerState = Literal["off", "ok", "starting", "circuit_open", "closed", "unknown"]
 ProviderId = Literal["openai", "anthropic"]
@@ -45,8 +48,10 @@ _POOL_STATES: dict[str, NerState] = {
     "closed": "closed",
 }
 SCHEMA_VERSION = 1
-MAX_URL_CHARACTERS = 2048
 MAX_NAME_CHARACTERS = 253
+# A longer label, or one starting with "sk-" (OpenAI and Anthropic keys), looks like a key.
+MAX_LABEL_CHARACTERS = 32
+KEY_LIKE_PREFIX = "sk-"
 
 # One pattern for Python (fullmatch) and for the JSON schema (pydantic's regex, anchored there):
 # ASCII classes only, no look-around.
@@ -58,45 +63,58 @@ _PORT = (
 HOST_PATTERN = rf"(?:{_LABEL}(?:\.{_LABEL})*|\[[0-9a-f:.]{{2,45}}\]){_PORT}"
 HOST = re.compile(HOST_PATTERN)
 VERSION_PATTERN = r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:[-+.]?[0-9A-Za-z][0-9A-Za-z.+-]{0,31})?"
-_AUTHORITY_END = re.compile(r"[/?#\\]")
 
 
-def _has_user_part(url: str) -> bool:
-    """Whether the authority (after "//", up to the first / ? # or backslash) has an "@"."""
-    rest = url.split("//", 1)[1] if "//" in url else url
-    return "@" in _AUTHORITY_END.split(rest, maxsplit=1)[0]
+@dataclass(frozen=True)
+class UrlParts:
+    """A base URL as httpx will use it (api/app.py base_url_parts): never kept in the facts."""
+
+    scheme: str
+    host: str  # httpx's raw_host, in ASCII: IDNA2008 for a name, no brackets for an IPv6
+    port: int | None = field(repr=False)
+    has_credentials: bool
 
 
-def _host(url: str) -> str | None:
-    """The checked host[:port] of an http(s) URL, or None."""
-    odd = any(char.isspace() or not char.isprintable() for char in url)
-    if len(url) > MAX_URL_CHARACTERS or odd or "%" in url or "\\" in url:
+def is_default(url: str, default: str) -> bool:
+    """Whether a base URL is the shipped one (a trailing "/" aside)."""
+    return url.rstrip("/") == default.rstrip("/")
+
+
+def _key_like(name: str) -> bool:
+    return any(
+        len(label) > MAX_LABEL_CHARACTERS or label.startswith(KEY_LIKE_PREFIX)
+        for label in name.split(".")
+    )
+
+
+def _host(parts: UrlParts) -> str | None:
+    """The checked host[:port], or None."""
+    if parts.scheme not in ("http", "https") or not parts.host:
+        return None
+    if parts.port is not None and not 0 < parts.port < 65536:
         return None
     try:
-        parts = urlsplit(url)
-        name = parts.hostname
-        port = parts.port
-        if parts.scheme not in ("http", "https") or not name:
-            return None
-        if ":" in name:
-            host = f"[{ipaddress.IPv6Address(name).compressed}]"
-        elif name.replace(".", "").isdigit():
-            host = str(ipaddress.IPv4Address(name))
+        if ":" in parts.host:
+            host = f"[{ipaddress.IPv6Address(parts.host).compressed}]"
+        elif parts.host.replace(".", "").isdigit():
+            host = str(ipaddress.IPv4Address(parts.host))
         else:
-            host = name.encode("idna").decode("ascii").lower()
-            if len(host) > MAX_NAME_CHARACTERS:
+            host = parts.host
+            if len(host) > MAX_NAME_CHARACTERS or _key_like(host):
                 return None
-    except ValueError:  # a bad port, IPv6, IPv4 or IDNA label (UnicodeError is a ValueError)
+    except ValueError:  # a bad IPv4 or IPv6 (a zone id, too many groups...)
         return None
-    address = host if port is None else f"{host}:{port}"
+    address = host if parts.port is None else f"{host}:{parts.port}"
     return address if HOST.fullmatch(address) else None
 
 
-def provider_address(url: str, default: str) -> tuple[str, bool]:
+def provider_address(parts: UrlParts | None, *, default: bool) -> tuple[str, bool]:
     """(address, has_credentials): "default", the checked host[:port], or "custom"."""
-    if url.rstrip("/") == default.rstrip("/"):
+    if default:
         return "default", False
-    return _host(url) or "custom", _has_user_part(url)
+    if parts is None:
+        return "custom", False
+    return _host(parts) or "custom", parts.has_credentials
 
 
 class _NerOff:

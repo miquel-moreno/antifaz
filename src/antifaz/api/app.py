@@ -8,7 +8,7 @@ import functools
 import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import anyio
 import anyio.to_thread
@@ -34,6 +34,9 @@ from antifaz.mask import Detector
 from antifaz.policy import DEFAULT_POLICY, Policy
 from antifaz.providers.http import build_client
 
+if TYPE_CHECKING:  # antifaz.web is imported only when the panel is on (_panel)
+    from antifaz.web.status import UrlParts
+
 # Threads that can mask at the same time (detection and waiting for the NER). A limiter of our
 # own: masking never takes the threads of anyio's shared default limiter from other work.
 MASK_THREADS = 8
@@ -58,6 +61,20 @@ def registered_paths(app: FastAPI) -> frozenset[str]:
     return frozenset(context.path for context in iter_route_contexts(app.routes) if context.path)
 
 
+def base_url_parts(url: str) -> "UrlParts | None":
+    """A provider base URL exactly as httpx will use it (11c-3b): scheme, the ASCII host httpx
+    contacts (IDNA2008), the port and whether there is a user part. None if httpx refuses it.
+    Only for the panel's «Estado» facts, which keep nothing but the checked host[:port]."""
+    from antifaz.web.status import UrlParts
+
+    try:
+        parsed = httpx.URL(url)
+        host = parsed.raw_host.decode("ascii")
+        return UrlParts(parsed.scheme, host, parsed.port, parsed.userinfo != b"")
+    except (httpx.InvalidURL, ValueError, TypeError):  # UnicodeError is a ValueError
+        return None
+
+
 def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
@@ -76,11 +93,12 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
     from antifaz.web.login_limit import FailureLimiter
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
-    from antifaz.web.status import NER_OFF, ProviderFacts, StatusFacts, provider_address
+    from antifaz.web.status import NER_OFF, ProviderFacts, StatusFacts, is_default, provider_address
 
     def provider(id_: Literal["openai", "anthropic"], key: object, url: str) -> ProviderFacts:
         default = Settings.model_fields[f"{id_}_base_url"].default
-        address, credentials = provider_address(url, default)
+        parts = base_url_parts(url)
+        address, credentials = provider_address(parts, default=is_default(url, default))
         return ProviderFacts(id_, key is not None, address, credentials)
 
     def ner_state() -> object:

@@ -1,9 +1,11 @@
 """The facts behind the panel's «Estado» view (issue 53, PR 11c-3b, ADR-0018).
 
 - `provider_address`: what the panel may say about a provider's base URL. "default" if it is the
-  shipped one; else only the host name (and port) of a custom URL, lowercased, IDNA in ASCII and
+  shipped one; else only the host (and port) httpx will really contact (`base_url_parts` in
+  api/app.py parses the URL with httpx.URL: its IDNA2008 ASCII host, its port, its user part),
   checked by a strict pattern, or "custom". Never the user part, path, query or fragment;
-  `has_credentials` says the URL carries a user part (the view shows a warning).
+  `has_credentials` says the URL carries a user part (the view shows a warning). A label longer
+  than 32 characters or starting with "sk-" looks like a key: "custom".
 - `ner_state`: "off" without the NER, its four states, and "unknown" for anything else.
 - `overall`: the truth table of the gateway card.
 - `StatusFacts`: booleans, counts, enums, the version, a checked host and a callable for the NER
@@ -22,12 +24,15 @@ from hypothesis import strategies as st
 from pydantic import SecretStr, ValidationError
 
 from antifaz import __version__
+from antifaz.api.app import base_url_parts
 from antifaz.web.status import (
     HOST,
     NER_OFF,
     NER_STATES,
     ProviderFacts,
     StatusFacts,
+    UrlParts,
+    is_default,
     ner_state,
     overall,
     provider_address,
@@ -37,6 +42,11 @@ from antifaz.web.status_response import StatusResponse
 
 OPENAI = "https://api.openai.com/v1"
 ANTHROPIC = "https://api.anthropic.com"
+
+
+def _address(url: str, default: str) -> tuple[str, bool]:
+    """What the gateway hands the panel for this base URL (api/app.py does the same)."""
+    return provider_address(base_url_parts(url), default=is_default(url, default))
 
 
 @pytest.mark.parametrize(
@@ -64,8 +74,23 @@ ANTHROPIC = "https://api.anthropic.com"
         ),
         ("https://proxy.example?key=x@y", OPENAI, ("proxy.example", False)),
         ("https://proxy.example/a@b", OPENAI, ("proxy.example", False)),
-        # IDN in ASCII (punycode).
-        ("https://bücher.example/v1", OPENAI, ("xn--bcher-kva.example", False)),
+        # IDN: the ASCII host httpx sends (IDNA2008), never another one.
+        ("https://b\u00fccher.example/v1", OPENAI, ("xn--bcher-kva.example", False)),
+        ("https://\u00df.example/v1", OPENAI, ("xn--zca.example", False)),
+        ("https://fa\u00df.example", OPENAI, ("xn--fa-hia.example", False)),
+        ("https://\u03c2.gr", OPENAI, ("xn--3xa.gr", False)),
+        # What httpx refuses: "custom".
+        ("https://\uff50\uff52\uff4f\uff58\uff59.example", OPENAI, ("custom", False)),
+        ("https://\u24b6.com", OPENAI, ("custom", False)),
+        ("https://cafe\u0301.example", OPENAI, ("custom", False)),
+        ("https://[v1.abc]/", OPENAI, ("custom", False)),
+        # A backslash before "@": httpx contacts "evil" with a user part; the panel says so.
+        ("https://proxy.example\\@evil/", OPENAI, ("evil", True)),
+        # A host that looks like a key: "custom".
+        ("https://" + "a" * 33 + ".example/", OPENAI, ("custom", False)),
+        ("https://" + "a" * 32 + ".example/", OPENAI, ("a" * 32 + ".example", False)),
+        ("https://sk-abc.example/", OPENAI, ("custom", False)),
+        ("https://proxy.sk-ant-xyz.example/", OPENAI, ("custom", False)),
         # Anything odd: "custom", never the raw text.
         ("not a url", OPENAI, ("custom", False)),
         ("", OPENAI, ("custom", False)),
@@ -87,17 +112,32 @@ ANTHROPIC = "https://api.anthropic.com"
         ("https://[nope]/", OPENAI, ("custom", False)),
         ("https://" + "a" * 64 + ".example/", OPENAI, ("custom", False)),
         ("https://" + ".".join(["abcdefghij"] * 26) + "/", OPENAI, ("custom", False)),
-        ("https://proxy.example/" + "x" * 5000, OPENAI, ("custom", False)),
-        ("https://user:pa ss@proxy.example/", OPENAI, ("custom", True)),
+        ("https://proxy.example/" + "x" * 5000, OPENAI, ("proxy.example", False)),
+        ("https://user:pa ss@proxy.example/", OPENAI, ("proxy.example", True)),
     ],
 )
 def test_provider_address(url: str, default: str, expected: tuple[str, bool]) -> None:
-    assert provider_address(url, default) == expected
+    assert _address(url, default) == expected
+
+
+def test_the_pure_piece_checks_parts_it_is_given() -> None:
+    assert provider_address(None, default=False) == ("custom", False)
+    assert provider_address(None, default=True) == ("default", False)
+    bad = UrlParts("https", "Proxy.example", None, True)
+    assert provider_address(bad, default=False) == ("custom", True)
+    assert provider_address(UrlParts("gopher", "proxy.example", None, False), default=False) == (
+        "custom",
+        False,
+    )
+    assert provider_address(UrlParts("https", "::1", 8080, False), default=False) == (
+        "[::1]:8080",
+        False,
+    )
 
 
 @given(st.text(max_size=300), st.sampled_from([OPENAI, ANTHROPIC]))
 def test_provider_address_is_always_an_enum_or_a_strict_host(url: str, default: str) -> None:
-    address, _ = provider_address(url, default)
+    address, _ = _address(url, default)
 
     assert address in ("default", "custom") or HOST.fullmatch(address)
     assert not set(address) & set("@/?#%\\ ")
@@ -110,7 +150,7 @@ def test_provider_address_is_always_an_enum_or_a_strict_host(url: str, default: 
 )
 def test_a_user_part_path_or_query_never_shows(host: str, secret: str, tail: str) -> None:
     url = f"https://u{secret}@{host}/{tail}?{tail}#{tail}"
-    address, credentials = provider_address(url, OPENAI)
+    address, credentials = _address(url, OPENAI)
 
     assert credentials
     assert address in (host, "custom")
