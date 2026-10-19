@@ -65,6 +65,7 @@ def _wait_until(check: object, within: float = 30.0) -> None:
 
 def test_try_predict_answers_when_a_worker_is_idle(slow_pool: NerPool) -> None:
     text = f"Hola {CARMEN}"
+    slow_pool.predict(["calentar"], LABELS, 0.5)  # its first inference is the proxy's
 
     assert slow_pool.try_predict([text], LABELS, 0.5) == [[[5, 5 + len(CARMEN), "person", 0.9]]]
 
@@ -110,6 +111,7 @@ def test_the_same_hang_through_the_proxy_does_count(hanging_pool: NerPool) -> No
 
 
 def test_a_try_success_does_not_reset_the_breaker(slow_pool: NerPool) -> None:
+    slow_pool.predict(["calentar"], LABELS, 0.5)
     with slow_pool._lock:
         slow_pool._failures = 1  # as if the proxy had failed once (circuit not open: no time)
     assert slow_pool.try_predict([CARMEN], LABELS, 0.5)
@@ -277,6 +279,7 @@ def test_a_proxy_request_arriving_mid_try_waits_one_try_batch_at_most(
         except BaseException as error:
             outcome.append(error)
 
+    batch_pool.predict(["calentar"], LABELS, 0.5)  # the worker's first inference: the proxy's
     trying = threading.Thread(target=run_try)
     trying.start()
     try:
@@ -290,8 +293,9 @@ def test_a_proxy_request_arriving_mid_try_waits_one_try_batch_at_most(
     assert served == [[[0, len(CARMEN), "person", 0.9]]]
     assert [type(e) for e in outcome] == [NerBusyError]  # the Try was cut short
     assert try_ner.was_busy()
-    assert counting.try_calls < 5  # it never ran its remaining batches
-    assert waited < 5 * 0.6  # never the whole Try (bound: one 0.6 s batch plus overhead)
+    assert counting.try_calls <= 2  # cut after the batch the proxy request arrived during
+    # Very loose on purpose (no fixed timing limits): one 0.6 s batch plus generous overhead.
+    assert waited < 0.6 * 2 + 2.0
 
 
 def test_a_try_is_busy_while_a_proxy_request_waits(batch_pool: NerPool) -> None:
@@ -373,6 +377,7 @@ def test_the_cooldown_ends() -> None:
     pool = NerPool(FAKE_FACTORY, {"names": {CARMEN: "person"}}, try_cooldown_seconds=0.2)
     pool.start()
     try:
+        pool.predict(["calentar"], LABELS, 0.5)
         with pool._lock:
             pool._try_cooldown_until = time.monotonic() + 0.2
         with pytest.raises(NerBusyError):
@@ -414,3 +419,55 @@ def test_for_try_sends_one_batch_per_call() -> None:
     base.for_try(5.0, max_chunks=10, batch_chunks=2).find_many(["a b c d e f"])
 
     assert predictor.try_calls == 3  # 5 windows, 2 per batch
+
+
+# --- last review: a failed load is replaced at once; a fresh worker serves the proxy first ----
+
+
+class _FailedLoad:
+    """A worker connection whose ready message says the model did not load."""
+
+    def __init__(self, conn: object) -> None:
+        self._conn = conn
+
+    def poll(self, timeout: float = 0.0) -> bool:
+        return True
+
+    def recv_bytes(self, maxlength: int | None = None) -> bytes:
+        return b'{"status": "load_failed"}'
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+def test_a_failed_load_seen_by_a_try_is_replaced_at_once(batch_pool: NerPool) -> None:
+    batch_pool.predict(["calentar"], LABELS, 0.5)
+    (worker,) = list(batch_pool._idle.queue)
+    before = batch_pool.worker_pids()
+    worker.ready = False
+    worker.conn = _FailedLoad(worker.conn)  # type: ignore[assignment]
+
+    with pytest.raises(NerBusyError):
+        batch_pool.try_predict([CARMEN], LABELS, 0.5)
+
+    assert batch_pool.worker_pids() != before  # replaced now, not left for the proxy
+    assert worker not in list(batch_pool._idle.queue)
+    assert batch_pool._failures == 0  # the proxy's breaker is untouched
+    assert time.monotonic() < batch_pool._try_cooldown_until  # a Try-only cooldown started
+    # The next proxy request waits for the fresh worker to load and is served, not blocked.
+    assert batch_pool.predict([CARMEN], LABELS, 0.5) == [[[0, len(CARMEN), "person", 0.9]]]
+
+
+def test_a_try_never_takes_a_worker_that_has_not_served_the_proxy_yet() -> None:
+    pool = NerPool(FAKE_FACTORY, {"names": {CARMEN: "person"}}, workers=1, timeout=20.0)
+    pool.start()
+    try:
+        with pytest.raises(NerBusyError):  # loaded, but its first inference would be the Try's
+            pool.try_predict([CARMEN], LABELS, 0.5)
+        assert pool._idle.qsize() == 1
+
+        pool.predict(["calentar"], LABELS, 0.5)
+
+        assert pool.try_predict([CARMEN], LABELS, 0.5) == [[[0, len(CARMEN), "person", 0.9]]]
+    finally:
+        pool.close()

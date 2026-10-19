@@ -22,7 +22,9 @@ Parent and worker speak JSON over a pipe, with a size limit.
 «Prueba un texto» (the panel, PR 11d-a reviews) uses try_predict(), and the proxy goes first:
 - NerBusyError at once, without waiting, when any proxy request is waiting for a worker (counted
   under the lock while it waits), when no worker is idle, when the idle one is still loading
-  (checked without blocking; it goes back to the queue), or during the Try-only cooldown;
+  (checked without blocking; it goes back to the queue) or has not served a prediction yet (a
+  freshly loaded model's first inference may be slow: it is always the proxy's), or during the
+  Try-only cooldown. An idle worker whose load failed is replaced at once (as a Try failure);
 - the circuit breaker is never touched: a Try that hangs or kills a worker does not count as a
   failure, and a Try that works does not reset the count;
 - a Try that breaks a worker (it is still killed and replaced) starts a Try-only cooldown
@@ -91,6 +93,7 @@ class _Worker:
     conn: Pipe
     spawned: float = field(default_factory=time.monotonic)
     ready: bool = False
+    served: bool = False  # it answered at least one prediction (its first may be slow)
 
 
 class NerPool:
@@ -397,8 +400,13 @@ class NerPool:
         try:
             ready = self._wait_ready(worker, time.monotonic())  # a poll(0): never blocks
         except _LostError:
-            ready = False  # a failed load: the proxy's next request replaces it as usual
-        if not ready:
+            # A failed load: replaced now (a Try failure: the Try cooldown, never the breaker),
+            # so no proxy request stumbles on it.
+            with self._lock:
+                self._busy.add(worker)
+            self._release(worker, lost=True, counted=False)
+            raise NerBusyError() from None
+        if not ready or not worker.served:
             self._idle.put(worker)
             raise NerBusyError()
         return worker
@@ -461,6 +469,8 @@ class NerPool:
         try:
             results, killed = self._call(worker, texts, labels, threshold, deadline)
             lost = False
+            if results is not None:
+                worker.served = True
         except _NotReadyError:
             lost = False
         except _LostError:
