@@ -18,7 +18,8 @@ otherwise, never the system's), a pixel ratio and:
   there (fail-closed): Playwright's Firefox drops the context's `color_scheme` on the first
   navigation into a page with `Cross-Origin-Opener-Policy: same-origin` (the gateway's pages),
   so before this the "dark" checks ran light in Firefox. Once emulated on the page it holds
-  through later navigations and reloads.
+  through later navigations and reloads. The forced colours asked for (`forced_colors`,
+  "none" unless a test says "active", issue 53 PR 11c-4) are emulated and checked the same way.
 
 Secret values never reach a test: `cookie_names()` and `cookie_attributes()` drop the values,
 and only this module reads the cookie jar (tests/unit/test_browser_harness_rules.py). The
@@ -70,6 +71,7 @@ CSP_VIOLATIONS_JS = """async () => {
   return [...window.__antifazCsp];
 }"""
 DARK_JS = "() => matchMedia('(prefers-color-scheme: dark)').matches"
+FORCED_JS = "() => matchMedia('(forced-colors: active)').matches"
 CSRF_META_JS = """() => {
   const meta = document.querySelector('meta[name="antifaz-csrf"]');
   return meta ? meta.content : null;
@@ -96,6 +98,7 @@ class Tab:
         scale: int = 1,
         height: int | None = None,
         extra_origin: str | None = None,
+        forced_colors: str = "none",
     ) -> None:
         self.origin = origin
         self.extra_origin = extra_origin
@@ -109,6 +112,7 @@ class Tab:
         self.seen_secrets: set[str] = set()
         self.response: Response | None = None
         self.color_scheme = color_scheme
+        self.forced_colors = forced_colors
         self.context = browser.new_context(
             bypass_csp=bypass_csp,
             color_scheme=color_scheme,  # type: ignore[arg-type]
@@ -117,6 +121,7 @@ class Tab:
             viewport={"width": width, "height": height or (844 if width < 768 else 800)},
             device_scale_factor=scale,
             locale=locale or DEFAULT_LOCALE,
+            forced_colors=forced_colors,  # type: ignore[arg-type]
         )
         self.context.set_default_timeout(TIMEOUT_MS)
         self.context.set_default_navigation_timeout(TIMEOUT_MS)
@@ -158,9 +163,14 @@ class Tab:
     def goto(self, path: str) -> None:
         """Open a path of the gateway and settle: load, then every font ready."""
         self.response = self.page.goto(self.origin + path, wait_until="load")
-        self.page.emulate_media(color_scheme=self.color_scheme)  # type: ignore[arg-type]
+        self.page.emulate_media(
+            color_scheme=self.color_scheme,  # type: ignore[arg-type]
+            forced_colors=self.forced_colors,  # type: ignore[arg-type]
+        )
         dark: bool = self.page.evaluate(DARK_JS)
         assert dark == (self.color_scheme == "dark"), "the page lost the requested colour scheme"
+        forced: bool = self.page.evaluate(FORCED_JS)
+        assert forced == (self.forced_colors == "active"), "the page lost the forced colours"
         self.page.evaluate(SETTLED_JS)
         self.remember_secrets()
 
@@ -256,4 +266,5 @@ class NewTab(Protocol):
         scale: int = 1,
         height: int | None = None,
         extra_origin: str | None = None,
+        forced_colors: str = "none",
     ) -> Tab: ...
