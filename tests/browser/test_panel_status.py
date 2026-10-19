@@ -15,11 +15,13 @@ transport still refuses every provider call, and the fixture checks nothing trie
   view grows at least 1.8 times and nothing clips or spills.
 """
 
+import contextlib
 import json
 import re
 import sys
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Response, Route
 
 from antifaz.web.i18n import load_catalogs
@@ -36,7 +38,7 @@ CHECKED_JS = """(texts) => {
   const line = document.getElementById('status-time').textContent;
   return texts.some((text) => line.startsWith(text));
 }"""
-IDLE_JS = "() => !document.getElementById('status-refresh').disabled"
+IDLE_JS = "() => document.getElementById('status-refresh').getAttribute('aria-disabled') !== 'true'"
 ACTIVE_ID_JS = "() => document.activeElement ? document.activeElement.id : null"
 # Make the page look hidden or visible again, and tell it (headless pages are always visible).
 VISIBILITY_JS = """(state) => {
@@ -282,6 +284,235 @@ def test_unknown_values_show_the_unknown_label_never_the_raw_string(
         assert unknown in tab.page.locator(selector).inner_text(), selector
     assert unknown in tab.page.locator('[data-provider="openai"] [data-address]').inner_text()
     assert tab.page.locator("[data-ner][aria-current]").count() == 0
+
+
+# --- review of 11c-3b: announcements, focus, in-flight requests ---------------------------------
+
+# Press the button and read, in the same task (before any answer can arrive), what the page shows.
+PRESS_AND_READ_JS = """() => {
+  const button = document.getElementById('status-refresh');
+  button.click();
+  return {alertHidden: document.getElementById('status-alert').hidden,
+          alertText: document.getElementById('status-alert-text').textContent,
+          busy: document.getElementById('status-grid').getAttribute('aria-busy'),
+          ariaDisabled: button.getAttribute('aria-disabled'), disabled: button.disabled,
+          focused: document.activeElement === button};
+}"""
+FOCUS_BUTTON_JS = "() => document.getElementById('status-refresh').focus()"
+DOUBLE_PRESS_JS = """() => { const b = document.getElementById('status-refresh');
+  b.click(); b.click(); b.click(); }"""
+FLAP_DURING_PRESS_JS = """() => {
+  const set = (state) => {
+    Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => state});
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  document.getElementById('status-refresh').click();
+  set('hidden'); set('visible'); set('hidden'); set('visible');
+}"""
+PILL_JS = """(id) => { const p = document.getElementById(id);
+  return {label: p.querySelector('[data-label]').textContent,
+          tones: ['ok', 'warn', 'danger', 'neutral'].filter((t) => p.classList.contains(t))}; }"""
+STALE_JS = "() => document.getElementById('status-grid').classList.contains('is-stale')"
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_a_failure_after_a_failure_is_announced_again(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    tab = new_tab(locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _abort_status(tab)
+    tab.page.click("#tab-status")
+    tab.page.locator("#status-alert").wait_for(state="visible")
+
+    pressed = tab.page.evaluate(PRESS_AND_READ_JS)
+    tab.page.locator("#status-alert").wait_for(state="visible")
+
+    assert pressed["alertHidden"] is True  # hidden while checking...
+    assert pressed["alertText"] == ""
+    assert pressed["busy"] == "true"
+    text = tab.page.locator("#status-alert").inner_text()
+    assert _texts(lang, "status.error.network") in text  # ...and shown again, fresh
+
+
+def test_the_focus_stays_on_the_button_through_a_refresh(tab: Tab, server: PanelServer) -> None:
+    _log_in(tab, server, "en")
+    _open_status(tab, "en")
+    tab.page.evaluate(FOCUS_BUTTON_JS)
+
+    with tab.page.expect_response(_is_status):
+        pressed = tab.page.evaluate(PRESS_AND_READ_JS)
+    _wait_checked(tab, "en")
+
+    assert pressed["ariaDisabled"] == "true"
+    assert pressed["disabled"] is False  # never disabled: the focus would be lost
+    assert pressed["focused"] is True
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "status-refresh"
+    assert tab.page.locator("#status-refresh").get_attribute("aria-disabled") in (None, "false")
+
+
+def test_presses_while_one_is_in_flight_ask_once(tab: Tab, server: PanelServer) -> None:
+    _log_in(tab, server, "en")
+    _open_status(tab, "en")
+
+    with tab.page.expect_response(_is_status):
+        tab.page.evaluate(DOUBLE_PRESS_JS)
+    _wait_checked(tab, "en")
+
+    assert _status_requests(tab) == 2
+
+
+def test_visibility_flapping_during_a_request_asks_at_most_once_more(
+    tab: Tab, server: PanelServer
+) -> None:
+    _log_in(tab, server, "en")
+    _open_status(tab, "en")
+
+    with tab.page.expect_response(_is_status):
+        tab.page.evaluate(FLAP_DURING_PRESS_JS)
+    _wait_checked(tab, "en")
+    tab.page.evaluate(SETTLE_JS)
+
+    assert _status_requests(tab) == 2  # the press; every visible event came while in flight
+
+
+# A bound on waiting for a route event, counted in page round trips (never a time limit).
+ROUND_TRIPS = 200
+
+
+def _answer(ner: str, overall: str) -> str:
+    return json.dumps(
+        {
+            "schema": 1,
+            "version": "0.1.1",
+            "uptime_seconds": 7200,
+            "panel_scheme": "http_localhost",
+            "detectors": {"validators": "on", "patterns": "on", "ner": ner},
+            "providers": [
+                {"id": "openai", "has_key": True, "address": "default", "has_credentials": False},
+                {
+                    "id": "anthropic",
+                    "has_key": True,
+                    "address": "default",
+                    "has_credentials": False,
+                },
+            ],
+            "limits": {"allowed_hosts": 2, "allowed_origins": 0, "trusted_proxies": 0},
+            "overall": overall,
+        }
+    )
+
+
+def test_only_the_latest_answer_renders(tab: Tab, server: PanelServer) -> None:
+    """The first request is held; «Actualizar» replaces it (the first is aborted) and its answer
+    renders; the held answer, released afterwards, changes nothing."""
+    held: list[Route] = []
+
+    def handler(route: Route) -> None:
+        if not held:
+            held.append(route)  # answered later, or never
+            return
+        route.fulfill(status=200, content_type="application/json", body=_answer("ok", "ok"))
+
+    _log_in(tab, server, "en")
+    tab.page.route(f"{tab.origin}{STATUS_PATH}", handler)
+    tab.page.click("#tab-status")
+    for _ in range(ROUND_TRIPS):  # let the route event arrive: a few round trips at most
+        if held:
+            break
+        tab.page.evaluate(SETTLE_JS)
+    assert held, "the first request never reached the route"
+    with tab.page.expect_response(_is_status):
+        # A person can press it while it reads (aria-disabled, never disabled): Playwright's
+        # click() waits for "enabled", so the press is dispatched directly.
+        tab.page.locator("#status-refresh").dispatch_event("click")
+    _wait_checked(tab, "en")
+    with contextlib.suppress(PlaywrightError):  # the page already aborted it: that is the point
+        held[0].fulfill(
+            status=200, content_type="application/json", body=_answer("closed", "danger")
+        )
+    tab.page.evaluate(SETTLE_JS)
+
+    assert tab.page.evaluate(PILL_JS, "status-ner")["tones"] == ["ok"]
+    assert tab.page.evaluate(PILL_JS, "status-overall")["tones"] == ["ok"]
+    assert tab.page.locator("#status-alert").is_hidden()
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_after_an_error_the_overall_pill_is_not_refreshed_and_the_grid_is_dimmed(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    tab = new_tab(locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab, lang)
+    assert tab.page.evaluate(PILL_JS, "status-overall")["tones"] == ["ok"]
+    _abort_status(tab)
+
+    tab.page.click("#status-refresh")
+    _wait_checked(tab, lang, "status.checked.old")
+
+    pill = tab.page.evaluate(PILL_JS, "status-overall")
+    assert pill == {"label": _texts(lang, "status.overall.stale"), "tones": ["neutral"]}
+    assert tab.page.evaluate(STALE_JS) is True
+    with tab.page.expect_response(_is_status):
+        tab.page.unroute(f"{tab.origin}{STATUS_PATH}")
+        tab.page.click("#status-refresh")
+    _wait_checked(tab, lang)
+    assert tab.page.evaluate(STALE_JS) is False
+
+
+WARNINGS_ANSWER = {
+    "schema": 1,
+    "version": "0.1.1",
+    "uptime_seconds": 3 * 86400 + 4 * 3600,
+    "panel_scheme": "https",
+    "detectors": {"validators": "on", "patterns": "on", "ner": "closed"},
+    "providers": [
+        {
+            "id": "openai",
+            "has_key": True,
+            "address": "proxy.example:8443",
+            "has_credentials": True,
+        },
+        {"id": "anthropic", "has_key": False, "address": "default", "has_credentials": False},
+    ],
+    "limits": {"allowed_hosts": 3, "allowed_origins": 1, "trusted_proxies": 1},
+    "overall": "danger",
+}
+
+
+def fulfill_warnings(route: Route) -> None:
+    """A valid answer with every warning at once (also used by the captures)."""
+    route.fulfill(status=200, content_type="application/json", body=json.dumps(WARNINGS_ANSWER))
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_every_warning_renders_and_axe_finds_nothing(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str
+) -> None:
+    tab = new_tab(bypass_csp=True, color_scheme=theme, locale=_locale(lang))
+    _log_in(tab, server, lang)
+    tab.page.route(f"{tab.origin}{STATUS_PATH}", fulfill_warnings)
+
+    _open_status(tab, lang)
+
+    assert tab.page.evaluate(PILL_JS, "status-overall") == {
+        "label": _texts(lang, "status.overall.danger"),
+        "tones": ["danger"],
+    }
+    assert tab.page.evaluate(PILL_JS, "status-ner")["tones"] == ["danger"]
+    assert tab.page.locator('[data-ner="closed"]').get_attribute("aria-current") == "true"
+    openai = tab.page.locator('[data-provider="openai"]')
+    assert openai.locator("[data-address]").inner_text() == "proxy.example:8443"
+    assert openai.locator("[data-credentials]").is_visible()
+    anthropic = tab.page.locator('[data-provider="anthropic"]')
+    assert _texts(lang, "status.key.no") in anthropic.inner_text()
+    assert anthropic.locator("[data-credentials]").is_hidden()
+    assert tab.page.locator("#status-uptime").inner_text() == "3 d 4 h"
+    report = tab.axe()
+    assert report.passes > 0
+    assert report.violations == "", f"incomplete rules {report.incomplete}"
 
 
 # --- accessibility and text size ---------------------------------------------------------------

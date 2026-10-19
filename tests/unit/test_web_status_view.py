@@ -27,7 +27,7 @@ from antifaz.web.templating import Pages
 CATALOGS = load_catalogs()
 PAGES = Pages(load_assets(), version=__version__)
 MESSAGES = (
-    *(f"overall.{value}" for value in ("ok", "warn", "danger")),
+    *(f"overall.{value}" for value in ("ok", "warn", "danger", "stale")),
     *(f"ner.{value}" for value in sorted(NER_STATES - {"unknown"})),
     "scheme.https",
     "scheme.http_localhost",

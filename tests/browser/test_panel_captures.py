@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 54 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 56 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
@@ -10,7 +10,9 @@ scrolls and fades on the side that has more, on the first tab (`*-5-text200-firs
 providers with a key on their official addresses, the NER working), the whole page on the
 desktop and the window on a phone (its tab bar is fixed), for both
 languages, themes and sizes (`*-7-status.png`), and its error state, Spanish light at both sizes
-(`es-light-*-8-status-error.png`: the request refused by the browser, the last data kept). With
+(`es-light-*-8-status-error.png`: the request refused by the browser, the last data kept), and
+every warning at once, Spanish light at both sizes (`es-light-*-9-status-warnings.png`: the NER
+stopped, an address with a user part, a provider without a key; a fixed answer). With
 reduced motion, animations disabled, the caret hidden and after every font is ready.
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
@@ -25,6 +27,7 @@ import pytest
 
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer, ServerOptions
+from tests.browser.test_panel_status import fulfill_warnings
 
 pytestmark = pytest.mark.browser
 
@@ -41,7 +44,8 @@ FADE_SETTLED_JS = """() => {
 
 
 # Idle and filled in: the button enabled again and the line says when it was checked.
-STATUS_IDLE_JS = """() => !document.getElementById('status-refresh').disabled &&
+STATUS_IDLE_JS = """() =>
+  document.getElementById('status-refresh').getAttribute('aria-disabled') !== 'true' &&
   document.getElementById('status-time').textContent !== ''"""
 
 
@@ -171,5 +175,18 @@ def test_capture_the_status_error(new_tab: NewTab, server: PanelServer, width: i
     tab.page.mouse.move(0, 0)  # no hover on the button in the reference
 
     path = _capture(tab, f"es-light-{SIZES[width]}-8-status-error", full_page=width >= 768)
+
+    assert path.stat().st_size > 0
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+def test_capture_the_status_warnings(new_tab: NewTab, server: PanelServer, width: int) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme="light", width=width, scale=2)
+    _log_in(tab, server, "es")
+    tab.page.route(f"{tab.origin}/panel/api/status", fulfill_warnings)
+    _open_status(tab)
+
+    path = _capture(tab, f"es-light-{SIZES[width]}-9-status-warnings", full_page=width >= 768)
 
     assert path.stat().st_size > 0

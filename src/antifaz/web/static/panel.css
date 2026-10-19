@@ -481,6 +481,11 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 /* While the status is being read the cards dim a little; the live region says "Checking". */
 .sgrid{transition:opacity var(--duration-base) var(--ease-out)}
 .sgrid[aria-busy="true"]{opacity:.6}
+/* After a failed refresh the last data stay, greyed (colour only: the text keeps its contrast)
+   and the gateway pill says "not refreshed". */
+.sgrid.is-stale{filter:grayscale(1)}
+/* «Actualizar» is never disabled (the focus would be lost), only aria-disabled while it reads. */
+.btn[aria-disabled="true"]{cursor:progress;opacity:.55}
 
 /* Identifiers (key, team, model and policy names, ids, versions, markers, codes, commands) never
    break inside: each one is an atomic inline box, so it moves whole to the next line and the text

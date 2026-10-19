@@ -510,7 +510,8 @@ FADE_JS = """() => {
 SELECTED_INSIDE_JS = """(id) => { const t = document.getElementById(id).getBoundingClientRect();
   const l = document.querySelector('[role=tablist]').getBoundingClientRect();
   return t.left >= l.left - 0.5 && t.right <= l.right + 0.5; }"""
-STATUS_IDLE_JS = """() => !document.getElementById('status-refresh').disabled &&
+STATUS_IDLE_JS = """() =>
+  document.getElementById('status-refresh').getAttribute('aria-disabled') !== 'true' &&
   document.getElementById('status-time').textContent !== ''"""
 HAS_CLASS_JS = "(name) => document.querySelector('[role=tablist]').classList.contains(name)"
 # A hang guard only (about ten seconds of frames), never a measure of speed.

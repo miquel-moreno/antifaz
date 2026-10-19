@@ -254,6 +254,7 @@
   var statusSequence = 0;
   var statusStarted = false;
   var statusCheckedAt = null;
+  var statusInFlight = null;
   var TONES = ["ok", "warn", "danger", "neutral"];
   var HOST_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.-:[]";
   var VERSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.+-";
@@ -386,8 +387,9 @@
   }
 
   function statusIdle(fromButton) {
+    statusInFlight = null;
     statusGrid.setAttribute("aria-busy", "false");
-    statusButton.disabled = false;
+    statusButton.removeAttribute("aria-disabled");
     if (fromButton) {
       statusButton.focus();
     }
@@ -396,7 +398,7 @@
   function statusShown(data, fromButton) {
     renderStatus(data);
     statusCheckedAt = new Date();
-    statusAlert.hidden = true;
+    statusGrid.classList.remove("is-stale");
     statusGrid.hidden = false;
     statusTime.textContent = statusText("checked").replace("{time}", clockTime(statusCheckedAt));
     statusIdle(fromButton);
@@ -405,22 +407,35 @@
   function statusFailed(key, fromButton) {
     statusAlertText.textContent = statusText("error." + key);
     statusAlert.hidden = false;
+    setPill(document.getElementById("status-overall"), "neutral", statusText("overall.stale"));
+    statusGrid.classList.add("is-stale");
     statusTime.textContent = statusCheckedAt
       ? statusText("checked.old").replace("{time}", clockTime(statusCheckedAt)) : "";
     statusIdle(fromButton);
   }
 
   function loadStatus(fromButton) {
+    if (statusInFlight) {
+      if (!fromButton || statusInFlight.fromButton) {
+        return;
+      }
+      statusInFlight.controller.abort();
+    }
     statusSequence += 1;
     var sequence = statusSequence;
+    var controller = new AbortController();
+    statusInFlight = {controller: controller, fromButton: fromButton};
+    statusAlert.hidden = true;
+    statusAlertText.textContent = "";
     statusGrid.setAttribute("aria-busy", "true");
-    statusButton.disabled = true;
+    statusButton.setAttribute("aria-disabled", "true");
     statusTime.textContent = statusText("checking");
     fetch("/panel/api/status", {
       credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
-      referrerPolicy: "no-referrer"
+      referrerPolicy: "no-referrer",
+      signal: controller.signal
     }).then(function (response) {
       if (sequence !== statusSequence) {
         return;

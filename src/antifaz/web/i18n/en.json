@@ -58,6 +58,7 @@
   "status.overall.ok": "All in order",
   "status.overall.warn": "Check the warnings",
   "status.overall.danger": "Something is blocking",
+  "status.overall.stale": "Not refreshed",
   "status.version": "Version",
   "status.uptime": "Running for",
   "status.uptime.days": "{days} d {hours} h",

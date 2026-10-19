@@ -58,6 +58,7 @@
   "status.overall.ok": "Todo en orden",
   "status.overall.warn": "Revisa los avisos",
   "status.overall.danger": "Algo está bloqueando",
+  "status.overall.stale": "Sin actualizar",
   "status.version": "Versión",
   "status.uptime": "En marcha desde hace",
   "status.uptime.days": "{days} d {hours} h",
