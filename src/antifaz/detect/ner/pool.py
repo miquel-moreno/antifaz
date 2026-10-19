@@ -18,6 +18,13 @@ every request is blocked at once for a backoff that doubles each time (up to
 any text, and `status()` feeds /healthz.
 
 Parent and worker speak JSON over a pipe, with a size limit.
+
+«Prueba un texto» (the panel, PR 11d-a review) uses try_predict(): it takes a worker only if one
+is idle right now (NerBusyError otherwise, without waiting), so a Try never queues in front of
+the proxy, and it never touches the circuit breaker (a Try that hangs or kills a worker does not
+count as a failure, and a Try that works does not reset the count). The worker it breaks is
+still killed and replaced. A Try that already holds the only worker keeps it until its own
+(short) deadline: the proxy may wait that long, never longer.
 """
 
 import json
@@ -31,7 +38,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from multiprocessing.process import BaseProcess
 
-from antifaz.detect.ner.backend import split_factory
+from antifaz.detect.ner.backend import NerBusyError, split_factory
 from antifaz.detect.ner.worker import Pipe
 from antifaz.detect.ner.worker import main as worker_main
 from antifaz.errors import DetectorFailed
@@ -332,16 +339,19 @@ class NerPool:
         self._failures = 0
         self._open_until = 0.0
 
-    def _release(self, worker: _Worker, lost: bool, killed: bool = False) -> None:
-        """Back to the queue, or replaced if `lost` (a failure) or `killed` (by a watchdog
-        that fired after the reply arrived: not a failure)."""
+    def _release(
+        self, worker: _Worker, lost: bool, killed: bool = False, counted: bool = True
+    ) -> None:
+        """Back to the queue, or replaced if `lost` (a failure, counted by the breaker unless
+        it was a Try) or `killed` (by a watchdog that fired after the reply arrived: not a
+        failure)."""
         with self._lock:
             self._busy.discard(worker)
             if self._closed:
                 self._dispose(worker)
                 return
             if lost or killed:
-                if lost:
+                if lost and counted:
                     self._failed()  # the circuit state first: disposing joins for seconds
                 self._dispose(worker)
                 worker = self._spawn()  # it loads in the background
@@ -359,6 +369,29 @@ class NerPool:
         Everything, including waiting for a free or loading worker, happens before `deadline`
         (time.monotonic()) or `timeout` from now, whichever comes first.
         """
+        return self._predict(texts, labels, threshold, deadline, wait=True, counted=True)
+
+    def try_predict(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None = None,
+    ) -> object:
+        """predict() for «Prueba un texto»: NerBusyError at once if no worker is idle, and the
+        circuit breaker is never touched (neither counted nor reset)."""
+        return self._predict(texts, labels, threshold, deadline, wait=False, counted=False)
+
+    def _predict(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None,
+        *,
+        wait: bool,
+        counted: bool,
+    ) -> object:
         now = time.monotonic()
         deadline = min(now + self._timeout, deadline if deadline is not None else now + 1e9)
         with self._lock:
@@ -366,9 +399,14 @@ class NerPool:
         if refused:
             raise DetectorFailed()
         try:
-            worker = self._idle.get(timeout=max(0.0, deadline - now))
+            if wait:
+                worker = self._idle.get(timeout=max(0.0, deadline - now))
+            else:
+                worker = self._idle.get_nowait()
         except queue.Empty:
             worker = None
+        if worker is None and not wait:  # a Try never waits for a worker
+            raise NerBusyError()
         if worker is None:  # every worker stayed busy until the deadline
             raise DetectorFailed()
         with self._lock:
@@ -390,9 +428,10 @@ class NerPool:
         except _LostError:
             pass
         finally:
-            self._release(worker, lost, killed)
+            self._release(worker, lost, killed, counted)
         if results is None:  # raised here, outside any except block: nothing is chained
             raise DetectorFailed()
-        with self._lock:
-            self._succeeded()
+        if counted:
+            with self._lock:
+                self._succeeded()
         return results

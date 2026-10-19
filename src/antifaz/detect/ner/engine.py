@@ -14,7 +14,7 @@ import time
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
-from antifaz.detect.ner.backend import Predictor
+from antifaz.detect.ner.backend import NerBusyError, Predictor
 from antifaz.detect.ner.cache import SpanCache, cache_key
 from antifaz.detect.ner.chunker import (
     CHUNKER_VERSION,
@@ -59,6 +59,36 @@ def _entities(raw: object, length: int, labels: Mapping[str, EntityType]) -> lis
     return out
 
 
+class _TryPredictor:
+    """The predictor of a for_try() detector: try_predict() if the inner one has it."""
+
+    def __init__(self, inner: Predictor) -> None:
+        self._inner = inner
+        self.busy = False
+
+    def start(self) -> None:  # pragma: no cover - a Try detector is never started
+        raise RuntimeError("a Try detector is never started")
+
+    def close(self) -> None:  # pragma: no cover - nor closed: the gateway owns the predictor
+        raise RuntimeError("a Try detector is never closed")
+
+    def predict(
+        self,
+        texts: Sequence[str],
+        labels: Sequence[str],
+        threshold: float,
+        deadline: float | None = None,
+    ) -> object:
+        try_predict = getattr(self._inner, "try_predict", None)
+        if not callable(try_predict):
+            return self._inner.predict(texts, labels, threshold, deadline=deadline)
+        try:
+            return try_predict(texts, labels, threshold, deadline=deadline)
+        except NerBusyError:
+            self.busy = True
+            raise
+
+
 class NerDetector:
     """Finds names and addresses through a predictor, with a cache in front of it."""
 
@@ -99,6 +129,36 @@ class NerDetector:
         self._max_chunks = max_chunks
         self._timeout: float | None = timeout
         self._chunker = f"{CHUNKER_VERSION}:{window}:{overlap}:{VIEW_VERSION}"
+
+    def for_try(self, seconds: float) -> "NerDetector":
+        """A detector for «Prueba un texto» (PR 11d-a review) over the same predictor:
+        - no span cache: a Try never reads or writes the proxy's cache, so it cannot tell
+          whether a text went through the proxy (a cache hit is fast), never evicts the proxy's
+          entries and leaves no digest or spans behind;
+        - a deadline of at most `seconds`;
+        - the predictor's try_predict() when it has one (the pool: no waiting for a worker and
+          no circuit breaker); in-process predictors have no workers to starve and are called
+          as usual. was_busy() says whether this detector found no free worker.
+        One per Try: the busy flag belongs to it."""
+        if seconds <= 0:
+            raise ValueError("the Try deadline must be positive")
+        timeout = seconds if self._timeout is None else min(seconds, self._timeout)
+        return NerDetector(
+            _TryPredictor(self._predictor),
+            labels=self._labels,
+            threshold=self._threshold,
+            cache=None,
+            model_id=self._model_id,
+            window=self._window,
+            overlap=self._overlap,
+            batch_chunks=self._batch,
+            max_chunks=self._max_chunks,
+            timeout=timeout,
+        )
+
+    def was_busy(self) -> bool:
+        """For a detector from for_try(): whether it found no free NER worker."""
+        return bool(getattr(self._predictor, "busy", False))
 
     def start(self) -> None:
         self._predictor.start()

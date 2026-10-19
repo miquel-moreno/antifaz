@@ -15,6 +15,13 @@ from typing import Protocol
 _FACTORY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*")
 
 
+class NerBusyError(Exception):
+    """«Prueba un texto» found no idle NER worker right now (PR 11d-a review). Fixed message."""
+
+    def __init__(self) -> None:
+        super().__init__("no NER worker is free right now")
+
+
 class NerBackend(Protocol):
     """A loaded model. Runs only inside a worker process."""
 
