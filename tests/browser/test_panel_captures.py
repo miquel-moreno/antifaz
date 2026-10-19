@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 56 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 58 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
@@ -12,7 +12,9 @@ desktop and the window on a phone (its tab bar is fixed), for both
 languages, themes and sizes (`*-7-status.png`), and its error state, Spanish light at both sizes
 (`es-light-*-8-status-error.png`: the request refused by the browser, the last data kept), and
 every warning at once, Spanish light at both sizes (`es-light-*-9-status-warnings.png`: the NER
-stopped, an address with a user part, a provider without a key; a fixed answer). With
+stopped, an address with a user part, a provider without a key; a fixed answer). 11c-4: under
+forced colours, Spanish light at 1280x800, the login with the token field focused
+(`es-light-1280x800-10-forced-login-focus.png`) and «Estado» (`*-11-forced-status.png`). With
 reduced motion, animations disabled, the caret hidden and after every font is ready.
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
@@ -193,3 +195,23 @@ def test_capture_the_status_warnings(new_tab: NewTab, server: PanelServer, width
     path = _capture(tab, f"es-light-{SIZES[width]}-9-status-warnings", full_page=width >= 768)
 
     assert path.stat().st_size > 0
+
+
+def test_capture_under_forced_colours(new_tab: NewTab, server: PanelServer) -> None:
+    """11c-4: Spanish, light, 1280x800, forced colours (Windows high contrast): the login with
+    the token field focused from the keyboard (its outline is the focus ring there,
+    `es-light-1280x800-10-forced-login-focus.png`) and the panel on «Estado» with its data
+    (`es-light-1280x800-11-forced-status.png`, the whole page)."""
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme="light", width=1280, scale=2, forced_colors="active")
+    tab.goto("/panel/login?lang=es")
+    tab.page.keyboard.press("Tab")  # the keyboard's modality first, then the field
+    tab.page.focus("#login-token")
+    assert tab.page.evaluate("() => document.activeElement.matches(':focus-visible')")
+    written = [_capture(tab, "es-light-1280x800-10-forced-login-focus")]
+
+    _log_in(tab, server, "es")
+    _open_status(tab)
+    written.append(_capture(tab, "es-light-1280x800-11-forced-status", full_page=True))
+
+    assert all(path.stat().st_size > 0 for path in written)

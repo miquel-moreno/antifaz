@@ -156,6 +156,7 @@ def new_tab(
         scale: int = 1,
         height: int | None = None,
         extra_origin: str | None = None,
+        forced_colors: str = "none",
     ) -> Tab:
         tab = Tab(
             browser,
@@ -167,6 +168,7 @@ def new_tab(
             scale=scale,
             height=height,
             extra_origin=extra_origin,
+            forced_colors=forced_colors,
         )
         tabs.append(tab)
         return tab
