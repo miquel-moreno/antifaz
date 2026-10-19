@@ -285,3 +285,27 @@ def test_axe_finds_no_violation(
         assert report.passes > 0  # axe really ran its rules on this page
         assert report.violations == "", f"{page}: incomplete rules {report.incomplete}"
     assert tab.blocked == []
+
+
+# --- the harness keeps the requested colour scheme (review of 11c-3a) ----------------------------
+
+DARK_JS = "() => matchMedia('(prefers-color-scheme: dark)').matches"
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_requested_colour_scheme_holds_on_every_page(
+    new_tab: NewTab, server: PanelServer, scheme: str
+) -> None:
+    """Playwright's Firefox dropped the context's colour scheme on the first navigation into a
+    page with COOP (the gateway's), so the "dark" checks ran light there. The harness emulates
+    it again after every goto(); here it must hold on the login, after the form's navigation
+    to the panel and after a reload."""
+    tab = new_tab(width=390, color_scheme=scheme)
+    tab.goto("/panel/login")
+    assert tab.page.evaluate(DARK_JS) == (scheme == "dark")
+    tab.page.fill("#login-token", server.admin_token)
+    tab.page.click("#login-form button[type=submit]")
+    tab.page.wait_for_url(f"{server.origin}/panel")
+    assert tab.page.evaluate(DARK_JS) == (scheme == "dark")
+    tab.page.reload(wait_until="load")
+    assert tab.page.evaluate(DARK_JS) == (scheme == "dark")
