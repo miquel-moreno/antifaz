@@ -147,6 +147,13 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Nada guardado en el navegador**: ni el idioma, ni el tema, ni el token. Los scripts no tienen texto visible (todo sale de la página) ni comentarios, y no usan `innerHTML`, `eval`, almacenamiento ni `document.cookie`.
 - **Otro sitio no puede entrar ni salir.** Un test con navegadores reales abre una página de `localhost` (otro sitio que `127.0.0.1`) que envía al login y al logout de `127.0.0.1` un `fetch` JSON, uno `no-cors` en `text/plain` y un formulario `text/plain` con cuerpo JSON: la puerta los rechaza todos (o el navegador ni los envía) en Chromium, Firefox y WebKit. Lo mismo desde `127.0.0.1` en otro puerto, el mismo sitio con otro origen, donde la cookie sí viaja.
 
+**Nota (2026-10-19, PR 11c-3b).** «Estado» enseña datos reales, sin cambiar la puerta:
+
+- **`GET /panel/api/status`** (`async def`), solo con sesión del esquema de la petición; la clave de la API no lo abre y no es pública. Sin CSRF por ser `GET`; los demás métodos, 403 o 405, y `HEAD` 405. Cabeceras de la puerta y `no-store`, sin `Vary` ni `Content-Language` (el JSON no tiene idioma). Esquema cerrado (pydantic, `extra="forbid"`): solo booleanos, enteros, enums, la versión y, de una URL de proveedor propia, el host y el puerto comprobados; nunca usuario, contraseña, ruta, consulta ni fragmento (si hay usuario, la vista avisa).
+- **Los datos salen de un `StatusFacts` sin secretos** que la pasarela construye al arrancar; los `Settings` siguen sin llegar a `antifaz.web`. El esquema es el único módulo de `antifaz.web` que importa pydantic, y solo piezas de modelo (nunca `SecretStr`).
+- **Sin sondeo**: el navegador pide el estado al enseñar la vista por primera vez, al pulsar «Actualizar» (lee el estado local, nunca llama a un proveedor) y al volver a estar visible la página con «Estado» elegido. Nada al cargar, ningún temporizador y nada con la página oculta.
+- **Respecto al diseño aprobado**: fuera «Escucha en», «Base de datos», `/healthz` y las latencias; dentro «Panel servido por», los recuentos de hosts, orígenes y proxies de confianza, y la nota de que las sesiones viven en memoria por proceso. Evidencias queda como «Llega con el registro de evidencias (punto 9)». La píldora de la cabecera, el punto en la pestaña, los contadores y «Comprobar ahora» siguen en 11e.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
