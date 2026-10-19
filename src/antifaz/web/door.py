@@ -12,6 +12,11 @@ key does not open the panel. In this order:
 2. HTTPS or localhost: the scheme is scope["scheme"], or X-Forwarded-Proto from a trusted
    proxy (forwarded.effective_scheme); "localhost" is decided by the Host header. Plain HTTP
    from any other host gets a fixed 403 page and goes no further (no login, no cookie).
+2b. /panel/api/* (11c-3b review): a browser request whose Sec-Fetch-Site is not same-origin
+   (another site, another localhost port, a navigation typed in the address bar) gets 403
+   csrf_rejected, whatever the method and BEFORE the session is looked up
+   (csrf.api_fetch_allowed). Without the header (not a browser) the usual rules follow. GET
+   /panel keeps its rule: any site may open the page, and only its own requests count as a use.
 3. GET and HEAD are safe; any other method (POST, PUT, DELETE, PATCH, OPTIONS...) on any
    /panel* path gets the CSRF checks, all in this one place and closed by default (csrf.py):
    a. Layer 3 and JSON (one Sec-Fetch-Site: same-origin, one Origin equal to scheme://host, a
@@ -65,7 +70,13 @@ from antifaz.http_errors import (
 from antifaz.routing import route_path
 from antifaz.web.assets import Assets
 from antifaz.web.cookies import read_session_cookie, session_scheme
-from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
+from antifaz.web.csrf import (
+    api_fetch_allowed,
+    counts_as_use,
+    has_csrf_token,
+    is_json,
+    is_same_origin,
+)
 from antifaz.web.forwarded import IPNetwork, effective_scheme, is_local_host, request_host
 from antifaz.web.headers import IMMUTABLE, NO_STORE, with_security_headers
 from antifaz.web.login_limit import FailureLimiter
@@ -82,6 +93,8 @@ CSRF_TOKEN_EXEMPT = frozenset({("/panel/login", "POST")})
 # or HEAD need a session. The static files have their own rule (is_public_static).
 PUBLIC_ROUTES = frozenset({("/panel/login", "GET")}) | CSRF_TOKEN_EXEMPT
 LOGIN_PATH = "/panel/login"
+# The panel's JSON routes (11c-3b): only the panel's own fetch may read them (step 2b).
+API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
 
 
@@ -163,6 +176,9 @@ class PanelDoor:
         host = request_host(scope)
         if scheme != "https" and not is_local_host(host):
             await HTMLResponse(HTTPS_ONLY_PAGE, status_code=403)(scope, receive, send)
+            return
+        if path.startswith(API_PREFIX) and not api_fetch_allowed(headers):
+            await error_response(CsrfRejectedError())(scope, receive, send)
             return
         safe = method in SAFE_METHODS
         # Layer 3 and JSON before the session: a cross-origin request never touches one.

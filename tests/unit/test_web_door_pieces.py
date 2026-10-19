@@ -39,7 +39,13 @@ from antifaz.web.cookies import (
     session_cookie,
     session_scheme,
 )
-from antifaz.web.csrf import counts_as_use, has_csrf_token, is_json, is_same_origin
+from antifaz.web.csrf import (
+    api_fetch_allowed,
+    counts_as_use,
+    has_csrf_token,
+    is_json,
+    is_same_origin,
+)
 from antifaz.web.headers import (
     CONTENT_SECURITY_POLICY,
     IMMUTABLE,
@@ -448,6 +454,30 @@ def test_anything_else_does_not_count_as_use(values: list[bytes]) -> None:
     headers = [(b"Sec-Fetch-Site", v) for v in values]
 
     assert not counts_as_use(headers)
+
+
+# --- api_fetch_allowed: who may read /panel/api/* (11c-3b review) --------------------------
+
+
+@pytest.mark.parametrize("values", [[], [b"same-origin"]], ids=["absent", "same-origin"])
+def test_the_panel_page_or_no_browser_may_read_the_api(values: list[bytes]) -> None:
+    assert api_fetch_allowed([(b"Sec-Fetch-Site", v) for v in values])
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [b"none"],  # typed in the address bar: a navigation, never the panel's own fetch
+        [b"same-site"],  # another localhost port
+        [b"cross-site"],
+        [b"Same-Origin"],
+        [b""],
+        [b"same-origin", b"same-origin"],
+        [b"same-origin", b"cross-site"],
+    ],
+)
+def test_any_other_browser_request_may_not_read_the_api(values: list[bytes]) -> None:
+    assert not api_fetch_allowed([(b"Sec-Fetch-Site", v) for v in values])
 
 
 def test_the_token_is_compared_in_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:

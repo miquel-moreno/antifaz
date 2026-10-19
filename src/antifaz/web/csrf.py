@@ -15,6 +15,12 @@ The login has no session yet: it is the only route without layer 2 (door.CSRF_TO
 counts_as_use() is not a CSRF check: it says whether a request that passed the door comes from
 the panel's own page (or from no browser at all), so that it may refresh the session's last use.
 
+api_fetch_allowed() (11c-3b review): who may read /panel/api/*, even with GET. A browser always
+sends Sec-Fetch-Site, so only `same-origin` (the panel's own fetch) passes; a page of another
+site or another localhost port (same-site, which carries the cookie) and a navigation typed in
+the address bar (`none`) are refused. Without the header it is not a browser (curl, a monitor)
+and the session decides, as on the other routes.
+
 Forbidden: comparing without the scheme or the port. Folding case or decoding the Origin.
 Comparing the token with `==`. Logging a token.
 """
@@ -52,6 +58,12 @@ def counts_as_use(headers: Iterable[tuple[bytes, bytes]]) -> bool:
     localhost port (same-site, which SameSite lets carry the cookie) never counts."""
     fetch_site = _values(headers, b"sec-fetch-site")
     return not fetch_site or (len(fetch_site) == 1 and fetch_site[0] in _OWN_USE)
+
+
+def api_fetch_allowed(headers: Iterable[tuple[bytes, bytes]]) -> bool:
+    """No Sec-Fetch-Site (not a browser), or exactly one that is same-origin."""
+    fetch_site = _values(headers, b"sec-fetch-site")
+    return not fetch_site or fetch_site == [b"same-origin"]
 
 
 def is_same_origin(headers: Iterable[tuple[bytes, bytes]], scheme: str, host: str | None) -> bool:

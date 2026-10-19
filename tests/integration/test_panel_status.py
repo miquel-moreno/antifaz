@@ -195,8 +195,8 @@ def kept(monkeypatch: pytest.MonkeyPatch) -> type[_Kept]:
     return _Kept
 
 
-@pytest.mark.parametrize("fetch_site", ["same-site", "cross-site"])
-def test_another_site_or_port_never_refreshes_the_last_use(
+@pytest.mark.parametrize("fetch_site", ["same-site", "cross-site", "none"])
+def test_another_site_or_port_is_403_and_never_refreshes_the_last_use(
     kept: type[_Kept], fetch_site: str
 ) -> None:
     with panel_client(LOCAL_URL) as client:
@@ -205,10 +205,41 @@ def test_another_site_or_port_never_refreshes_the_last_use(
 
         response = _get(client, session_id, **{"Sec-Fetch-Site": fetch_site})
 
-        assert response.status_code == 200
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "csrf_rejected"
+        assert response.headers["cache-control"] == NO_STORE
         assert kept.store._sessions[fingerprint(session_id)].last_used == 1000.0
         assert _get(client, session_id, **{"Sec-Fetch-Site": "same-origin"}).status_code == 200
         assert kept.store._sessions[fingerprint(session_id)].last_used == 1600.0
+
+
+def test_only_the_panel_page_or_no_browser_reads_it(client: TestClient) -> None:
+    session_id = log_in(client)
+
+    assert _get(client, session_id).status_code == 200  # no Sec-Fetch-Site: not a browser
+    assert _get(client, session_id, **{"Sec-Fetch-Site": "same-origin"}).status_code == 200
+    for site in ("same-site", "cross-site", "none"):
+        assert _get(client, session_id, **{"Sec-Fetch-Site": site}).status_code == 403, site
+    # Without a session it is the same 403 first: nothing about the session is looked up.
+    assert _get(client, None, **{"Sec-Fetch-Site": "cross-site"}).status_code == 403
+
+
+def test_other_api_paths_get_the_same_rule(client: TestClient) -> None:
+    cookie = {"Cookie": f"{cookie_of(client)}={log_in(client)}"}
+
+    refused = client.get("/panel/api/nothing", headers={**cookie, "Sec-Fetch-Site": "same-site"})
+    unknown = client.get("/panel/api/nothing", headers=cookie)
+
+    assert refused.status_code == 403
+    assert unknown.status_code == 404
+
+
+def test_the_panel_page_keeps_its_rule_for_other_sites(client: TestClient) -> None:
+    cookie = {"Cookie": f"{cookie_of(client)}={log_in(client)}"}
+
+    for site in ("same-site", "cross-site", "none"):
+        response = client.get("/panel", headers={**cookie, "Sec-Fetch-Site": site})
+        assert response.status_code == 200, site
 
 
 # --- the facts it reports -------------------------------------------------------------------
