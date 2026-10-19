@@ -181,7 +181,11 @@ class NerPool:
         if time.monotonic() < self._open_until:
             return "circuit_open"
         workers = tuple(self._workers)
-        if not self._started or not all(worker.ready for worker in workers):
+        # Fewer workers than the size: one is being replaced (already out of the list, maybe
+        # still being joined) and all(()) would say "ok" with none left.
+        if not self._started or len(workers) < self._size:
+            return "starting"
+        if not all(worker.ready for worker in workers):
             return "starting"
         return "ok"
 
@@ -337,9 +341,9 @@ class NerPool:
                 self._dispose(worker)
                 return
             if lost or killed:
-                self._dispose(worker)
                 if lost:
-                    self._failed()
+                    self._failed()  # the circuit state first: disposing joins for seconds
+                self._dispose(worker)
                 worker = self._spawn()  # it loads in the background
             self._idle.put(worker)
 

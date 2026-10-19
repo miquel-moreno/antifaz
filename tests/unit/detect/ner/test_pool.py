@@ -462,3 +462,30 @@ def test_status_returns_while_another_thread_holds_the_lock() -> None:
     assert answers == ["starting"]
     ner_pool.close()
     assert ner_pool.status() == "closed"
+
+
+def test_status_is_starting_while_a_worker_is_missing() -> None:
+    """During a replacement the lost worker is already out of the list (and joined, up to
+    seconds) before the new one is spawned: never "ok" with fewer live workers than the size."""
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT)
+    ner_pool._started = True  # as after start(), with the only worker removed by _dispose()
+    ner_pool._workers = []
+
+    with ner_pool._lock:
+        assert ner_pool.status() == "starting"
+
+
+def test_a_lost_worker_opens_the_circuit_before_it_is_disposed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_release writes the circuit state first; the slow kill and join come after."""
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT, failure_threshold=1)
+    seen: list[float] = []
+    lost, fresh = object(), object()
+    monkeypatch.setattr(ner_pool, "_dispose", lambda worker: seen.append(ner_pool._open_until))
+    monkeypatch.setattr(ner_pool, "_spawn", lambda: fresh)
+
+    ner_pool._release(lost, lost=True)  # type: ignore[arg-type]
+
+    assert seen and seen[0] > 0.0, "the circuit was still closed while the worker was disposed"
+    assert ner_pool._idle.get_nowait() is fresh
