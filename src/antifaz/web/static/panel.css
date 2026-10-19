@@ -478,9 +478,10 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .prov .prov-warn{grid-column:1/-1;display:flex;align-items:flex-start;gap:8px;margin-top:-4px;font-size:var(--text-sm);color:var(--color-warn)}
 .prov .prov-warn .ic{width:16px;height:16px;flex:none;margin-top:2px}
 .ner .dot.neutral{color:var(--color-text-faint)}
-/* While the status is being read the cards dim a little; the live region says "Checking". */
+/* While the status is being read the cards dim a little (opacity .85 at least: the text stays AA);
+   the live region says "Checking". */
 .sgrid{transition:opacity var(--duration-base) var(--ease-out)}
-.sgrid[aria-busy="true"]{opacity:.6}
+.sgrid[aria-busy="true"]{opacity:.85}
 /* After a failed refresh the last data stay, greyed (colour only: the text keeps its contrast)
    and the gateway pill says "not refreshed". */
 .sgrid.is-stale{filter:grayscale(1)}

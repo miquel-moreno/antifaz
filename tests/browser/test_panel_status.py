@@ -247,6 +247,22 @@ def test_a_401_goes_to_the_login_with_the_language(tab: Tab, server: PanelServer
     assert tab.page.locator("html").get_attribute("lang") == "es"
 
 
+def test_a_401_on_refresh_after_a_good_load_goes_to_the_login(
+    tab: Tab, server: PanelServer
+) -> None:
+    _log_in(tab, server, "es")
+    _open_status(tab, "es")
+    tab.page.route(
+        f"{tab.origin}{STATUS_PATH}",
+        lambda route: route.fulfill(status=401, json={"error": {"code": "panel_unauthorized"}}),
+    )
+
+    tab.page.click("#status-refresh")
+
+    tab.page.wait_for_url(f"{server.origin}/panel/login?lang=es")
+    assert tab.page.locator("html").get_attribute("lang") == "es"
+
+
 UNKNOWN_ANSWER = {
     "schema": 7,
     "version": "9.9.9 RAWVERSION",
@@ -403,9 +419,13 @@ def _answer(ner: str, overall: str) -> str:
     )
 
 
-def test_only_the_latest_answer_renders(tab: Tab, server: PanelServer) -> None:
-    """The first request is held; «Actualizar» replaces it (the first is aborted) and its answer
-    renders; the held answer, released afterwards, changes nothing."""
+NO_ABORT_JS = "() => { AbortController.prototype.abort = function () {}; }"
+
+
+def _hold_the_first_load_and_press(tab: Tab, server: PanelServer, abort: bool) -> Route:
+    """Open «Estado» with its first request held, press «Actualizar» (a fresh "ok" answer
+    renders) and give back the held route. `abort=False` makes AbortController.abort a no-op
+    in the page first, so the held request stays alive."""
     held: list[Route] = []
 
     def handler(route: Route) -> None:
@@ -415,6 +435,8 @@ def test_only_the_latest_answer_renders(tab: Tab, server: PanelServer) -> None:
         route.fulfill(status=200, content_type="application/json", body=_answer("ok", "ok"))
 
     _log_in(tab, server, "en")
+    if not abort:
+        tab.page.evaluate(NO_ABORT_JS)
     tab.page.route(f"{tab.origin}{STATUS_PATH}", handler)
     tab.page.click("#tab-status")
     for _ in range(ROUND_TRIPS):  # let the route event arrive: a few round trips at most
@@ -427,15 +449,36 @@ def test_only_the_latest_answer_renders(tab: Tab, server: PanelServer) -> None:
         # click() waits for "enabled", so the press is dispatched directly.
         tab.page.locator("#status-refresh").dispatch_event("click")
     _wait_checked(tab, "en")
-    with contextlib.suppress(PlaywrightError):  # the page already aborted it: that is the point
-        held[0].fulfill(
-            status=200, content_type="application/json", body=_answer("closed", "danger")
-        )
-    tab.page.evaluate(SETTLE_JS)
+    return held[0]
 
+
+def _assert_the_fresh_answer_shows(tab: Tab) -> None:
     assert tab.page.evaluate(PILL_JS, "status-ner")["tones"] == ["ok"]
     assert tab.page.evaluate(PILL_JS, "status-overall")["tones"] == ["ok"]
     assert tab.page.locator("#status-alert").is_hidden()
+
+
+def test_a_press_aborts_the_load_it_replaces(tab: Tab, server: PanelServer) -> None:
+    first = _hold_the_first_load_and_press(tab, server, abort=True)
+    with contextlib.suppress(PlaywrightError):  # the page already aborted it
+        first.fulfill(status=200, content_type="application/json", body=_answer("closed", "danger"))
+    tab.page.evaluate(SETTLE_JS)
+
+    assert any(STATUS_PATH in line for line in tab.failed)  # the replaced request was aborted
+    _assert_the_fresh_answer_shows(tab)
+
+
+def test_a_late_answer_of_a_replaced_request_never_renders(tab: Tab, server: PanelServer) -> None:
+    """The sequence check alone: with abort() a no-op the first request completes after the
+    second one rendered, and its answer (NER stopped, danger) is dropped."""
+    first = _hold_the_first_load_and_press(tab, server, abort=False)
+    with tab.page.expect_response(_is_status):
+        first.fulfill(status=200, content_type="application/json", body=_answer("closed", "danger"))
+    for _ in range(3):  # the page's then() and json() run within a few tasks of the response
+        tab.page.evaluate(SETTLE_JS)
+
+    assert not any(STATUS_PATH in line for line in tab.failed)  # nothing was aborted
+    _assert_the_fresh_answer_shows(tab)
 
 
 @pytest.mark.parametrize("lang", ["es", "en"])

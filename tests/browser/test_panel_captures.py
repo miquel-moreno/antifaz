@@ -186,6 +186,9 @@ def test_capture_the_status_warnings(new_tab: NewTab, server: PanelServer, width
     _log_in(tab, server, "es")
     tab.page.route(f"{tab.origin}/panel/api/status", fulfill_warnings)
     _open_status(tab)
+    if width < 768:  # the window only (fixed tab bar): the providers card with its warning
+        tab.page.evaluate("() => document.getElementById('s-prov').scrollIntoView()")
+        tab.page.evaluate("() => document.fonts.ready.then(() => true)")
 
     path = _capture(tab, f"es-light-{SIZES[width]}-9-status-warnings", full_page=width >= 768)
 

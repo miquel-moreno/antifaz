@@ -14,6 +14,7 @@ Rendered from the real templates and catalogs, per language:
   each enum value, "unknown", the loading and checked lines, the errors and the uptime units.
 """
 
+import re
 from html.parser import HTMLParser
 
 import pytest
@@ -187,6 +188,18 @@ def test_the_messages_template_holds_every_label_the_script_needs(lang: str) -> 
     assert "{time}" in inside["checked"] and "{time}" in inside["checked.old"]
     assert "{days}" in inside["uptime.days"] and "{hours}" in inside["uptime.days"]
     assert all(value.strip() for value in inside.values())
+
+
+def test_the_loading_dim_keeps_the_text_contrast() -> None:
+    """While it reads, the cards may dim, but never below opacity .8 (AA text stays AA)."""
+    from antifaz.web.assets import STATIC_DIR
+
+    css = (STATIC_DIR / "panel.css").read_text("utf-8")
+    rules = re.findall(r'\.sgrid\[aria-busy="true"\]\{([^}]*)\}', css)
+    assert rules  # the rule exists
+    for rule in rules:
+        for value in re.findall(r"opacity:\s*([0-9.]+)", rule):
+            assert float(value) >= 0.8, rule
 
 
 def test_the_old_empty_status_texts_are_gone() -> None:
