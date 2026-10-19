@@ -4,8 +4,10 @@ simulated reply. No framework: the route (web/routes.py) reads the body and answ
 time, never queued) and then the proxy's mask limiter; with the NER on, over a Try-only NER
 detector (no span cache, no waiting for a worker, no effect on the circuit breaker).
 
-- parse_body(raw, languages): exactly {"text": str, "lang": a loaded catalog code}, no repeated
-  key, no NaN or Infinity, no lone surrogate, valid UTF-8 without BOM; anything else is
+- parse_body(raw, languages): exactly {"text": str, "lang": a loaded catalog code}, or that and
+  "ner": a real JSON boolean (11d-b; true when absent, false asks for a Try without the name
+  detector), no repeated key, no NaN or Infinity, no lone surrogate, valid UTF-8 without BOM;
+  the answer is a TryInput (text, lang, ner). Anything else (a "ner" of 0, "false" or null) is
   TryBodyError, whose message is fixed and never quotes the input (raised outside any except
   block, so no decode error is even its context). A text over MAX_TEXT_BYTES UTF-8 bytes is
   TextTooLongError. The raw body itself is capped by the route at MAX_BODY_BYTES (enough for the
@@ -55,7 +57,7 @@ import json
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from antifaz import guard
 from antifaz.detect.types import EntityType
@@ -72,6 +74,15 @@ MAX_LISTED = 10
 
 _TOKEN = re.compile(r"[A-Z]+(?:_[A-Z]+)*_[0-9]+")
 _KEYS = frozenset({"text", "lang"})
+_KEYS_WITH_NER = _KEYS | {"ner"}
+
+
+class TryInput(NamedTuple):
+    """A good Try body: the text, its loaded language and whether to use the name detector."""
+
+    text: str
+    lang: str
+    ner: bool
 
 
 class TryBodyError(ValueError):
@@ -111,8 +122,9 @@ def _utf8_size(text: str) -> int | None:
         return None
 
 
-def parse_body(raw: bytes, languages: Collection[str]) -> tuple[str, str]:
-    """(text, lang) of a body that is exactly {"text": str, "lang": one of `languages`}."""
+def parse_body(raw: bytes, languages: Collection[str]) -> TryInput:
+    """The TryInput of a body that is exactly {"text": str, "lang": one of `languages`}, with an
+    optional "ner": bool (a real JSON true or false, nothing else)."""
     data: object = None
     try:
         data = json.loads(
@@ -122,16 +134,17 @@ def parse_body(raw: bytes, languages: Collection[str]) -> tuple[str, str]:
         data = None
     text: object = None
     lang: object = None
-    if isinstance(data, dict) and data.keys() == _KEYS:
-        text, lang = data["text"], data["lang"]
-    good = type(text) is str and type(lang) is str and lang in languages
+    ner: object = None
+    if isinstance(data, dict) and data.keys() in (_KEYS, _KEYS_WITH_NER):
+        text, lang, ner = data["text"], data["lang"], data.get("ner", True)
+    good = type(text) is str and type(lang) is str and lang in languages and type(ner) is bool
     size = _utf8_size(text) if isinstance(text, str) else None
     # Raised outside the except block: a decode error (which may quote the body) is dropped.
     if not good or size is None or not isinstance(text, str) or not isinstance(lang, str):
         raise TryBodyError() from None
     if size > MAX_TEXT_BYTES:
         raise TextTooLongError()
-    return text, lang
+    return TryInput(text, lang, ner is True)
 
 
 def utf16_length(text: str) -> int:
@@ -316,6 +329,7 @@ __all__ = [
     "REPLIES",
     "TextTooLongError",
     "TryBodyError",
+    "TryInput",
     "parse_body",
     "run_try",
     "simulate_reply",

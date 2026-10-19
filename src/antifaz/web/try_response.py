@@ -11,6 +11,8 @@ for the types the policy allows (they stay in clear, as the provider would get t
 - Offsets (`entities[].start`, `end`) and `length_utf16` are UTF-16 code units, the unit of a
   JavaScript string (web/try_text.py explains why).
 - A blocked answer has no sent or reply segments; `outcome` and `blocked_reason` agree.
+- `names_checked` (11d-b) is true only when the name detector read the text: never with the
+  NER off for the whole gateway, after a `"ner": false` or when the NER failed (blocked).
 - A marker is exactly the placeholder form `[[TYPE_N]]` (MARKER_PATTERN).
 
 With web/status_response.py, one of the two web modules that import pydantic, and only plain
@@ -88,6 +90,9 @@ class TryResponse(_Closed):
     counts: list[Count]
     policy_version: str = Field(pattern=POLICY_VERSION_PATTERN)
     ner: NerState
+    # 11d-b: whether the name detector really read this text (the gateway's NER is on, the user
+    # did not send "ner": false and it answered). The page says «Nombres no comprobados» if not.
+    names_checked: StrictBool
 
     @model_validator(mode="after")
     def _blocked_sends_nothing(self) -> Self:
@@ -95,4 +100,6 @@ class TryResponse(_Closed):
             raise ValueError("outcome and blocked_reason disagree")
         if self.outcome == "blocked" and (self.sent or self.reply):
             raise ValueError("a blocked answer has no segments")
+        if self.names_checked and self.ner == "off":
+            raise ValueError("no name detector, no names checked")
         return self

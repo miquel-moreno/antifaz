@@ -51,15 +51,20 @@ CSRF again.
   2. The body: a declared Content-Length over MAX_BODY_BYTES (128 KiB) is 413 at once; else it
      is read as a stream and cut as soon as it passes that cap (413), with or without
      Content-Length, within TRY_BODY_SECONDS (else 408 body_timeout). Never parsed as a form.
-  3. Exactly {"text": str, "lang": a loaded catalog code} (web/try_text.parse_body), else 400
-     invalid_try_body (never quoting it); a text over 20 480 UTF-8 bytes is 413 text_too_large.
+  3. Exactly {"text": str, "lang": a loaded catalog code}, with an optional "ner": a real JSON
+     boolean (web/try_text.parse_body, 11d-b), else 400 invalid_try_body (never quoting it); a
+     text over 20 480 UTF-8 bytes is 413 text_too_large.
   4. PanelState.try_runner (the gateway's: mask -> guard -> simulated reply -> restore, in a
-     worker thread, no AI) and the closed schema of web/try_response.py, with the NER state at
-     that moment. Any error there is a fixed 500 and one log line with the error's type only:
-     an exception's message could hold the text. Busy is a fixed 503 with Retry-After: 1 and
-     never a queue: `try_busy` (another Try is running) or `ner_busy` (the NER would make a
-     proxy request wait, has no free loaded worker, or is in the Try-only cooldown). A text that
-     needs more NER windows than a Try may use is 413 text_too_long_for_ner.
+     worker thread, no AI; with "ner": false, the plain scanner, never the NER nor the proxy's
+     detector) and the closed schema of web/try_response.py, with the NER state at that moment
+     and names_checked (whether the name detector read the text). With the NER on and no
+     "ner": false, a failing NER is the blocked answer or 503 ner_busy, never a result without
+     names (tests/integration/test_panel_try_ner_failures.py). Any error there is a fixed 500
+     and one log line with the error's type only: an exception's message could hold the text.
+     Busy is a fixed 503 with Retry-After: 1 and never a queue: `try_busy` (another Try is
+     running) or `ner_busy` (the NER would make a proxy request wait, has no free loaded
+     worker, or is in the Try-only cooldown). A text that needs more NER windows than a Try
+     may use is 413 text_too_long_for_ner.
      No response_model: the answer is validated once, here, and FastAPI never re-validates it.
   The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
   values come back only in it (the scoped exception to invariant 15); the original text never.
@@ -116,6 +121,7 @@ from antifaz.web.try_text import (
     MAX_BODY_BYTES,
     TextTooLongError,
     TryBodyError,
+    TryInput,
     parse_body,
 )
 
@@ -181,9 +187,9 @@ async def _try_body(request: Request) -> bytes:
     return raw
 
 
-def _try_input(raw: bytes, languages: tuple[str, ...]) -> tuple[str, str]:
-    """(text, lang), or the fixed 400 or 413 (raised outside the except block)."""
-    parsed: tuple[str, str] | None = None
+def _try_input(raw: bytes, languages: tuple[str, ...]) -> TryInput:
+    """(text, lang, ner), or the fixed 400 or 413 (raised outside the except block)."""
+    parsed: TryInput | None = None
     too_long = False
     try:
         parsed = parse_body(raw, languages)
@@ -286,12 +292,12 @@ def build_router(state: PanelState) -> APIRouter:
         wait = state.try_limiter.take(context.session.fingerprint)
         if wait:
             raise TooManyTriesError(wait)
-        text, lang = _try_input(await _try_body(request), pages.languages)
+        text, lang, use_ner = _try_input(await _try_body(request), pages.languages)
         answer: bytes | None = None
         refused: AppError | None = None
         failure = ""
         try:
-            result = await state.try_runner(text, lang)
+            result = await state.try_runner(text, lang, use_ner)
             ner = ner_state(state.status.ner_state())
             answer = TryResponse.model_validate({**result, "ner": ner}).model_dump_json().encode()
         except (TryBusyError, TextTooLongForNerError) as error:

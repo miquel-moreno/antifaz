@@ -100,11 +100,11 @@ LOGIN_PATH = "/panel/login"
 API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
 
-# «Prueba un texto» (11d-a): text and language in, the answer (web/try_response.py) out. The
-# gateway builds it (api/app.py _panel): run_try() in a worker thread, behind the Try limiter
-# (one thread) and then the proxy's mask limiter. The panel never sees the detector, the policy
-# or the settings, only this callable.
-type TryRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
+# «Prueba un texto» (11d-a): text, language and whether to use the name detector (11d-b) in, the
+# answer (web/try_response.py, without `ner`) out. The gateway builds it (api/app.py _panel):
+# run_try() in a worker thread, behind the Try limiter (one thread) and then the proxy's mask
+# limiter. The panel never sees the detector, the policy or the settings, only this callable.
+type TryRunner = Callable[[str, str, bool], Awaitable[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -120,6 +120,9 @@ class PanelState:
     status: StatusFacts  # booleans, counts, enums, the version and checked hosts (11c-3b)
     try_runner: TryRunner = field(repr=False)  # «Prueba un texto»: the real pipeline (11d-a)
     try_limiter: TryLimiter = field(repr=False)  # 30 tries per minute per session (11d-a)
+    # 11d-b: the words (NER tokens) a Try may give the name detector, None when a Try never uses
+    # it (the NER is off). The page shows this number; the gateway derives it (api/app.py).
+    try_ner_words: int | None = None
 
 
 @dataclass(frozen=True)
