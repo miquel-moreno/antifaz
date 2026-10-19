@@ -88,6 +88,70 @@ class CsrfRejectedError(AppError):
         super().__init__("request refused: it must come from the panel's own page, as JSON")
 
 
+class InvalidTryBodyError(AppError):
+    """«Prueba un texto» (11d-a): a body that is not exactly {"text", "lang"}. Never quoted."""
+
+    status_code = 400
+    code = "invalid_try_body"
+
+    def __init__(self) -> None:
+        super().__init__("the body must be JSON with exactly a text and a loaded language")
+
+
+class TextTooLargeError(AppError):
+    """«Prueba un texto»: a body over its raw cap or a text over its UTF-8 limit."""
+
+    status_code = 413
+    code = "text_too_large"
+
+    def __init__(self) -> None:
+        super().__init__("the text is too long")
+
+
+class TextTooLongForNerError(AppError):
+    """«Prueba un texto» with the NER on: the text needs more NER windows than a Try may use
+    (its budget fits its deadline). Refused before any NER worker is asked."""
+
+    status_code = 413
+    code = "text_too_long_for_ner"
+
+    def __init__(self) -> None:
+        super().__init__("the text is too long to try with the name detector: try a shorter one")
+
+
+class TryBodyTimeoutError(AppError):
+    """«Prueba un texto»: the body did not arrive in time."""
+
+    status_code = 408
+    code = "body_timeout"
+
+    def __init__(self) -> None:
+        super().__init__("the body did not arrive in time")
+
+
+class TooManyTriesError(AppError):
+    status_code = 429
+    code = "too_many_tries"
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            "too many tries: wait and try again", headers={"Retry-After": str(retry_after)}
+        )
+
+
+class TryBusyError(AppError):
+    """«Prueba un texto» (11d-a review): busy right now, try again in a second. Never queued:
+    `try_busy` when another Try is running, `ner_busy` when no NER worker is free."""
+
+    status_code = 503
+
+    def __init__(self, code: str) -> None:
+        if code not in ("try_busy", "ner_busy"):
+            raise ValueError("unknown busy code")
+        self.code = code
+        super().__init__("busy right now: try again in a second", headers={"Retry-After": "1"})
+
+
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 

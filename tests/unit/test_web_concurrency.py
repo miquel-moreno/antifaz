@@ -13,6 +13,9 @@ nothing awaits in the middle of their read-modify-write. These tests keep it tha
 4. The logout (11b-2b) has no await at all: it closes the session and answers in one go.
 5. In the door, nothing awaits between looking the session up (peek) and counting the use
    (touch): no other request can close it in between and see it revived.
+6. «Prueba un texto» (11d-a): the rate limit (web/try_limit.py) is lock-free too, and the route
+   takes its try (`.take(`) before anything awaits: the check and the count are one plain call,
+   and the body is read only afterwards.
 """
 
 import ast
@@ -29,9 +32,10 @@ from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.routes import build_router
 from antifaz.web.sessions import MemorySessionStore
 from antifaz.web.status import NER_OFF, StatusFacts
+from antifaz.web.try_limit import TryLimiter
 
 WEB = Path(antifaz.web.__file__).parent
-LOCK_FREE = ("sessions.py", "login_limit.py")
+LOCK_FREE = ("sessions.py", "login_limit.py", "try_limit.py")
 
 
 def _tree(name: str) -> ast.Module:
@@ -69,6 +73,10 @@ def test_every_route_function_in_routes_py_is_async() -> None:
         assert isinstance(node, ast.AsyncFunctionDef), node.name
 
 
+async def _no_try(text: str, lang: str) -> dict[str, object]:
+    raise AssertionError("not called here")
+
+
 def test_every_registered_panel_endpoint_is_a_coroutine_function() -> None:
     state = PanelState(
         token_fingerprint=hashlib.sha256(b"x").digest(),
@@ -77,6 +85,8 @@ def test_every_registered_panel_endpoint_is_a_coroutine_function() -> None:
         limiter=FailureLimiter(),
         assets=load_assets(),
         status=StatusFacts("0.0.0", (), 1, 0, 0, lambda: NER_OFF),
+        try_runner=_no_try,
+        try_limiter=TryLimiter(),
     )
     routes = build_router(state).routes
     assert routes
@@ -236,3 +246,38 @@ def test_the_peek_touch_check_catches_an_await() -> None:
     )
 
     assert _awaits_between(ast.parse(source), "_handle", "peek", "touch") == [3]
+
+
+# --- «Prueba un texto» (11d-a): the try is taken before anything awaits ----------------------
+
+
+def _awaits_before(tree: ast.Module, function: str, call: str) -> list[int]:
+    """Await-like nodes in `function` on lines before its first `.call(`."""
+    (node,) = [
+        n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == function
+    ]
+    calls = [
+        n.lineno
+        for n in ast.walk(node)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == call
+    ]
+    assert calls, f"no .{call}( found: the check would pass without checking anything"
+    first = min(calls)
+    return [n.lineno for n in ast.walk(node) if isinstance(n, _ASYNC_NODES) and n.lineno <= first]
+
+
+def test_the_try_route_takes_its_try_before_any_await() -> None:
+    tree = _tree("routes.py")
+
+    assert _awaits_before(tree, "try_a_text", "take") == []
+    assert _async_nodes_in(tree, "try_a_text")  # the body is read afterwards, with an await
+
+
+def test_the_try_check_catches_an_await_before_the_take() -> None:
+    bad = ast.parse(
+        "async def try_a_text(request):\n"
+        "    body = await request.body()\n"
+        "    wait = state.try_limiter.take(key)\n"
+    )
+
+    assert _awaits_before(bad, "try_a_text", "take") == [2]

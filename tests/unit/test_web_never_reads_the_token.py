@@ -5,9 +5,10 @@ antifaz/web may reach a secret: no get_secret_value(), no `admin_token`, `_secre
 `model_dump` or `__dict__`, no vars(), no getattr() with a name that is not a literal, and no
 import of antifaz.config or pydantic (where SecretStr lives). The door's pure pieces are standard
 library only (plus antifaz.trusted_networks and each other, themselves standard library only).
-One exception (11c-3b): web/status_response.py, the closed JSON schema of GET /panel/api/status,
-imports pydantic, and only BaseModel, ConfigDict, Field, StrictBool and StrictInt (never a
-Secret type); the facts it is built from (web/status.py) are a pure piece.
+Two exceptions: web/status_response.py (11c-3b), the closed JSON schema of GET
+/panel/api/status, and web/try_response.py (11d-a), the one of POST /panel/api/try, import
+pydantic, and only BaseModel, ConfigDict, Field, StrictBool and StrictInt (and model_validator
+for the Try schema), never a Secret type; the facts they are built from are pure pieces.
 Indirect imports are checked too (end of this file): no antifaz.web module loads the settings
 through another project module.
 """
@@ -39,6 +40,7 @@ PURE = (
     "assets.py",
     "i18n.py",
     "status.py",
+    "try_limit.py",
 )
 # The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
 # FastAPI, no other project module).
@@ -63,6 +65,12 @@ FORBIDDEN_IMPORTS = ("antifaz.config", "pydantic", "pydantic_settings")
 SCHEMA = "status_response.py"
 SCHEMA_MODULE = "antifaz.web.status_response"
 SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictBool", "StrictInt"})
+# 11d-a: the Try answer's schema, with the same pieces plus model_validator (its cross checks).
+TRY_SCHEMA = "try_response.py"
+TRY_SCHEMA_MODULE = "antifaz.web.try_response"
+TRY_SCHEMA_PYDANTIC_NAMES = SCHEMA_PYDANTIC_NAMES | {"model_validator"}
+SCHEMAS = {SCHEMA: SCHEMA_PYDANTIC_NAMES, TRY_SCHEMA: TRY_SCHEMA_PYDANTIC_NAMES}
+SCHEMA_MODULES = frozenset({SCHEMA_MODULE, TRY_SCHEMA_MODULE})
 
 
 def _tree(path: Path) -> ast.Module:
@@ -129,10 +137,11 @@ def _pydantic_names(tree: ast.Module) -> list[str]:
 
 
 def test_only_the_status_schema_imports_pydantic_and_only_plain_model_pieces() -> None:
-    names = _pydantic_names(_tree(WEB / SCHEMA))
-    assert names  # not an empty pass
-    assert set(names) <= SCHEMA_PYDANTIC_NAMES, names
-    assert not any("Secret" in name for name in names)
+    for schema, allowed in SCHEMAS.items():
+        names = _pydantic_names(_tree(WEB / schema))
+        assert names  # not an empty pass
+        assert set(names) <= allowed, (schema, names)
+        assert not any("Secret" in name for name in names)
     bad = ast.parse("from pydantic import BaseModel, SecretStr\nimport pydantic_settings\n")
     assert set(_pydantic_names(bad)) - SCHEMA_PYDANTIC_NAMES == {"SecretStr", "pydantic_settings"}
 
@@ -140,7 +149,7 @@ def test_only_the_status_schema_imports_pydantic_and_only_plain_model_pieces() -
 def test_the_web_package_never_imports_the_settings_or_pydantic() -> None:
     for path in SOURCES:
         for module in _imports(_tree(path)):
-            if path.name == SCHEMA and module.split(".")[0] == "pydantic":
+            if path.name in SCHEMAS and module.split(".")[0] == "pydantic":
                 continue  # its own test above: only plain model pieces
             for forbidden in FORBIDDEN_IMPORTS:
                 assert module != forbidden and not module.startswith(f"{forbidden}."), (
@@ -215,7 +224,7 @@ LOADED_SETTINGS = ("antifaz.config", "pydantic_settings", "pydantic")
 # FastAPI (APIRouter) needs pydantic, and so does the status schema (11c-3b): the only web
 # modules allowed to load it. Check 2 makes sure no other project module in their closure
 # imports it.
-NEEDS_FASTAPI = {"antifaz.web.routes", SCHEMA_MODULE}
+NEEDS_FASTAPI = {"antifaz.web.routes", *SCHEMA_MODULES}
 _PROBE = (
     "import importlib, sys\n"
     "importlib.import_module(sys.argv[1])\n"
@@ -323,10 +332,12 @@ def test_no_project_import_of_a_web_module_reaches_the_settings(module: str) -> 
     modules, _ = _project_closure(SRC, "antifaz", module)
     assert module in modules  # the walk found the module itself: not an empty pass
 
-    assert _settings_in_closure(SRC, "antifaz", module, frozenset({SCHEMA_MODULE})) == []
+    assert _settings_in_closure(SRC, "antifaz", module, SCHEMA_MODULES) == []
 
 
-@pytest.mark.parametrize("module", ["antifaz.web.status", SCHEMA_MODULE])
+@pytest.mark.parametrize(
+    "module", ["antifaz.web.status", SCHEMA_MODULE, TRY_SCHEMA_MODULE, "antifaz.web.try_text"]
+)
 def test_the_status_pieces_never_reach_the_settings_or_the_providers(module: str) -> None:
     modules, _ = _project_closure(SRC, "antifaz", module)
     assert module in modules

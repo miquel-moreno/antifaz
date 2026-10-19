@@ -56,7 +56,9 @@ fails if any route but the login skips the token). Taking the scheme from X-Forw
 of an untrusted peer. Building the redirect from the Host header. Logging a cookie.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from starlette.responses import HTMLResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -83,6 +85,7 @@ from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.sessions import Session, SessionStore
 from antifaz.web.status import StatusFacts
+from antifaz.web.try_limit import TryLimiter
 
 # The methods that change nothing: no CSRF check. Everything else gets all the layers.
 SAFE_METHODS = frozenset({"GET", "HEAD"})
@@ -97,11 +100,17 @@ LOGIN_PATH = "/panel/login"
 API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
 
+# «Prueba un texto» (11d-a): text and language in, the answer (web/try_response.py) out. The
+# gateway builds it (api/app.py _panel): run_try() in a worker thread, behind the Try limiter
+# (one thread) and then the proxy's mask limiter. The panel never sees the detector, the policy
+# or the settings, only this callable.
+type TryRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
+
 
 @dataclass(frozen=True)
 class PanelState:
     """Everything the panel gets from the gateway: the token's fingerprint, never the token,
-    and the status facts (web/status.py), never the settings."""
+    the status facts (web/status.py) and the Try runner, never the settings."""
 
     token_fingerprint: bytes = field(repr=False)
     trusted_proxies: tuple[IPNetwork, ...]
@@ -109,6 +118,8 @@ class PanelState:
     limiter: FailureLimiter
     assets: Assets  # the static files' manifest: its exact paths are the public ones
     status: StatusFacts  # booleans, counts, enums, the version and checked hosts (11c-3b)
+    try_runner: TryRunner = field(repr=False)  # «Prueba un texto»: the real pipeline (11d-a)
+    try_limiter: TryLimiter = field(repr=False)  # 30 tries per minute per session (11d-a)
 
 
 @dataclass(frozen=True)

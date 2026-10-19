@@ -8,7 +8,8 @@ import functools
 import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 import anyio.to_thread
@@ -40,6 +41,32 @@ if TYPE_CHECKING:  # antifaz.web is imported only when the panel is on (_panel)
 # Threads that can mask at the same time (detection and waiting for the NER). A limiter of our
 # own: masking never takes the threads of anyio's shared default limiter from other work.
 MASK_THREADS = 8
+# «Prueba un texto» (11d-a): one Try at a time, never queued (a second one is 503 try_busy), and
+# taken BEFORE the mask limiter, so the panel holds at most one of the MASK_THREADS. With the NER
+# on, the proxy goes first (NerPool.try_predict): a Try is 503 ner_busy at once if a proxy request
+# is waiting for a worker, if no worker is idle and loaded, or during the Try-only cooldown after
+# a Try broke a worker; it never counts toward the circuit breaker. Its work is sized to its
+# deadline: at most TRY_NER_MAX_CHUNKS windows (else 413 text_too_long_for_ner, before any worker
+# is asked), one per batch, and the pool checks for waiting proxy requests before every batch, so
+# a proxy request that arrives mid-Try waits for ONE window at most, never the whole Try.
+# How the budget was chosen (TECNICO «Prueba un texto»): the bench measured GLiNER at p95 3.8 s
+# per MEDDOCAN document, several 200-token windows each, on the reference CPU; 1.5 s per window
+# is a conservative bound, so 2 windows take about 3 s, under a 5 s deadline. Measure on the
+# target machine before raising them.
+TRY_THREADS = 1
+TRY_NER_SECONDS = 5.0
+TRY_NER_MAX_CHUNKS = 2
+TRY_NER_BATCH_CHUNKS = 1
+
+
+@dataclass
+class _Limiters:
+    """The capacity limiters, made in the lifespan (on the server's event loop) and read by
+    the routes and the panel's Try runner at each call. None before the app starts."""
+
+    mask: anyio.CapacityLimiter | None = None
+    try_: anyio.CapacityLimiter | None = None
+
 
 # FastAPI's native OpenTelemetry (0.142+), off whatever the environment says. Left on, it would
 # wrap every request as soon as some library registered a global provider: the path, the query,
@@ -76,7 +103,11 @@ def base_url_parts(url: str) -> "UrlParts | None":
 
 
 def _panel(
-    app: FastAPI, settings: Settings, ner: NerDetector | None
+    app: FastAPI,
+    settings: Settings,
+    ner: NerDetector | None,
+    limiters: _Limiters,
+    try_ner: NerDetector | None,
 ) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
@@ -87,9 +118,21 @@ def _panel(
     provider has a key, the checked host of a custom base URL (never the URL), counts, and a
     callable that reads the NER state at each request (it holds the NER itself, never the
     app). They are kept in app.state.panel_status, so the lifespan marks when start-up finished.
+
+    «Prueba un texto» (11d-a) gets a runner, never the detector, the policy or the settings: it
+    runs web/try_text.run_try() with the gateway's policy and detector in a worker thread, behind
+    the Try limiter (one, never queued: 503 try_busy) and then the proxy's mask limiter. With the
+    NER, each Try gets its own Scanner over `ner.for_try()`: same model and workers, no span
+    cache (no membership oracle, nothing evicted or left behind), TRY_NER_MAX_CHUNKS windows at
+    most (else 413 text_too_long_for_ner, before any worker is asked), one per batch, under a
+    TRY_NER_SECONDS deadline; a worker only if no proxy request waits for one (checked before
+    every batch; else 503 ner_busy), no effect on the circuit breaker and a Try-only cooldown
+    after a Try breaks a worker. The proxy waits for one Try batch at most.
+    run_try never calls a provider; the runner holds no client.
     """
     if settings.admin_token is None:
         return None
+    from antifaz.http_errors import TextTooLongForNerError, TryBusyError
     from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelDoor, PanelState
     from antifaz.web.forwarded import parse_networks
@@ -97,6 +140,8 @@ def _panel(
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
     from antifaz.web.status import NER_OFF, ProviderFacts, StatusFacts, is_default, provider_address
+    from antifaz.web.try_limit import TryLimiter
+    from antifaz.web.try_text import run_try
 
     def provider(id_: Literal["openai", "anthropic"], key: object, url: str) -> ProviderFacts:
         default = Settings.model_fields[f"{id_}_base_url"].default
@@ -118,6 +163,45 @@ def _panel(
         trusted_proxies=len(settings.trusted_proxies),
         ner_state=ner_state,
     )
+    detector, policy = app.state.detector, app.state.policy
+
+    async def try_runner(text: str, lang: str) -> dict[str, Any]:
+        mask_limiter, try_limiter = limiters.mask, limiters.try_
+        if mask_limiter is None or try_limiter is None:
+            raise RuntimeError("the gateway has not started")
+        try:
+            try_limiter.acquire_nowait()  # one Try at a time and never a queue
+            taken = True
+        except anyio.WouldBlock:
+            taken = False
+        if not taken:
+            raise TryBusyError("try_busy")
+        isolated = (
+            None
+            if try_ner is None
+            else try_ner.for_try(
+                TRY_NER_SECONDS, max_chunks=TRY_NER_MAX_CHUNKS, batch_chunks=TRY_NER_BATCH_CHUNKS
+            )
+        )
+        try:
+            answer = await anyio.to_thread.run_sync(
+                functools.partial(
+                    run_try,
+                    text,
+                    lang,
+                    detector=detector if isolated is None else Scanner(isolated),
+                    policy=policy,
+                ),
+                limiter=mask_limiter,
+            )
+        finally:
+            try_limiter.release()
+        if isolated is not None and isolated.was_too_long():
+            raise TextTooLongForNerError()
+        if isolated is not None and isolated.was_busy():
+            raise TryBusyError("ner_busy")
+        return answer
+
     token = settings.admin_token.get_secret_value().encode()
     state = PanelState(
         token_fingerprint=hashlib.sha256(token).digest(),
@@ -126,8 +210,11 @@ def _panel(
         limiter=FailureLimiter(),
         assets=load_assets(),
         status=status,
+        try_runner=try_runner,
+        try_limiter=TryLimiter(),
     )
     app.state.panel_status = status
+    app.state.panel_state = state
     app.include_router(build_router(state))
     return functools.partial(PanelDoor, state=state)
 
@@ -152,12 +239,14 @@ def create_app(
     ner = ner if ner is not None else ner_from_settings(settings)
     configure_logging(settings.log_level)
     api_key = settings.antifaz_api_key.get_secret_value() if settings.antifaz_api_key else ""
+    limiters = _Limiters()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         client = http_client or build_client(settings)
         app.state.http_client = client
-        app.state.mask_limiter = anyio.CapacityLimiter(MASK_THREADS)
+        limiters.mask = app.state.mask_limiter = anyio.CapacityLimiter(MASK_THREADS)
+        limiters.try_ = app.state.try_limiter = anyio.CapacityLimiter(TRY_THREADS)
         # Starting and stopping the workers use a limiter of their own: a busy gateway never
         # delays its own shutdown.
         lifecycle = anyio.CapacityLimiter(1)
@@ -197,7 +286,9 @@ def create_app(
     app.include_router(anthropic.router)
     app.include_router(models.router)
     app.include_router(scan.router)
-    panel_door = _panel(app, settings, ner)
+    # A Try gets its own NER detector only when the gateway built the detector over the NER.
+    try_ner = ner if detector is None else None
+    panel_door = _panel(app, settings, ner, limiters, try_ner)
     app.state.route_paths = registered_paths(app)
     # The last one added runs first: request id -> trusted host -> gate (the panel's door for
     # /panel*; the key, Origin and JSON for the rest).
