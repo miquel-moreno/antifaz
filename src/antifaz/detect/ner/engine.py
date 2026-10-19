@@ -65,6 +65,7 @@ class _TryPredictor:
     def __init__(self, inner: Predictor) -> None:
         self._inner = inner
         self.busy = False
+        self.too_long = False
 
     def start(self) -> None:  # pragma: no cover - a Try detector is never started
         raise RuntimeError("a Try detector is never started")
@@ -130,18 +131,27 @@ class NerDetector:
         self._timeout: float | None = timeout
         self._chunker = f"{CHUNKER_VERSION}:{window}:{overlap}:{VIEW_VERSION}"
 
-    def for_try(self, seconds: float) -> "NerDetector":
+    def for_try(
+        self, seconds: float, *, max_chunks: int | None = None, batch_chunks: int | None = None
+    ) -> "NerDetector":
         """A detector for «Prueba un texto» (PR 11d-a review) over the same predictor:
         - no span cache: a Try never reads or writes the proxy's cache, so it cannot tell
           whether a text went through the proxy (a cache hit is fast), never evicts the proxy's
           entries and leaves no digest or spans behind;
-        - a deadline of at most `seconds`;
+        - a deadline of at most `seconds`, and work sized to it: at most `max_chunks` windows
+          (more is refused BEFORE any worker is asked; was_too_long() says so) in batches of
+          `batch_chunks`, each one a separate try_predict (the pool lets a waiting proxy
+          request go first between batches);
         - the predictor's try_predict() when it has one (the pool: no waiting for a worker and
           no circuit breaker); in-process predictors have no workers to starve and are called
           as usual. was_busy() says whether this detector found no free worker.
         One per Try: the busy flag belongs to it."""
         if seconds <= 0:
             raise ValueError("the Try deadline must be positive")
+        if (max_chunks is not None and max_chunks < 1) or (
+            batch_chunks is not None and batch_chunks < 1
+        ):
+            raise ValueError("the Try chunk budget and batch size must be positive")
         timeout = seconds if self._timeout is None else min(seconds, self._timeout)
         return NerDetector(
             _TryPredictor(self._predictor),
@@ -151,14 +161,19 @@ class NerDetector:
             model_id=self._model_id,
             window=self._window,
             overlap=self._overlap,
-            batch_chunks=self._batch,
-            max_chunks=self._max_chunks,
+            batch_chunks=batch_chunks or self._batch,
+            max_chunks=min(max_chunks or self._max_chunks, self._max_chunks),
             timeout=timeout,
         )
 
     def was_busy(self) -> bool:
         """For a detector from for_try(): whether it found no free NER worker."""
         return bool(getattr(self._predictor, "busy", False))
+
+    def was_too_long(self) -> bool:
+        """For a detector from for_try(): whether the text needed more windows than its budget
+        (refused before any worker was asked)."""
+        return bool(getattr(self._predictor, "too_long", False))
 
     def start(self) -> None:
         self._predictor.start()
@@ -183,6 +198,8 @@ class NerDetector:
     def _predict(self, chunks: list[Chunk]) -> list[list[Entity]]:
         """Every window through the predictor, all under ONE deadline for the request."""
         if len(chunks) > self._max_chunks:
+            if isinstance(self._predictor, _TryPredictor):
+                self._predictor.too_long = True  # before any call: no worker is touched
             raise DetectorFailed()
         deadline = None if self._timeout is None else time.monotonic() + self._timeout
         results: list[list[Entity]] = []

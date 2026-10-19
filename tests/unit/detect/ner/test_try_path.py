@@ -1,4 +1,4 @@
-"""The NER's «Prueba un texto» path (issue 53, PR 11d-a review): it never harms the proxy.
+"""The NER's «Prueba un texto» path (issue 53, PR 11d-a reviews): the proxy goes first.
 
 - NerPool.try_predict() takes a worker only if one is idle RIGHT NOW (NerBusyError otherwise,
   without waiting) and never touches the circuit breaker: a hang or a death in a Try neither
@@ -218,3 +218,199 @@ def test_for_try_needs_a_positive_deadline(seconds: float) -> None:
 
     with pytest.raises(ValueError):
         ner.for_try(seconds)
+
+
+# --- second review: the proxy goes first, work sized to the deadline, a Try-only cooldown ------
+
+
+class Counting:
+    """The pool, counting the calls a Try detector makes (one per batch)."""
+
+    def __init__(self, pool: NerPool) -> None:
+        self.pool = pool
+        self.try_calls = 0
+
+    def start(self) -> None:  # pragma: no cover - the pool is started by its fixture
+        self.pool.start()
+
+    def close(self) -> None:  # pragma: no cover
+        self.pool.close()
+
+    @property
+    def timeout(self) -> float:
+        return self.pool.timeout
+
+    def predict(self, *args: object, **kwargs: object) -> object:
+        return self.pool.predict(*args, **kwargs)  # type: ignore[arg-type]
+
+    def try_predict(self, *args: object, **kwargs: object) -> object:
+        self.try_calls += 1
+        return self.pool.try_predict(*args, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def batch_pool() -> Iterator[NerPool]:
+    """One worker; every FAKE_SLEEP text holds it for 0.6 s."""
+    pool = NerPool(
+        FAKE_FACTORY,
+        {"names": {CARMEN: "person"}, "triggers": True, "sleep_seconds": 0.6},
+        workers=1,
+        timeout=20.0,
+    )
+    pool.start()
+    yield pool
+    pool.close()
+
+
+def test_a_proxy_request_arriving_mid_try_waits_one_try_batch_at_most(
+    batch_pool: NerPool,
+) -> None:
+    counting = Counting(batch_pool)
+    # window 2 / overlap 1 over six FAKE_SLEEP tokens: 5 windows, one per Try batch (0.6 s each)
+    base = NerDetector(counting, window=2, overlap=1)  # type: ignore[arg-type]
+    try_ner = base.for_try(20.0, max_chunks=10, batch_chunks=1)
+    outcome: list[BaseException] = []
+
+    def run_try() -> None:
+        try:
+            try_ner.find_many(["FAKE_SLEEP " * 6])
+        except BaseException as error:
+            outcome.append(error)
+
+    trying = threading.Thread(target=run_try)
+    trying.start()
+    try:
+        _wait_until(lambda: batch_pool._busy)  # the Try's first batch holds the worker
+        started = time.monotonic()
+        served = batch_pool.predict([CARMEN], LABELS, 0.5)
+        waited = time.monotonic() - started
+    finally:
+        trying.join(timeout=30)
+
+    assert served == [[[0, len(CARMEN), "person", 0.9]]]
+    assert [type(e) for e in outcome] == [NerBusyError]  # the Try was cut short
+    assert try_ner.was_busy()
+    assert counting.try_calls < 5  # it never ran its remaining batches
+    assert waited < 5 * 0.6  # never the whole Try (bound: one 0.6 s batch plus overhead)
+
+
+def test_a_try_is_busy_while_a_proxy_request_waits(batch_pool: NerPool) -> None:
+    with batch_pool._lock:
+        batch_pool._waiting = 1  # a proxy request waiting for a worker (the worker is idle)
+    try:
+        started = time.monotonic()
+        with pytest.raises(NerBusyError):
+            batch_pool.try_predict([CARMEN], LABELS, 0.5)
+        assert time.monotonic() - started < 0.5
+    finally:
+        with batch_pool._lock:
+            batch_pool._waiting = 0
+    assert batch_pool._idle.qsize() == 1  # the worker stayed for the proxy
+
+
+def test_proxy_waiters_are_counted_while_they_wait(batch_pool: NerPool) -> None:
+    holders = [
+        threading.Thread(target=lambda: batch_pool.predict(["FAKE_SLEEP"], LABELS, 0.5))
+        for _ in range(2)
+    ]
+    for thread in holders:
+        thread.start()
+    try:
+        _wait_until(lambda: batch_pool._waiting == 1)  # one holds the worker, one waits
+        with pytest.raises(NerBusyError):
+            batch_pool.try_predict([CARMEN], LABELS, 0.5)
+    finally:
+        for thread in holders:
+            thread.join(timeout=30)
+    assert batch_pool._waiting == 0
+
+
+class _NeverReady:
+    def __init__(self, conn: object) -> None:
+        self._conn = conn
+
+    def poll(self, timeout: float = 0.0) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+
+def test_a_try_never_waits_for_a_loading_worker(batch_pool: NerPool) -> None:
+    (worker,) = list(batch_pool._idle.queue)
+    conn = worker.conn
+    worker.ready = False
+    worker.conn = _NeverReady(conn)  # type: ignore[assignment]
+    try:
+        started = time.monotonic()
+        with pytest.raises(NerBusyError):
+            batch_pool.try_predict([CARMEN], LABELS, 0.5)
+        assert time.monotonic() - started < 0.5
+        assert batch_pool._idle.qsize() == 1  # put back, untouched
+        assert batch_pool._failures == 0
+    finally:
+        worker.conn = conn
+        worker.ready = True
+    assert batch_pool.predict([CARMEN], LABELS, 0.5)
+
+
+def test_a_try_that_breaks_a_worker_starts_a_try_only_cooldown(hanging_pool: NerPool) -> None:
+    when_ready(lambda: hanging_pool.predict(["calentar"], LABELS, 0.5))
+    with pytest.raises(DetectorFailed):
+        hanging_pool.try_predict(["FAKE_SLEEP"], LABELS, 0.5, deadline=time.monotonic() + 0.5)
+    replaced = hanging_pool.worker_pids()
+    when_ready(lambda: hanging_pool.predict(["calentar"], LABELS, 0.5))  # the new one is up
+
+    with pytest.raises(NerBusyError):  # no second Try within the cooldown
+        hanging_pool.try_predict(["FAKE_SLEEP"], LABELS, 0.5, deadline=time.monotonic() + 0.5)
+
+    assert hanging_pool.worker_pids() == replaced  # no second respawn
+    assert hanging_pool._failures == 0  # the proxy's breaker is untouched
+    assert hanging_pool.predict([CARMEN], LABELS, 0.5)  # the proxy is served meanwhile
+
+
+def test_the_cooldown_ends() -> None:
+    pool = NerPool(FAKE_FACTORY, {"names": {CARMEN: "person"}}, try_cooldown_seconds=0.2)
+    pool.start()
+    try:
+        with pool._lock:
+            pool._try_cooldown_until = time.monotonic() + 0.2
+        with pytest.raises(NerBusyError):
+            pool.try_predict([CARMEN], LABELS, 0.5)
+        _wait_until(lambda: time.monotonic() > pool._try_cooldown_until)
+        assert pool.try_predict([CARMEN], LABELS, 0.5)
+    finally:
+        pool.close()
+
+
+def test_the_default_cooldown_is_a_minute() -> None:
+    from antifaz.detect.ner.pool import DEFAULT_TRY_COOLDOWN_SECONDS
+
+    assert DEFAULT_TRY_COOLDOWN_SECONDS == 60.0
+
+
+def test_for_try_refuses_more_chunks_than_its_budget_without_calling_the_model() -> None:
+    from antifaz.detect.ner.fake import FakeBackend
+
+    predictor = TryAware(FakeBackend(NAMES))
+    base = NerDetector(predictor, window=2, overlap=1)  # type: ignore[arg-type]
+    try_ner = base.for_try(5.0, max_chunks=3, batch_chunks=1)
+
+    with pytest.raises(DetectorFailed):
+        try_ner.find_many(["uno dos tres cuatro cinco seis"])  # 5 windows > 3
+
+    assert try_ner.was_too_long() and not try_ner.was_busy()
+    assert predictor.try_calls == 0 and predictor.calls == 0  # no worker touched
+    small = base.for_try(5.0, max_chunks=3, batch_chunks=1)
+    assert small.find_many([f"{CARMEN}"]) and not small.was_too_long()
+
+
+def test_for_try_sends_one_batch_per_call() -> None:
+    from antifaz.detect.ner.fake import FakeBackend
+
+    predictor = TryAware(FakeBackend(NAMES))
+    base = NerDetector(predictor, window=2, overlap=1)  # type: ignore[arg-type]
+
+    base.for_try(5.0, max_chunks=10, batch_chunks=2).find_many(["a b c d e f"])
+
+    assert predictor.try_calls == 3  # 5 windows, 2 per batch

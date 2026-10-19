@@ -19,12 +19,17 @@ any text, and `status()` feeds /healthz.
 
 Parent and worker speak JSON over a pipe, with a size limit.
 
-«Prueba un texto» (the panel, PR 11d-a review) uses try_predict(): it takes a worker only if one
-is idle right now (NerBusyError otherwise, without waiting), so a Try never queues in front of
-the proxy, and it never touches the circuit breaker (a Try that hangs or kills a worker does not
-count as a failure, and a Try that works does not reset the count). The worker it breaks is
-still killed and replaced. A Try that already holds the only worker keeps it until its own
-(short) deadline: the proxy may wait that long, never longer.
+«Prueba un texto» (the panel, PR 11d-a reviews) uses try_predict(), and the proxy goes first:
+- NerBusyError at once, without waiting, when any proxy request is waiting for a worker (counted
+  under the lock while it waits), when no worker is idle, when the idle one is still loading
+  (checked without blocking; it goes back to the queue), or during the Try-only cooldown;
+- the circuit breaker is never touched: a Try that hangs or kills a worker does not count as a
+  failure, and a Try that works does not reset the count;
+- a Try that breaks a worker (it is still killed and replaced) starts a Try-only cooldown
+  (`try_cooldown_seconds`, 60 s by default): every try_predict is busy until it ends, so a Try
+  cannot make the pool reload again and again. The proxy never sees the cooldown.
+The detector calls try_predict once per small batch, so the check runs again before every batch:
+a proxy request that arrives while a Try batch runs waits for that batch only.
 """
 
 import json
@@ -55,6 +60,8 @@ DEFAULT_LOAD_TIMEOUT_SECONDS = 300.0
 DEFAULT_FAILURE_THRESHOLD = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 DEFAULT_MAX_BACKOFF_SECONDS = 60.0
+# After a Try broke a worker, how long every Try is busy (the proxy is not affected).
+DEFAULT_TRY_COOLDOWN_SECONDS = 60.0
 # The watchdog's timer class: a seam for tests that move when it fires.
 _TIMER = threading.Timer
 # The pool's log lines about a replaced worker (tests count them by this exact text).
@@ -101,12 +108,15 @@ class NerPool:
         backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
         max_backoff_seconds: float = DEFAULT_MAX_BACKOFF_SECONDS,
         verify: Mapping[str, str] | None = None,
+        try_cooldown_seconds: float = DEFAULT_TRY_COOLDOWN_SECONDS,
     ) -> None:
         split_factory(factory)  # a malformed path fails here, not in a child process
         if workers < 1 or timeout <= 0 or load_timeout <= 0:
             raise ValueError("the NER pool needs at least one worker and positive time limits")
         if failure_threshold < 1 or backoff_seconds <= 0 or max_backoff_seconds < backoff_seconds:
             raise ValueError("the NER circuit breaker needs a threshold and positive backoffs")
+        if try_cooldown_seconds <= 0:
+            raise ValueError("the Try cooldown must be positive")
         self._factory = factory
         self._options = json.dumps(dict(options or {}))
         # {"model_dir", "manifest", "digest"}: every worker checks the model before loading it.
@@ -125,6 +135,9 @@ class NerPool:
         self._closed = False
         self._failures = 0
         self._open_until = 0.0
+        self._try_cooldown = try_cooldown_seconds
+        self._try_cooldown_until = 0.0
+        self._waiting = 0  # proxy requests waiting for a worker right now
 
     @property
     def timeout(self) -> float:
@@ -353,9 +366,42 @@ class NerPool:
             if lost or killed:
                 if lost and counted:
                     self._failed()  # the circuit state first: disposing joins for seconds
+                if not counted:  # a Try broke it: no Try for a while (never the breaker)
+                    self._try_cooldown_until = time.monotonic() + self._try_cooldown
                 self._dispose(worker)
                 worker = self._spawn()  # it loads in the background
             self._idle.put(worker)
+
+    def _take(self, deadline: float, now: float) -> _Worker | None:
+        """A worker for the proxy, waiting until `deadline`; counted as a waiter meanwhile, so
+        no Try takes a worker while a proxy request waits for one."""
+        with self._lock:
+            self._waiting += 1
+        try:
+            return self._idle.get(timeout=max(0.0, deadline - now))
+        except queue.Empty:
+            return None
+        finally:
+            with self._lock:
+                self._waiting -= 1
+
+    def _take_for_try(self, now: float) -> _Worker:
+        """An idle, loaded worker for a Try right now, or NerBusyError (never a wait)."""
+        worker: _Worker | None = None
+        with self._lock:
+            if not self._waiting and now >= self._try_cooldown_until:
+                with suppress(queue.Empty):
+                    worker = self._idle.get_nowait()
+        if worker is None:
+            raise NerBusyError()
+        try:
+            ready = self._wait_ready(worker, time.monotonic())  # a poll(0): never blocks
+        except _LostError:
+            ready = False  # a failed load: the proxy's next request replaces it as usual
+        if not ready:
+            self._idle.put(worker)
+            raise NerBusyError()
+        return worker
 
     def predict(
         self,
@@ -398,15 +444,7 @@ class NerPool:
             refused = not self._started or self._closed or now < self._open_until
         if refused:
             raise DetectorFailed()
-        try:
-            if wait:
-                worker = self._idle.get(timeout=max(0.0, deadline - now))
-            else:
-                worker = self._idle.get_nowait()
-        except queue.Empty:
-            worker = None
-        if worker is None and not wait:  # a Try never waits for a worker
-            raise NerBusyError()
+        worker = self._take(deadline, now) if wait else self._take_for_try(now)
         if worker is None:  # every worker stayed busy until the deadline
             raise DetectorFailed()
         with self._lock:
