@@ -53,6 +53,29 @@ def placeholder_tokens(text: str) -> frozenset[str]:
     )
 
 
+def placeholder_parts(text: str) -> list[tuple[str, str | None]]:
+    """`text` cut at its placeholders, with the same pattern as restore() (issue 53, 11d-a).
+
+    Each part is (text kept as it is, None), escapes included and untouched, or (the raw
+    placeholder, its upper-case token). No part is empty and joining them gives `text` back;
+    restore() of each part, joined, equals restore() of `text` (the cuts fall exactly where
+    restore() replaces a placeholder). Says nothing about whether a token was emitted.
+    """
+    parts: list[tuple[str, str | None]] = []
+    position = 0
+    for match in _ESCAPE_OR_PLACEHOLDER.finditer(text):
+        token = match.group("token")
+        if token is None:
+            continue  # an escape: it stays inside the text part around it
+        if match.start() > position:
+            parts.append((text[position : match.start()], None))
+        parts.append((match.group(0), token.upper()))
+        position = match.end()
+    if position < len(text):
+        parts.append((text[position:], None))
+    return parts
+
+
 def restore(text: str, vault: Vault, *, encode: Callable[[str], str] | None = None) -> str:
     """Undo the escapes and put back the values of this request's placeholders.
 
@@ -153,4 +176,11 @@ class StreamRestorer:
         return restore(text, self._vault)
 
 
-__all__ = ["MAX_HOLDBACK", "StreamLimitExceeded", "StreamRestorer", "placeholder_tokens", "restore"]
+__all__ = [
+    "MAX_HOLDBACK",
+    "StreamLimitExceeded",
+    "StreamRestorer",
+    "placeholder_parts",
+    "placeholder_tokens",
+    "restore",
+]

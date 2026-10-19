@@ -40,12 +40,32 @@ def escape(text: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class FoundSpan:
+    """Where mask() found one value and what it did with it (issue 53, PR 11d-a).
+
+    `start` and `end` are code points of the input text (Python indexes). `token` is the marker
+    without brackets ("ES_DNI_1") when the value was hidden, None when the policy allows the
+    type. There is no field for the value itself, so neither this nor its repr can hold one.
+    Read only by mask/ and the panel's «Prueba un texto» (web/try_text.py): a test keeps it
+    out of the evidence code, the Status view, the proxy and the logs.
+    """
+
+    start: int
+    end: int
+    type: EntityType
+    hidden: bool
+    token: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class MaskResult:
-    """Masked texts, in input order, and the table to restore the answer."""
+    """Masked texts, in input order, the table to restore the answer and, per text, the spans
+    that were found (positions, types and markers; never the values)."""
 
     texts: tuple[str, ...]
     vault: Vault
     hidden: tuple[EntityType, ...]
+    found_spans: tuple[tuple[FoundSpan, ...], ...] = ()
 
     @property
     def text(self) -> str:
@@ -119,20 +139,28 @@ def mask(
     vault = Vault(reserved)
     hidden: dict[EntityType, None] = {}
     masked = []
+    reported: list[tuple[FoundSpan, ...]] = []
     for text, spans in zip(items, found, strict=True):
         out: list[str] = []
+        where: list[FoundSpan] = []
         clear_start = 0  # start of the pending run of text kept in clear
         for span in spans:
             if policy.action_for(span.type) is Action.ALLOW:
+                where.append(FoundSpan(span.start, span.end, span.type, False, None))
                 continue
             out.append(escape(text[clear_start : span.start]))
             # _add is package-internal API: the Vault exposes no public way to read values.
-            out.append(f"[[{vault._add(span.type, text[span.start : span.end])}]]")
+            token = vault._add(span.type, text[span.start : span.end])
+            out.append(f"[[{token}]]")
+            where.append(FoundSpan(span.start, span.end, span.type, True, token))
             hidden.setdefault(span.type)
             clear_start = span.end
         out.append(escape(text[clear_start:]))
         masked.append("".join(out))
-    return MaskResult(texts=tuple(masked), vault=vault, hidden=tuple(hidden))
+        reported.append(tuple(where))
+    return MaskResult(
+        texts=tuple(masked), vault=vault, hidden=tuple(hidden), found_spans=tuple(reported)
+    )
 
 
-__all__ = ["BatchDetector", "Detector", "MaskResult", "escape", "find_spans", "mask"]
+__all__ = ["BatchDetector", "Detector", "FoundSpan", "MaskResult", "escape", "find_spans", "mask"]
