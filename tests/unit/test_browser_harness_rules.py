@@ -68,6 +68,56 @@ def test_only_the_harness_reads_the_cookie_jar() -> None:
             assert ".cookies(" not in module.read_text(encoding="utf-8"), module.name
 
 
+# Where a page may be navigated with page.goto(): only Tab.goto() in the harness, which emulates
+# the requested colour scheme again and checks it (review of 11c-3a), and the one helper that
+# opens the other site's page (not the gateway's).
+GOTO_ALLOWED = {"harness.py": None, "test_panel_ui.py": "_go_to_other_site"}
+
+
+def page_goto_offenders(name: str, source: str) -> list[str]:
+    """Every `<...>.page.goto(` call of a module outside the place it is allowed in."""
+    allowed = GOTO_ALLOWED.get(name, "")
+    if allowed is None:
+        return []
+
+    def calls(tree: ast.AST) -> set[int]:
+        return {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "goto"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "page"
+        }
+
+    tree = ast.parse(source)
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == allowed:
+            inside |= calls(node)
+    return [f"{name}:{line}" for line in sorted(calls(tree) - inside)]
+
+
+def test_only_the_harness_navigates_with_page_goto() -> None:
+    offenders = [
+        offender
+        for module in _browser_modules()
+        for offender in page_goto_offenders(module.name, module.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
+def test_the_goto_rule_sees_an_offender() -> None:
+    bad = "def test_x(tab):\n    tab.page.goto('http://127.0.0.1:1/panel')\n"
+    assert page_goto_offenders("test_panel_mobile.py", bad) == ["test_panel_mobile.py:2"]
+    helper = "def _go_to_other_site(tab, site):\n    tab.page.goto(site.origin)\n"
+    assert page_goto_offenders("test_panel_ui.py", helper) == []
+    elsewhere = helper + "def test_y(tab):\n    tab.page.goto('x')\n"
+    assert page_goto_offenders("test_panel_ui.py", elsewhere) == ["test_panel_ui.py:4"]
+    assert page_goto_offenders("harness.py", bad) == []
+
+
 # --- the redactor ----------------------------------------------------------------------------
 
 # Built, not written: shaped like token_urlsafe(32) (43 characters, with - and _) and like

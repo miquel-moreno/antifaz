@@ -689,19 +689,34 @@ ACTIVE_GAPS_JS = """() => {
 
 def test_the_active_tab_never_sits_in_the_fade(new_tab: NewTab, server: PanelServer) -> None:
     """WCAG 2.4.7 / 1.4.11: the focused and selected tab is scrolled clear of the fade on any
-    side that still has more, so its focus ring and selected look are never faded."""
-    tab = new_tab(width=320, bypass_csp=True, locale="es-ES")
+    side that still has more, so its focus ring and selected look are never faded. On a short
+    screen with the page scrolled down, bringing a tab into view moves only the bar: the tab is
+    selected again with its number key (same view, same page height) after the bar was scrolled
+    away from it, and the page's scroll position must not change."""
+    tab = new_tab(width=320, height=500, bypass_csp=True, locale="es-ES")
     _log_in(tab, server, "es")
     _text_200(tab)
     tab.page.focus("#tab-playground")
-    page_top = tab.page.evaluate("() => window.scrollY")
     keys = ["ArrowRight"] * 4 + ["ArrowLeft"] * 4
     for key in keys:
         tab.page.keyboard.press(key)
+        tab.page.evaluate("() => window.scrollTo(0, 120)")
+        page_top = tab.page.evaluate("() => window.scrollY")
+        assert page_top > 0  # the page really is scrolled down
+        active = tab.page.evaluate(ACTIVE_ID_JS)
+        tab.page.evaluate(
+            """(id) => { const l = document.querySelector('[role=tablist]');
+              const t = document.getElementById(id);
+              l.scrollLeft = t.offsetLeft > l.scrollWidth / 2 ? 0 : l.scrollWidth; }""",
+            active,
+        )
+        tab.page.keyboard.press(str(TABS.index(active.removeprefix("tab-")) + 1))
         tab.page.evaluate(TWO_FRAMES_JS)
+        assert tab.page.evaluate(ACTIVE_ID_JS) == active
         assert tab.page.evaluate("() => window.scrollY") == page_top  # only the bar scrolls
         gaps = tab.page.evaluate(ACTIVE_GAPS_JS)
         assert gaps["fade"] > 0, gaps
+        assert gaps["left"] >= 0 and gaps["right"] >= 0, (key, gaps)  # revealed
         if gaps["moreEnd"]:
             assert gaps["right"] >= gaps["fade"], (key, gaps)
         if gaps["moreStart"]:
