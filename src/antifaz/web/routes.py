@@ -95,6 +95,7 @@ from antifaz.http_errors import (
     TooManyAttemptsError,
     TooManyTriesError,
     TryBodyTimeoutError,
+    TryBusyError,
 )
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
@@ -268,8 +269,10 @@ def build_router(state: PanelState) -> APIRouter:
             raise PanelUnauthorizedError()
         return StatusResponse.model_validate(snapshot(state.status, context.scheme))
 
-    @router.post("/panel/api/try")
-    async def try_a_text(request: Request) -> TryResponse:
+    # response_model=None: the answer is validated once, in the route's try block below; FastAPI
+    # must not validate or serialise it again (a failure there would bypass the fixed 500).
+    @router.post("/panel/api/try", response_model=None)
+    async def try_a_text(request: Request) -> Response:
         context = panel_context(request.scope)
         if context.session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
@@ -278,18 +281,23 @@ def build_router(state: PanelState) -> APIRouter:
         if wait:
             raise TooManyTriesError(wait)
         text, lang = _try_input(await _try_body(request), pages.languages)
-        answer: TryResponse | None = None
+        answer: bytes | None = None
+        busy: TryBusyError | None = None
         failure = ""
         try:
             result = await state.try_runner(text, lang)
             ner = ner_state(state.status.ner_state())
-            answer = TryResponse.model_validate({**result, "ner": ner})
+            answer = TryResponse.model_validate({**result, "ner": ner}).model_dump_json().encode()
+        except TryBusyError as error:
+            busy = error  # a fixed 503 with Retry-After: never queued
         except Exception as error:
             failure = type(error).__name__  # only the type: the message could hold the text
+        if busy is not None:
+            raise busy
         if answer is None:
             logger.error("panel try failed: %s", failure)
             raise PanelInternalError()
-        return answer
+        return Response(answer, media_type="application/json")
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

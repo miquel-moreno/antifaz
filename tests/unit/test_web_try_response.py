@@ -29,7 +29,6 @@ def _good(**changes: Any) -> dict[str, Any]:
         "counts": [{"type": EntityType.ES_DNI, "found": 1, "hidden": 1}],
         "policy_version": "builtin-1",
         "ner": "off",
-        "elapsed_ms": 3,
     }
     body.update(changes)
     return body
@@ -69,7 +68,7 @@ def test_a_blocked_answer() -> None:
         {"length_utf16": -1},
         {"length_utf16": "14"},
         {"length_utf16": 14.0},
-        {"elapsed_ms": True},
+        {"elapsed_ms": 3},  # no timing in the answer (review: a timing oracle)
         {"entities": [{"type": EntityType.ES_DNI, "start": 4, "end": 13, "hidden": 1}]},
         {"entities": [{"type": "NOT_A_TYPE", "start": 4, "end": 13, "hidden": True}]},
         {

@@ -375,4 +375,84 @@ def test_a_try_flood_never_starves_a_proxy_request() -> None:
             release.set()
             for thread in flood:
                 thread.join(timeout=60)
-    assert sorted(results) == [200] * tries
+    # One Try runs; the others are refused at once (503 try_busy), never queued.
+    assert sorted(results) == [200] + [503] * (tries - 1)
+
+
+# --- with the NER on: a Try never starves the proxy nor trips its circuit breaker ---------
+
+
+def _ner_pool(sleep_seconds: float) -> Any:
+    from antifaz.detect.ner.cache import SpanCache
+    from antifaz.detect.ner.engine import NerDetector
+    from antifaz.detect.ner.pool import NerPool
+    from tests.nerfakes import CARMEN, FAKE_FACTORY
+
+    pool = NerPool(
+        FAKE_FACTORY,
+        {"names": {CARMEN: "person"}, "triggers": True, "sleep_seconds": sleep_seconds},
+        workers=1,
+        timeout=20.0,
+        failure_threshold=1,
+    )
+    return pool, NerDetector(pool, cache=SpanCache(100))
+
+
+def _chat(client: TestClient, text: str) -> httpx.Response:
+    return client.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": text}]},
+        headers={"Authorization": f"Bearer {GATEWAY_KEY}"},
+    )
+
+
+def test_the_proxy_is_served_during_a_try_flood_with_the_ner_on() -> None:
+    from tests.nerfakes import CARMEN
+
+    pool, ner = _ner_pool(sleep_seconds=0.5)  # each Try holds the only worker for 0.5 s
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session = logged_in(client)
+        tries: list[int] = []
+
+        def flood() -> None:
+            for _ in range(6):
+                text = f"FAKE_SLEEP {CARMEN} {SENTINEL_DNI}"
+                tries.append(_try(client, session, _body(text)).status_code)
+
+        flooder = threading.Thread(target=flood)
+        flooder.start()
+        try:
+            served = [_chat(client, f"Soy {CARMEN}") for _ in range(3)]
+        finally:
+            flooder.join(timeout=60)
+
+    assert [r.status_code for r in served] == [200, 200, 200]
+    for response in served:
+        assert response.json()["choices"][0]["message"]["content"] == f"Soy {CARMEN}"
+    assert set(tries) <= {200, 503} and len(tries) == 6
+    assert pool.status() == "closed"  # closed by the lifespan at the end, never circuit_open
+
+
+def test_a_hanging_try_never_trips_the_proxy_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from antifaz.api import app as app_module
+    from tests.nerfakes import CARMEN
+
+    monkeypatch.setattr(app_module, "TRY_NER_SECONDS", 0.5)
+    pool, ner = _ner_pool(sleep_seconds=60)  # FAKE_SLEEP hangs the worker
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session = logged_in(client)
+        assert _chat(client, "calentar").status_code == 200  # the worker is loaded
+
+        hung = _try(client, session, _body(f"FAKE_SLEEP {CARMEN}"))
+
+        assert hung.status_code == 200
+        assert hung.json()["blocked_reason"] == "detector_failed"
+        assert pool._failures == 0  # threshold 1: one counted failure would open the circuit
+        assert pool.status() != "circuit_open"
+        give_up = time.monotonic() + 60  # the replaced worker loads in the background
+        while (proxied := _chat(client, f"Soy {CARMEN}")).status_code != 200:
+            assert time.monotonic() < give_up
+            time.sleep(0.2)
+        assert proxied.json()["choices"][0]["message"]["content"] == f"Soy {CARMEN}"

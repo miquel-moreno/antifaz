@@ -128,6 +128,19 @@ class TooManyTriesError(AppError):
         )
 
 
+class TryBusyError(AppError):
+    """«Prueba un texto» (11d-a review): busy right now, try again in a second. Never queued:
+    `try_busy` when another Try is running, `ner_busy` when no NER worker is free."""
+
+    status_code = 503
+
+    def __init__(self, code: str) -> None:
+        if code not in ("try_busy", "ner_busy"):
+            raise ValueError("unknown busy code")
+        self.code = code
+        super().__init__("busy right now: try again in a second", headers={"Retry-After": "1"})
+
+
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 

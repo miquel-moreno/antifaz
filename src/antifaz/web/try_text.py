@@ -47,7 +47,6 @@ to simulate_reply. Importing a provider client or an HTTP library.
 
 import json
 import re
-import time
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -268,7 +267,6 @@ def _entities(text: str, spans: Sequence[FoundSpan]) -> list[dict[str, Any]]:
 def run_try(text: str, lang: str, *, detector: Detector, policy: Policy) -> dict[str, Any]:
     """mask -> guard -> simulated reply (markers only) -> restore. Synchronous: run it in a
     worker thread. The answer never holds the original text."""
-    started = time.perf_counter()
     answer: dict[str, Any] = {
         "outcome": "blocked",
         "blocked_reason": None,
@@ -301,7 +299,6 @@ def run_try(text: str, lang: str, *, detector: Detector, policy: Policy) -> dict
             answer["outcome"] = "masked"
             answer["sent"] = _sent(result.text, types)
             answer["reply"] = _reply(simulated, types, result.vault)
-    answer["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
     return answer
 
 

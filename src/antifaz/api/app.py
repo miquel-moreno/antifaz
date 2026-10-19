@@ -41,9 +41,13 @@ if TYPE_CHECKING:  # antifaz.web is imported only when the panel is on (_panel)
 # Threads that can mask at the same time (detection and waiting for the NER). A limiter of our
 # own: masking never takes the threads of anyio's shared default limiter from other work.
 MASK_THREADS = 8
-# «Prueba un texto» (11d-a): its own limiter of one, taken BEFORE the mask limiter, so the panel
-# never holds more than one of the MASK_THREADS: a flood of tries cannot starve the proxy.
+# «Prueba un texto» (11d-a): one Try at a time, never queued (a second one is 503 try_busy), and
+# taken BEFORE the mask limiter, so the panel holds at most one of the MASK_THREADS. With the NER
+# on, a Try also takes a NER worker only if one is idle right now (else 503 ner_busy), never
+# counts toward the NER circuit breaker and gives up after TRY_NER_SECONDS: the proxy may wait
+# for the worker a running Try holds, at most that long (NerPool.try_predict).
 TRY_THREADS = 1
+TRY_NER_SECONDS = 3.0
 
 
 @dataclass
@@ -90,7 +94,11 @@ def base_url_parts(url: str) -> "UrlParts | None":
 
 
 def _panel(
-    app: FastAPI, settings: Settings, ner: NerDetector | None, limiters: _Limiters
+    app: FastAPI,
+    settings: Settings,
+    ner: NerDetector | None,
+    limiters: _Limiters,
+    try_ner: NerDetector | None,
 ) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
@@ -103,12 +111,16 @@ def _panel(
     app). They are kept in app.state.panel_status, so the lifespan marks when start-up finished.
 
     «Prueba un texto» (11d-a) gets a runner, never the detector, the policy or the settings: it
-    runs web/try_text.run_try() with the gateway's own detector (the NER too) and policy in a
-    worker thread, behind the Try limiter (one) and then the proxy's mask limiter. run_try never
-    calls a provider; the runner holds no client.
+    runs web/try_text.run_try() with the gateway's policy and detector in a worker thread, behind
+    the Try limiter (one, never queued: 503 try_busy) and then the proxy's mask limiter. With the
+    NER, each Try gets its own Scanner over `ner.for_try()`: same model and workers, no span
+    cache (no membership oracle, nothing evicted or left behind), a TRY_NER_SECONDS deadline, a
+    worker only if one is idle (else 503 ner_busy) and no effect on the circuit breaker.
+    run_try never calls a provider; the runner holds no client.
     """
     if settings.admin_token is None:
         return None
+    from antifaz.http_errors import TryBusyError
     from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelDoor, PanelState
     from antifaz.web.forwarded import parse_networks
@@ -145,11 +157,30 @@ def _panel(
         mask_limiter, try_limiter = limiters.mask, limiters.try_
         if mask_limiter is None or try_limiter is None:
             raise RuntimeError("the gateway has not started")
-        async with try_limiter:  # one Try at a time, before it takes one of the mask threads
-            return await anyio.to_thread.run_sync(
-                functools.partial(run_try, text, lang, detector=detector, policy=policy),
+        try:
+            try_limiter.acquire_nowait()  # one Try at a time and never a queue
+            taken = True
+        except anyio.WouldBlock:
+            taken = False
+        if not taken:
+            raise TryBusyError("try_busy")
+        isolated = None if try_ner is None else try_ner.for_try(TRY_NER_SECONDS)
+        try:
+            answer = await anyio.to_thread.run_sync(
+                functools.partial(
+                    run_try,
+                    text,
+                    lang,
+                    detector=detector if isolated is None else Scanner(isolated),
+                    policy=policy,
+                ),
                 limiter=mask_limiter,
             )
+        finally:
+            try_limiter.release()
+        if isolated is not None and isolated.was_busy():
+            raise TryBusyError("ner_busy")
+        return answer
 
     token = settings.admin_token.get_secret_value().encode()
     state = PanelState(
@@ -235,7 +266,9 @@ def create_app(
     app.include_router(anthropic.router)
     app.include_router(models.router)
     app.include_router(scan.router)
-    panel_door = _panel(app, settings, ner, limiters)
+    # A Try gets its own NER detector only when the gateway built the detector over the NER.
+    try_ner = ner if detector is None else None
+    panel_door = _panel(app, settings, ner, limiters, try_ner)
     app.state.route_paths = registered_paths(app)
     # The last one added runs first: request id -> trusted host -> gate (the panel's door for
     # /panel*; the key, Origin and JSON for the rest).

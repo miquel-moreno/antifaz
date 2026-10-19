@@ -292,7 +292,7 @@ def test_the_pipeline_masks_simulates_and_restores() -> None:
         {"type": EntityType.ES_CIF, "found": 1, "hidden": 0},
         {"type": EntityType.EMAIL, "found": 1, "hidden": 1},
     ]
-    assert isinstance(result["elapsed_ms"], int) and result["elapsed_ms"] >= 0
+    assert "elapsed_ms" not in result  # no timing: it could tell a cache hit (review)
     assert "text" not in result  # the original text is never echoed
 
 

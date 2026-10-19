@@ -408,3 +408,121 @@ def test_the_original_text_is_never_echoed() -> None:
     assert "Escribo esto: [[ES_DNI_1]] y nada más" in "".join(
         s.get("text", s.get("marker", "")) for s in response.json()["sent"]
     )
+
+
+# --- review fixes: no cache oracle, no timing, never queue behind or in front of the proxy ---
+
+
+def test_the_answer_has_no_timing() -> None:
+    with panel_client(HTTPS_URL) as client:
+        session_id, token = logged_in(client)
+
+        data = post_try(client, session_id, token).json()
+
+    assert "elapsed_ms" not in data
+
+
+def test_a_try_never_reads_or_writes_the_proxy_ner_cache() -> None:
+    ner, predictor = fake_detector(NAMES)
+    cache = ner._cache  # type: ignore[attr-defined]
+    text = f"Soy {CARMEN}, DNI {SENTINEL_DNI}"
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        proxied = client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "messages": [{"role": "user", "content": text}]},
+            headers={"Authorization": f"Bearer {GATEWAY_KEY}"},
+        )
+        assert proxied.status_code == 200
+        calls, size = predictor.calls, len(cache)
+        session_id, token = logged_in(client)
+
+        response = post_try(client, session_id, token, body(text))
+
+    assert response.status_code == 200
+    assert predictor.calls == calls + 1  # the model path: a cache hit would not call it
+    assert len(cache) == size  # nothing added, nothing evicted
+
+
+class BusyPredictor(InProcess):
+    def try_predict(self, *args: Any, **kwargs: Any) -> object:
+        from antifaz.detect.ner.backend import NerBusyError
+
+        raise NerBusyError()
+
+
+def test_no_free_ner_worker_is_503_ner_busy_without_the_text() -> None:
+    from antifaz.detect.ner.engine import NerDetector
+    from antifaz.detect.ner.fake import FakeBackend
+
+    ner = NerDetector(BusyPredictor(FakeBackend(NAMES)))  # type: ignore[arg-type]
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+
+        response = post_try(client, session_id, token, body(f"Soy {CARMEN} {SENTINEL_DNI}"))
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "ner_busy"
+    assert response.headers["retry-after"] == "1"
+    assert response.headers["cache-control"] == NO_STORE
+    assert SENTINEL_DNI not in response.text and CARMEN not in response.text
+
+
+def test_a_second_try_while_one_runs_is_503_try_busy_at_once() -> None:
+    import threading
+    import time
+
+    from antifaz.detect.scan import scan
+    from antifaz.detect.types import Span
+
+    release, entered = threading.Event(), threading.Event()
+
+    def slow(text: str) -> list[Span]:
+        if "lento" in text:
+            entered.set()
+            release.wait(timeout=30)
+        return scan(text)
+
+    with panel_client(HTTPS_URL, detector=slow) as client:
+        session_id, token = logged_in(client)
+        first: list[int] = []
+        runner = threading.Thread(
+            target=lambda: first.append(
+                post_try(client, session_id, token, body("lento")).status_code
+            )
+        )
+        runner.start()
+        try:
+            assert entered.wait(timeout=30)
+            started = time.monotonic()
+            second = post_try(client, session_id, token, body("rápido"))
+            waited = time.monotonic() - started
+        finally:
+            release.set()
+            runner.join(timeout=30)
+
+    assert second.status_code == 503
+    assert second.json()["error"]["code"] == "try_busy"
+    assert second.headers["retry-after"] == "1"
+    assert waited < 5  # refused at once, never queued behind the first
+    assert first == [200]
+
+
+def test_the_route_has_no_response_model_so_fastapi_never_revalidates() -> None:
+    """The answer is validated once, inside the route's try block (a failure is the fixed 500
+    with the error's type only); FastAPI must not validate or serialise it a second time."""
+    with panel_client(HTTPS_URL) as client:
+        from fastapi.routing import iter_route_contexts
+
+        (route,) = [
+            context.original_route
+            for context in iter_route_contexts(client.app.routes)  # type: ignore[attr-defined]
+            if context.path == TRY
+        ]
+        session_id, token = logged_in(client)
+        response = post_try(client, session_id, token)
+
+    assert route.response_model is None  # type: ignore[attr-defined]
+    assert (
+        response.content
+        == TryResponse.model_validate_json(response.content).model_dump_json(by_alias=True).encode()
+    )

@@ -87,7 +87,6 @@ class TryResponse(_Closed):
     counts: list[Count]
     policy_version: str = Field(pattern=POLICY_VERSION_PATTERN)
     ner: NerState
-    elapsed_ms: StrictInt = Field(ge=0)
 
     @model_validator(mode="after")
     def _blocked_sends_nothing(self) -> Self:
