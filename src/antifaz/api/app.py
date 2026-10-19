@@ -8,6 +8,7 @@ import functools
 import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import anyio
 import anyio.to_thread
@@ -63,6 +64,9 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
     antifaz.web is imported only here, so without the token nothing of the panel is loaded. The
     panel gets a PanelState and nothing else: the token's SHA-256, never the token or settings.
     Its static files are read, checked and hashed here, once (AssetError stops the startup).
+    The «Estado» view's facts (11c-3b) are made here too, without a secret: whether each
+    provider has a key, the checked host of a custom base URL (never the URL), counts, and a
+    callable that reads the NER state at each request.
     """
     if settings.admin_token is None:
         return None
@@ -72,7 +76,28 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
     from antifaz.web.login_limit import FailureLimiter
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
+    from antifaz.web.status import NER_OFF, ProviderFacts, StatusFacts, provider_address
 
+    def provider(id_: Literal["openai", "anthropic"], key: object, url: str) -> ProviderFacts:
+        default = Settings.model_fields[f"{id_}_base_url"].default
+        address, credentials = provider_address(url, default)
+        return ProviderFacts(id_, key is not None, address, credentials)
+
+    def ner_state() -> object:
+        ner = app.state.ner
+        return NER_OFF if ner is None else ner.status()
+
+    status = StatusFacts(
+        version=__version__,
+        providers=(
+            provider("openai", settings.openai_api_key, settings.openai_base_url),
+            provider("anthropic", settings.anthropic_api_key, settings.anthropic_base_url),
+        ),
+        allowed_hosts=len(settings.allowed_hosts),
+        allowed_origins=len(settings.allowed_origins),
+        trusted_proxies=len(settings.trusted_proxies),
+        ner_state=ner_state,
+    )
     token = settings.admin_token.get_secret_value().encode()
     state = PanelState(
         token_fingerprint=hashlib.sha256(token).digest(),
@@ -80,6 +105,7 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
         assets=load_assets(),
+        status=status,
     )
     app.include_router(build_router(state))
     return functools.partial(PanelDoor, state=state)

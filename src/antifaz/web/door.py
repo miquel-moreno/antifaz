@@ -71,6 +71,7 @@ from antifaz.web.headers import IMMUTABLE, NO_STORE, with_security_headers
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.pages import HTTPS_ONLY_PAGE
 from antifaz.web.sessions import Session, SessionStore
+from antifaz.web.status import StatusFacts
 
 # The methods that change nothing: no CSRF check. Everything else gets all the layers.
 SAFE_METHODS = frozenset({"GET", "HEAD"})
@@ -86,13 +87,15 @@ CONTEXT_KEY = "antifaz.panel"
 
 @dataclass(frozen=True)
 class PanelState:
-    """Everything the panel gets from the gateway: the token's fingerprint, never the token."""
+    """Everything the panel gets from the gateway: the token's fingerprint, never the token,
+    and the status facts (web/status.py), never the settings."""
 
     token_fingerprint: bytes = field(repr=False)
     trusted_proxies: tuple[IPNetwork, ...]
     sessions: SessionStore
     limiter: FailureLimiter
     assets: Assets  # the static files' manifest: its exact paths are the public ones
+    status: StatusFacts  # booleans, counts, enums, the version and checked hosts (11c-3b)
 
 
 @dataclass(frozen=True)

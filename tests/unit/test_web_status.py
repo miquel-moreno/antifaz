@@ -24,6 +24,7 @@ from pydantic import SecretStr, ValidationError
 from antifaz import __version__
 from antifaz.web.status import (
     HOST,
+    NER_OFF,
     NER_STATES,
     ProviderFacts,
     StatusFacts,
@@ -118,7 +119,8 @@ def test_a_user_part_path_or_query_never_shows(host: str, secret: str, tail: str
 @pytest.mark.parametrize(
     ("raw", "state"),
     [
-        (None, "off"),
+        (NER_OFF, "off"),
+        (None, "unknown"),
         ("ok", "ok"),
         ("starting", "starting"),
         ("circuit_open", "circuit_open"),
@@ -169,7 +171,7 @@ class _Clock:
 
 
 def _facts(
-    clock: Callable[[], float], ner: Callable[[], object] = lambda: None, **values: object
+    clock: Callable[[], float], ner: Callable[[], object] = lambda: NER_OFF, **values: object
 ) -> StatusFacts:
     fields: dict[str, object] = {
         "version": __version__,

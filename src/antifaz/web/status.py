@@ -10,7 +10,7 @@ a base URL or any other free text (tests/unit/test_web_status.py).
   aside); else only the host name and port of a custom URL (lowercased, IDNA in ASCII, an IPv4
   or a bracketed IPv6) that passes HOST; else "custom". Never the user part, path, query or
   fragment. `has_credentials` is True when the URL has a user part (the view warns about it).
-- `ner_state(raw)`: None (no NER) is "off"; the NER pool's four states pass; anything else is
+- `ner_state(raw)`: NER_OFF (no NER) is "off"; the NER pool's four states pass; anything else is
   "unknown", never the raw value.
 - `overall(ner, providers)`: "danger" if the NER is closed; "warn" if it is starting, paused
   after failures (circuit_open) or unknown, if no provider has a key or if a provider URL has a
@@ -99,9 +99,19 @@ def provider_address(url: str, default: str) -> tuple[str, bool]:
     return _host(url) or "custom", _has_user_part(url)
 
 
+class _NerOff:
+    def __repr__(self) -> str:
+        return "NER_OFF"
+
+
+# What the gateway's NER callable answers when there is no NER. A sentinel, so that a NER whose
+# status() says "off" or None is "unknown", never mistaken for a NER that is not there.
+NER_OFF: object = _NerOff()
+
+
 def ner_state(raw: object) -> NerState:
-    """The NER state for the panel: "off" for None, the pool's states, else "unknown"."""
-    if raw is None:
+    """The NER state for the panel: "off" for NER_OFF, the pool's states, else "unknown"."""
+    if raw is NER_OFF:
         return "off"
     return _POOL_STATES.get(raw, "unknown") if isinstance(raw, str) else "unknown"
 
@@ -141,7 +151,7 @@ class StatusFacts:
     allowed_hosts: int
     allowed_origins: int
     trusted_proxies: int
-    ner_state: Callable[[], object] = field(repr=False)  # None without the NER, else its state
+    ner_state: Callable[[], object] = field(repr=False)  # NER_OFF without the NER, else its state
     clock: Callable[[], float] = field(default=time.monotonic, repr=False)
     started: float = field(default=-1.0)
 

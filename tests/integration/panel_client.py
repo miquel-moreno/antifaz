@@ -52,9 +52,11 @@ def panel_client(
     settings: Settings | None = None,
     peer: tuple[str, int] = ("testclient", 50000),
     upstream: FakeUpstream | None = None,
+    ner: Any = None,
 ) -> TestClient:
+    """`ner`: a NER detector, or a fake with start(), close() and status() (11c-3b)."""
     http = httpx.AsyncClient(transport=httpx.MockTransport(upstream or FakeUpstream(both_echo)))
-    app = create_app(settings or panel_settings(), http_client=http)
+    app = create_app(settings or panel_settings(), http_client=http, ner=ner)
     return TestClient(
         app,
         base_url=base_url,

@@ -227,7 +227,9 @@ def test_local_routes_never_call_a_provider(
 # The panel's routes, by door. Exact (path, method) pairs: a new panel route must be put in one
 # of these on purpose.
 PANEL_PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
-PANEL_SESSION_ROUTES = frozenset({("/panel", "GET"), ("/panel/logout", "POST")})
+PANEL_SESSION_ROUTES = frozenset(
+    {("/panel", "GET"), ("/panel/logout", "POST"), ("/panel/api/status", "GET")}
+)
 # 11c-1: public only for GET and only for the exact paths of the manifest (the door's rule);
 # any other name under it follows the general rule (a session).
 PANEL_STATIC_ROUTES = frozenset({("/panel/static/{name}", "GET")})
