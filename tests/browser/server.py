@@ -12,7 +12,8 @@
   app (`door_headers`), so a test can say which headers a browser sends.
 - Options (11c-3b, `ServerOptions`): throwaway provider keys made here (they only make the
   Status view say "key configured"; the transport above still refuses every call) and a fake
-  NER that only answers status() with a fixed state (no model, no process).
+  NER that only answers status() with a fixed state (no model, no process); 11d-b: or a NER that
+  finds the invented names of tests/nerfakes.py, in this process (`ner_names`).
 - Ready when uvicorn says it started (an Event set right after its startup), with a generous
   hang guard that only produces an error message: never a timing assertion.
 
@@ -73,6 +74,10 @@ class ServerOptions:
 
     provider_keys: bool = False  # throwaway OpenAI and Anthropic keys (never used: no provider)
     ner_state: str | None = None  # a fake NER answering this state; None: the NER is off
+    # 11d-b: a NER that really detects, for «Prueba un texto»: the fake dictionary backend of the
+    # tests (invented names, tests/nerfakes.py) in this process, with no worker process. It says
+    # "ok" for the Status view. Takes the place of ner_state.
+    ner_names: bool = False
 
 
 class FakeNer:
@@ -178,7 +183,11 @@ class PanelServer:
             _env_file=None,  # type: ignore[call-arg]
             **keys,  # type: ignore[arg-type]
         )
-        self.ner = FakeNer(options.ner_state) if options.ner_state is not None else None
+        self.ner: object = FakeNer(options.ner_state) if options.ner_state is not None else None
+        if options.ner_names:
+            from tests.nerfakes import fake_detector
+
+            self.ner = fake_detector()[0]
         self._http = httpx.AsyncClient(transport=httpx.MockTransport(self._provider))
         app = create_app(settings, http_client=self._http, ner=self.ner)  # type: ignore[arg-type]
         self._recorder = _PostRecorder(app)
