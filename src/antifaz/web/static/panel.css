@@ -684,9 +684,11 @@ body{container:page/inline-size}
   /* The bar is the nav box (background and hairline); the tab list inside it scrolls sideways
      when the names do not fit (large text): whole words, never broken, and a fade on the side
      that has more (is-more-start / is-more-end, set by panel.js on scroll and resize). The fade
-     is a mask (alpha only) over the list, so the tabs fade into the bar's own background. */
+     is a mask (alpha only) over the list, so the tabs fade into the bar's own background.
+     scroll-padding-inline keeps the tab that panel.js brings into view clear of the fade, so its
+     focus ring and selected look are never faded (WCAG 2.4.7, 1.4.11). */
   .app-nav{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--color-window);border-top:1px solid var(--color-line)}
-  .app-tablist{position:relative;display:grid;grid-template-columns:repeat(5,minmax(max-content,1fr));gap:2px;margin:0;padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));overflow-x:auto;overflow-y:hidden}
+  .app-tablist{position:relative;display:grid;grid-template-columns:repeat(5,minmax(max-content,1fr));gap:2px;margin:0;padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));overflow-x:auto;overflow-y:hidden;scroll-padding-inline:calc(var(--tabbar-fade) + 4px)}
   .app-tablist.is-more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - var(--tabbar-fade)),transparent);mask-image:linear-gradient(to right,#000 calc(100% - var(--tabbar-fade)),transparent)}
   .app-tablist.is-more-start{-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade));mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade))}
   .app-tablist.is-more-start.is-more-end{-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade),#000 calc(100% - var(--tabbar-fade)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--tabbar-fade),#000 calc(100% - var(--tabbar-fade)),transparent)}
@@ -707,8 +709,10 @@ body{container:page/inline-size}
   .app-window{border-radius:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--color-window);min-height:100vh;min-height:100dvh}
   .login{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:stretch;gap:0;background:var(--color-window)}
   .login-tools{align-self:flex-end;padding:12px 12px 0}
-  .login-card{flex:1;width:100%;padding:16px 20px 28px}
-  /* Centred in the screen while it fits; taller (large text), auto margins drop to zero and it
+  .login-card{flex:1;width:100%;min-height:auto;padding:16px 20px 28px}
+  /* min-height:auto undoes the window's 100dvh above (the card is also an .app-window), so the
+     tools row and the card together fit the screen; auto, not 0, so a tall card is never cut by
+     the window's overflow:clip. Centred in the screen while it fits; taller (large text), auto margins drop to zero and it
      starts at the top and scrolls, never clipped. */
   .login-card>:first-child{margin-top:auto}
   .login-note{margin-bottom:auto}

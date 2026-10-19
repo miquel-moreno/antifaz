@@ -8,7 +8,7 @@
   var crumb = document.getElementById("crumb-name");
 
   function horizontal() {
-    return getComputedStyle(tablist).flexDirection.indexOf("row") === 0;
+    return tabs.length > 1 && tabs[1].offsetTop === tabs[0].offsetTop;
   }
 
   function syncOrientation() {
@@ -19,13 +19,7 @@
     if (tablist.scrollWidth <= tablist.clientWidth) {
       return;
     }
-    var start = tab.offsetLeft;
-    var end = start + tab.offsetWidth;
-    if (start < tablist.scrollLeft) {
-      tablist.scrollLeft = start - 8;
-    } else if (end > tablist.scrollLeft + tablist.clientWidth) {
-      tablist.scrollLeft = end - tablist.clientWidth + 8;
-    }
+    tab.scrollIntoView({block: "nearest", inline: "nearest"});
   }
 
   function enter(view) {

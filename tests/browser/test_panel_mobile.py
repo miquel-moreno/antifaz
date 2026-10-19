@@ -288,9 +288,6 @@ def test_the_menu_theme_row_is_a_switch_named_by_its_fixed_text(
     desktop's icon button keeps its aria-label."""
     tab = new_tab(width=390, locale=_locale(lang), color_scheme=scheme)
     _log_in(tab, server, lang)
-    # Firefox under Playwright ignores the context's colour scheme until a page has loaded, so
-    # the scheme is emulated again here (a no-op in Chromium and WebKit, which honour it).
-    tab.page.emulate_media(color_scheme=scheme)  # type: ignore[arg-type]
     _open_menu(tab)
     switch = tab.page.locator(SWITCH)
     assert switch.count() == 1
@@ -514,6 +511,14 @@ SELECTED_INSIDE_JS = """(id) => { const t = document.getElementById(id).getBound
   const l = document.querySelector('[role=tablist]').getBoundingClientRect();
   return t.left >= l.left - 0.5 && t.right <= l.right + 0.5; }"""
 HAS_CLASS_JS = "(name) => document.querySelector('[role=tablist]').classList.contains(name)"
+# A hang guard only (about ten seconds of frames), never a measure of speed.
+CLASS_SET_JS = """(name) => new Promise((done) => {
+  const list = document.querySelector('[role=tablist]');
+  let frames = 0;
+  const check = () => list.classList.contains(name) ? done(true)
+    : (++frames > 600 ? done(false) : requestAnimationFrame(check));
+  check();
+})"""
 
 
 def _locale(lang: str) -> str:
@@ -631,6 +636,7 @@ LOGIN_BOXES_JS = """() => {
   const last = card.querySelector('.login-note').getBoundingClientRect();
   return {top: r.top + parseFloat(cs.paddingTop), bottom: r.bottom - parseFloat(cs.paddingBottom),
           first: first.top, last: last.bottom, vh: window.innerHeight,
+          tools: document.querySelector('.login-tools').getBoundingClientRect().bottom,
           scroll: document.documentElement.scrollHeight};
 }"""
 
@@ -642,10 +648,11 @@ def test_the_phone_login_is_centred_vertically(
     tab = new_tab(width=390, height=844, locale=_locale(lang))
     tab.goto(f"/panel/login?lang={lang}")
     box = tab.page.evaluate(LOGIN_BOXES_JS)
-    above = box["first"] - box["top"]
-    below = box["bottom"] - box["last"]
-    assert above > 40, box  # really centred, not at the top
-    assert abs(above - below) <= 16, box  # the content's middle within 8 px of the card's
+    assert box["scroll"] <= box["vh"], box  # it fits: the page does not scroll
+    middle = (box["first"] + box["last"]) / 2
+    screen_middle = (box["tools"] + box["vh"]) / 2  # the screen below the tools row
+    assert box["first"] - box["tools"] > 40, box  # really centred, not at the top
+    assert abs(middle - screen_middle) <= 8, box
 
 
 def test_a_tall_phone_login_starts_at_the_top_and_scrolls(
@@ -665,3 +672,70 @@ def test_a_tall_phone_login_starts_at_the_top_and_scrolls(
     assert box["last"] <= box["bottom"] + 0.5
     card = _box(tab, ".login-card")
     assert card["bottom"] >= card["vh"] - 1  # still fills the screen
+
+
+# --- 11c-3a review: the active tab clear of the fade, orientation, CSP --------------------------
+
+# How far the active tab is from each edge of the tab list, and whether that side has more.
+ACTIVE_GAPS_JS = """() => {
+  const list = document.querySelector('[role=tablist]');
+  const t = document.activeElement.getBoundingClientRect(), l = list.getBoundingClientRect();
+  const max = list.scrollWidth - list.clientWidth;
+  return {id: document.activeElement.id, left: t.left - l.left, right: l.right - t.right,
+          moreStart: list.scrollLeft > 1, moreEnd: list.scrollLeft < max - 1,
+          fade: parseFloat(getComputedStyle(list).getPropertyValue('--tabbar-fade'))};
+}"""
+
+
+def test_the_active_tab_never_sits_in_the_fade(new_tab: NewTab, server: PanelServer) -> None:
+    """WCAG 2.4.7 / 1.4.11: the focused and selected tab is scrolled clear of the fade on any
+    side that still has more, so its focus ring and selected look are never faded."""
+    tab = new_tab(width=320, bypass_csp=True, locale="es-ES")
+    _log_in(tab, server, "es")
+    _text_200(tab)
+    tab.page.focus("#tab-playground")
+    page_top = tab.page.evaluate("() => window.scrollY")
+    keys = ["ArrowRight"] * 4 + ["ArrowLeft"] * 4
+    for key in keys:
+        tab.page.keyboard.press(key)
+        tab.page.evaluate(TWO_FRAMES_JS)
+        assert tab.page.evaluate("() => window.scrollY") == page_top  # only the bar scrolls
+        gaps = tab.page.evaluate(ACTIVE_GAPS_JS)
+        assert gaps["fade"] > 0, gaps
+        if gaps["moreEnd"]:
+            assert gaps["right"] >= gaps["fade"], (key, gaps)
+        if gaps["moreStart"]:
+            assert gaps["left"] >= gaps["fade"], (key, gaps)
+
+
+def test_the_orientation_follows_the_layout_not_a_flex_declaration(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """The phone tab list is a grid: its arrows must not depend on a leftover flex-direction."""
+    tab = new_tab(width=390, bypass_csp=True)
+    _log_in(tab, server)
+    tab.page.add_style_tag(content=".app-tablist{flex-direction:column!important}")
+    tab.page.focus("#tab-playground")
+    tab.page.keyboard.press("ArrowRight")
+    assert tab.page.evaluate(SELECTED_JS) == ["tab-live"]
+
+
+def test_scrolling_the_tab_bar_keeps_the_csp_clean(new_tab: NewTab, server: PanelServer) -> None:
+    """With the real CSP (no bypass): a screen so narrow the names overflow at 100 % text; the
+    fade classes toggle as the bar scrolls, and nothing breaks the policy or leaves the page."""
+    tab = new_tab(width=240, locale="es-ES")
+    _log_in(tab, server, "es")  # the longer names: they overflow 240 px at 100 %
+    # evaluate(), not wait_for_function(): the latter needs eval in the page, which the CSP
+    # refuses. The promise checks once per frame until panel.js has set the class.
+    assert tab.page.evaluate(CLASS_SET_JS, "is-more-end")
+    tab.page.evaluate(
+        "() => { const l = document.querySelector('[role=tablist]');"
+        " l.scrollLeft = l.scrollWidth; }"
+    )
+    assert tab.page.evaluate(CLASS_SET_JS, "is-more-start")
+    assert not tab.page.evaluate(HAS_CLASS_JS, "is-more-end")
+    tab.page.click("#tab-live")
+    assert tab.csp_violations() == []
+    assert tab.errors == []
+    assert tab.blocked == []
+    assert tab.foreign_requests() == []
