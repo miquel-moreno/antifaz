@@ -208,6 +208,13 @@ def test_the_login_clears_the_field_before_it_waits() -> None:
         ("persisted", "panel.js"),
         ("location.reload()", "panel.js"),
         ("textContent", "panel.js"),
+        # The Status view (11c-3b): one literal URL, read only when shown, no timers.
+        ('fetch("/panel/api/status"', "panel.js"),
+        ('"visibilitychange"', "panel.js"),
+        ('document.visibilityState === "visible"', "panel.js"),
+        ('"aria-busy"', "panel.js"),
+        ("Intl.DateTimeFormat(root.lang", "panel.js"),
+        ('location.replace("/panel/login" + languageQuery())', "panel.js"),
     ],
 )
 def test_the_fetch_options_and_navigation(needle: str, name: str) -> None:

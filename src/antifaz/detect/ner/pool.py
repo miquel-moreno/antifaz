@@ -169,15 +169,25 @@ class NerPool:
 
         "starting": a worker was replaced and has not answered yet (it may be loading). The
         pipe is never read here: only the thread that holds a worker reads it.
+
+        Never takes the lock (review of 11c-3b): start(), close() and a replacement hold it while
+        they spawn, wait for or join worker processes, and /healthz and the panel's status
+        route call this on the event loop. Each attribute read here is one atomic read of a
+        value written under the lock, and the worker list is copied first, so a reading may mix
+        two moments of a change in progress but never blocks and never fails.
         """
-        with self._lock:
-            if self._closed:
-                return "closed"
-            if time.monotonic() < self._open_until:
-                return "circuit_open"
-            if not self._started or not all(worker.ready for worker in self._workers):
-                return "starting"
-            return "ok"
+        if self._closed:
+            return "closed"
+        if time.monotonic() < self._open_until:
+            return "circuit_open"
+        workers = tuple(self._workers)
+        # Fewer workers than the size: one is being replaced (already out of the list, maybe
+        # still being joined) and all(()) would say "ok" with none left.
+        if not self._started or len(workers) < self._size:
+            return "starting"
+        if not all(worker.ready for worker in workers):
+            return "starting"
+        return "ok"
 
     # --- workers ------------------------------------------------------------------------------
 
@@ -331,9 +341,9 @@ class NerPool:
                 self._dispose(worker)
                 return
             if lost or killed:
-                self._dispose(worker)
                 if lost:
-                    self._failed()
+                    self._failed()  # the circuit state first: disposing joins for seconds
+                self._dispose(worker)
                 worker = self._spawn()  # it loads in the background
             self._idle.put(worker)
 

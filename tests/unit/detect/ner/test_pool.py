@@ -440,3 +440,52 @@ def test_closing_during_a_call_blocks_that_call_without_errors(
 
 def test_the_pool_exposes_its_time_limit() -> None:
     assert NerPool(FAKE_FACTORY, OPTIONS, timeout=3.0).timeout == 3.0
+
+
+# --- status() never waits for the lock (review of 11c-3b) -----------------------------------
+
+# A hang guard only: status() reads plain attributes, so it returns at once; a status() that
+# took the lock would never return while the test holds it.
+STATUS_HANG_GUARD = 30.0
+
+
+def test_status_returns_while_another_thread_holds_the_lock() -> None:
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT)  # never started
+    answers: list[str] = []
+    with ner_pool._lock:  # what join or spawn hold for a while
+        reader = threading.Thread(target=lambda: answers.append(ner_pool.status()), daemon=True)
+        reader.start()
+        reader.join(STATUS_HANG_GUARD)
+        finished = not reader.is_alive()
+
+    assert finished, "status() waited for the pool's lock"
+    assert answers == ["starting"]
+    ner_pool.close()
+    assert ner_pool.status() == "closed"
+
+
+def test_status_is_starting_while_a_worker_is_missing() -> None:
+    """During a replacement the lost worker is already out of the list (and joined, up to
+    seconds) before the new one is spawned: never "ok" with fewer live workers than the size."""
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT)
+    ner_pool._started = True  # as after start(), with the only worker removed by _dispose()
+    ner_pool._workers = []
+
+    with ner_pool._lock:
+        assert ner_pool.status() == "starting"
+
+
+def test_a_lost_worker_opens_the_circuit_before_it_is_disposed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_release writes the circuit state first; the slow kill and join come after."""
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT, failure_threshold=1)
+    seen: list[float] = []
+    lost, fresh = object(), object()
+    monkeypatch.setattr(ner_pool, "_dispose", lambda worker: seen.append(ner_pool._open_until))
+    monkeypatch.setattr(ner_pool, "_spawn", lambda: fresh)
+
+    ner_pool._release(lost, lost=True)  # type: ignore[arg-type]
+
+    assert seen and seen[0] > 0.0, "the circuit was still closed while the worker was disposed"
+    assert ner_pool._idle.get_nowait() is fresh

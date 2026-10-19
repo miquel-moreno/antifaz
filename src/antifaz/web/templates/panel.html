@@ -5,6 +5,8 @@
     «Salir» in the sidebar foot. On a phone (panel.css) the tabs are a bar fixed at the bottom
     with short names, and the top bar holds only the logo and a settings button that opens a
     menu (disclosure) with the language, the theme switch and «Salir». -#}
+{#- «Estado» (11c-3b) has its real content (status_view below) instead of the empty block; panel.js
+    fills it from GET /panel/api/status with textContent only. -#}
 {#- (name, tab icon, empty-block icon, tab label, short label, intro, empty text): the keys
     written out, so a test can tell that every key of the catalogs is used. -#}
 {% set views = [
@@ -12,8 +14,61 @@
   ("live", "i-live", "i-live", t("tab.live"), t("tab.live.short"), t("view.live.intro"), t("view.live.empty")),
   ("keys", "i-key", "i-key", t("tab.keys"), t("tab.keys.short"), t("view.keys.intro"), t("view.keys.empty")),
   ("policies", "i-policy", "i-policy", t("tab.policies"), t("tab.policies.short"), t("view.policies.intro"), t("view.policies.empty")),
-  ("status", "i-status", "i-status", t("tab.status"), t("tab.status.short"), t("view.status.intro"), t("view.status.empty")),
+  ("status", "i-status", "i-status", t("tab.status"), t("tab.status.short"), t("view.status.intro"), none),
 ] %}
+{#- A status pill: its dot and its label; panel.js sets the tone class and the label. -#}
+{% macro pill(id="") -%}
+<span class="status neutral"{% if id %} id="{{ id }}"{% else %} data-key{% endif %}><span class="dot" aria-hidden="true"></span><span data-label></span></span>
+{%- endmacro %}
+{#- «Estado» (11c-3b): the error callout, four cards (hidden until the first answer) and the note
+    that nothing updates by itself. No /healthz, address, database or latency (review of the
+    design): only local facts, never a key, a base URL or a personal value. -#}
+{% macro status_view() -%}
+<div class="callout danger" id="status-alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("status.error.title") }}</strong><p id="status-alert-text"></p></div>
+<div class="sgrid" id="status-grid" aria-busy="false" hidden>
+<article class="surface scard" aria-labelledby="s-gw">
+<div class="sh"><h2 id="s-gw">{{ t("status.gateway") }}</h2>{{ pill("status-overall") }}</div>
+<dl class="kv">
+<dt>{{ t("status.version") }}</dt><dd class="mono"><span class="ident" id="status-version"></span></dd>
+<dt>{{ t("status.uptime") }}</dt><dd id="status-uptime"></dd>
+<dt>{{ t("status.panel_scheme") }}</dt><dd id="status-scheme"></dd>
+<dt>{{ t("status.allowed_hosts") }}</dt><dd id="status-hosts"></dd>
+<dt>{{ t("status.allowed_origins") }}</dt><dd id="status-origins"></dd>
+<dt>{{ t("status.trusted_proxies") }}</dt><dd id="status-proxies"></dd>
+</dl>
+<p class="cmd">{{ t("status.sessions") }}</p>
+</article>
+<article class="surface scard" aria-labelledby="s-ner">
+<div class="sh"><h2 id="s-ner">{{ t("status.ner") }}</h2>{{ pill("status-ner") }}</div>
+<p class="desc">{{ t("status.ner.desc") }}</p>
+<ul class="ner" aria-label="{{ t('status.ner.states') }}">
+{%- for state, tone, state_label, state_desc in [
+  ("ok", "ok", t("status.ner.ok"), t("status.ner.ok.desc")),
+  ("starting", "warn", t("status.ner.starting"), t("status.ner.starting.desc")),
+  ("circuit_open", "warn", t("status.ner.circuit_open"), t("status.ner.circuit_open.desc")),
+  ("closed", "danger", t("status.ner.closed"), t("status.ner.closed.desc")),
+  ("off", "neutral", t("status.ner.off"), t("status.ner.off.desc")),
+] %}
+<li data-ner="{{ state }}"><span class="dot {{ tone }}" aria-hidden="true"></span><b>{{ state_label }}</b><span class="tag" hidden>{{ t("status.now") }}</span><p>{{ state_desc }}</p></li>
+{%- endfor %}
+</ul>
+</article>
+<article class="surface scard" aria-labelledby="s-prov">
+<div class="sh"><h2 id="s-prov">{{ t("status.providers") }}</h2></div>
+<ul class="prov">
+{%- for provider, provider_name in [("openai", t("status.provider.openai")), ("anthropic", t("status.provider.anthropic"))] %}
+<li data-provider="{{ provider }}"><span class="nm">{{ provider_name }}<span class="ident" data-address></span></span>{{ pill() }}<p class="prov-warn" data-credentials hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>{{ t("status.credentials") }}</p></li>
+{%- endfor %}
+</ul>
+<p class="cmd">{{ t("view.status.cli") }} <code class="code ident">{{ t("view.status.command") }}</code></p>
+</article>
+<article class="surface scard" aria-labelledby="s-ev">
+<div class="sh"><h2 id="s-ev">{{ t("status.evidence") }}</h2></div>
+<p class="desc">{{ t("status.evidence.soon") }}</p>
+</article>
+</div>
+<p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>{{ t("status.foot") }}</p>
+{%- endmacro %}
 {% block meta %}<meta name="{{ csrf_meta }}" content="{{ csrf_token }}">
 {% endblock %}
 {% block title %}{{ t("panel.title") }}{% endblock %}
@@ -55,14 +110,19 @@
 <div class="vh"><div>
 <h1>{{ label }}</h1>
 <p>{{ intro }}</p>
-</div></div>
+</div>
+{%- if name == "status" %}
+<span class="vh-side"><span class="status-time" id="status-time" role="status"></span><button class="btn ghost" type="button" id="status-refresh"><svg class="ic spin" aria-hidden="true"><use href="#i-replay"/></svg>{{ t("status.refresh") }}</button></span>
+{%- endif %}
+</div>
+{%- if name == "status" %}
+{{ status_view() }}
+{%- else %}
 <div class="empty">
 <span class="orb"><svg class="ic" aria-hidden="true"><use href="#{{ orb }}"/></svg></span>
 <p><b>{{ t("view.soon") }}</b> {{ empty }}</p>
-{%- if name == "status" %}
-<p class="empty-cli">{{ t("view.status.cli") }} <code class="code ident">{{ t("view.status.command") }}</code></p>
-{%- endif %}
 </div>
+{%- endif %}
 </section>
 {%- endfor %}
 </main>
@@ -73,5 +133,32 @@
 <template id="panel-messages">
 <span data-msg="refused">{{ t("logout.error.refused") }}</span>
 <span data-msg="network">{{ t("logout.error.network") }}</span>
+</template>
+<template id="status-messages">
+<span data-msg="overall.ok">{{ t("status.overall.ok") }}</span>
+<span data-msg="overall.warn">{{ t("status.overall.warn") }}</span>
+<span data-msg="overall.danger">{{ t("status.overall.danger") }}</span>
+<span data-msg="overall.stale">{{ t("status.overall.stale") }}</span>
+<span data-msg="ner.off">{{ t("status.ner.off") }}</span>
+<span data-msg="ner.ok">{{ t("status.ner.ok") }}</span>
+<span data-msg="ner.starting">{{ t("status.ner.starting") }}</span>
+<span data-msg="ner.circuit_open">{{ t("status.ner.circuit_open") }}</span>
+<span data-msg="ner.closed">{{ t("status.ner.closed") }}</span>
+<span data-msg="scheme.https">{{ t("status.scheme.https") }}</span>
+<span data-msg="scheme.http_localhost">{{ t("status.scheme.http_localhost") }}</span>
+<span data-msg="address.default">{{ t("status.address.default") }}</span>
+<span data-msg="address.custom">{{ t("status.address.custom") }}</span>
+<span data-msg="key.yes">{{ t("status.key.yes") }}</span>
+<span data-msg="key.no">{{ t("status.key.no") }}</span>
+<span data-msg="unknown">{{ t("status.unknown") }}</span>
+<span data-msg="checking">{{ t("status.checking") }}</span>
+<span data-msg="checked">{{ t("status.checked") }}</span>
+<span data-msg="checked.old">{{ t("status.checked.old") }}</span>
+<span data-msg="error.network">{{ t("status.error.network") }}</span>
+<span data-msg="error.refused">{{ t("status.error.refused") }}</span>
+<span data-msg="uptime.days">{{ t("status.uptime.days") }}</span>
+<span data-msg="uptime.hours">{{ t("status.uptime.hours") }}</span>
+<span data-msg="uptime.minutes">{{ t("status.uptime.minutes") }}</span>
+<span data-msg="uptime.less">{{ t("status.uptime.less") }}</span>
 </template>
 {% endblock %}

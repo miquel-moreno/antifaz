@@ -78,6 +78,45 @@ def test_every_text_grows_with_the_text_size(
     assert shrunk == [], "\n".join(shrunk)
 
 
+# The sidebar's «processed on your network» line: the vertical centre of its dot, and the box of
+# the first line of its text (a Range over the text node: one rect per line).
+LOCAL_DOT_JS = """() => {
+  const line = document.querySelector('.app-sidebar-foot .app-local');
+  const dot = line.querySelector('.dot').getBoundingClientRect();
+  const text = [...line.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const rects = [...range.getClientRects()].filter((r) => r.width > 0);
+  const tops = [...new Set(rects.map((r) => Math.round(r.top)))];
+  const first = rects.filter((r) => Math.round(r.top) === tops[0]);
+  return {centre: dot.top + dot.height / 2, lines: tops.length,
+          top: Math.min(...first.map((r) => r.top)),
+          bottom: Math.max(...first.map((r) => r.bottom))};
+}"""
+
+
+@pytest.mark.parametrize("text_200", [False, True], ids=["text-100", "text-200"])
+def test_the_sidebar_dot_sits_on_the_first_line(
+    new_tab: NewTab, server: PanelServer, text_200: bool
+) -> None:
+    """Miquel's review: the green dot of «Los datos personales se detectan y se cambian en tu
+    red» goes with the first line of the text, not with the middle of the block."""
+    tab = new_tab(width=1280, bypass_csp=True, locale="es-ES")
+    tab.goto("/panel/login?lang=es")
+    tab.page.fill("#login-token", server.admin_token)
+    tab.page.click("#login-form button[type=submit]")
+    tab.page.wait_for_url(f"{server.origin}/panel?lang=es")
+    tab.remember_secrets()
+    if text_200:
+        tab.page.add_style_tag(content=TEXT_200_CSS)
+    tab.page.evaluate(SETTLE_JS)
+
+    dot = tab.page.evaluate(LOCAL_DOT_JS)
+
+    assert dot["lines"] >= 2, dot  # it wraps at this width: the check means something
+    assert dot["top"] <= dot["centre"] <= dot["bottom"], dot
+
+
 LAYOUT_JS = """() => {
   const button = document.getElementById('settings-btn');
   return {overflow: document.documentElement.scrollWidth - window.innerWidth,

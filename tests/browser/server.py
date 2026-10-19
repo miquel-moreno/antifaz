@@ -10,6 +10,9 @@
 - What each browser really sent through the door on a POST (its Origin and Sec-Fetch-Site,
   and whether an X-Antifaz-CSRF header came, never its value) is recorded as it reaches the
   app (`door_headers`), so a test can say which headers a browser sends.
+- Options (11c-3b, `ServerOptions`): throwaway provider keys made here (they only make the
+  Status view say "key configured"; the transport above still refuses every call) and a fake
+  NER that only answers status() with a fixed state (no model, no process).
 - Ready when uvicorn says it started (an Event set right after its startup), with a generous
   hang guard that only produces an error message: never a timing assertion.
 
@@ -22,6 +25,7 @@ import logging
 import secrets
 import socket
 import threading
+from dataclasses import dataclass
 
 import httpx
 import uvicorn
@@ -61,6 +65,30 @@ class _NoProvider:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(f"{request.method} {request.url.host}")
         raise AssertionError("the browser tests must never reach a provider")
+
+
+@dataclass(frozen=True)
+class ServerOptions:
+    """What a test's gateway has besides the defaults (11c-3b)."""
+
+    provider_keys: bool = False  # throwaway OpenAI and Anthropic keys (never used: no provider)
+    ner_state: str | None = None  # a fake NER answering this state; None: the NER is off
+
+
+class FakeNer:
+    """A NER that is never asked to detect: start, close and a fixed status()."""
+
+    def __init__(self, state: str) -> None:
+        self.state = state
+
+    def start(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def status(self) -> str:
+        return self.state
 
 
 class _PostRecorder:
@@ -126,19 +154,34 @@ class _Server(uvicorn.Server):
 class PanelServer:
     """One gateway with the panel on, for one test. Start with `start()`, end with `stop()`."""
 
-    def __init__(self) -> None:
+    def __init__(self, options: ServerOptions | None = None) -> None:
+        options = options or ServerOptions()
         self.api_key = secrets.token_hex(32)
         self.admin_token = secrets.token_hex(32)
+        self.provider_keys = (
+            (secrets.token_hex(32), secrets.token_hex(32)) if options.provider_keys else ()
+        )
         self._provider = _NoProvider()
+        keys = (
+            {
+                "openai_api_key": SecretStr(self.provider_keys[0]),
+                "anthropic_api_key": SecretStr(self.provider_keys[1]),
+            }
+            if self.provider_keys
+            else {}
+        )
         settings = Settings(
             antifaz_api_key=SecretStr(self.api_key),
             admin_token=SecretStr(self.admin_token),
             allowed_hosts=[HOST, "localhost"],
             log_level="WARNING",
             _env_file=None,  # type: ignore[call-arg]
+            **keys,  # type: ignore[arg-type]
         )
+        self.ner = FakeNer(options.ner_state) if options.ner_state is not None else None
         self._http = httpx.AsyncClient(transport=httpx.MockTransport(self._provider))
-        self._recorder = _PostRecorder(create_app(settings, http_client=self._http))
+        app = create_app(settings, http_client=self._http, ner=self.ner)  # type: ignore[arg-type]
+        self._recorder = _PostRecorder(app)
         config = uvicorn.Config(
             self._recorder,
             loop="asyncio",
@@ -172,7 +215,7 @@ class PanelServer:
     @property
     def throwaway_tokens(self) -> tuple[str, str]:
         """The throwaway tokens of this gateway, to redact from any failure log."""
-        return (self.api_key, self.admin_token)
+        return (self.api_key, self.admin_token, *self.provider_keys)
 
     @property
     def provider_calls(self) -> list[str]:

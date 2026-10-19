@@ -28,6 +28,7 @@ from antifaz.web.door import PanelState
 from antifaz.web.login_limit import FailureLimiter
 from antifaz.web.routes import build_router
 from antifaz.web.sessions import MemorySessionStore
+from antifaz.web.status import NER_OFF, StatusFacts
 
 WEB = Path(antifaz.web.__file__).parent
 LOCK_FREE = ("sessions.py", "login_limit.py")
@@ -75,6 +76,7 @@ def test_every_registered_panel_endpoint_is_a_coroutine_function() -> None:
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
         assets=load_assets(),
+        status=StatusFacts("0.0.0", (), 1, 0, 0, lambda: NER_OFF),
     )
     routes = build_router(state).routes
     assert routes

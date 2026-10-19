@@ -136,7 +136,8 @@ panel-check:
 # Captures of the real panel (tests/browser/test_panel_captures.py) into build/panel-captures/,
 # which git ignores: login empty, login with an error and the panel, in Spanish and English, light
 # and dark, at 1280x800 and 390x844 (2x), plus the phone settings menu open and the phone panel
-# with the text at 200 % (390x844 and 320x844). Synthetic only: the
+# with the text at 200 % (390x844 and 320x844), and the Status view with its data and in its
+# error state (11c-3b). Synthetic only: the
 # token field is checked empty before every capture. Chromium only. Not part of `check` nor of `panel-check`.
 panel-captures:
 	uv run --frozen --group panel pytest tests/browser/test_panel_captures.py -vv --no-cov --panel --panel-captures --panel-browser chromium -p no:cacheprovider

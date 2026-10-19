@@ -8,6 +8,7 @@ import functools
 import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Literal
 
 import anyio
 import anyio.to_thread
@@ -33,6 +34,9 @@ from antifaz.mask import Detector
 from antifaz.policy import DEFAULT_POLICY, Policy
 from antifaz.providers.http import build_client
 
+if TYPE_CHECKING:  # antifaz.web is imported only when the panel is on (_panel)
+    from antifaz.web.status import UrlParts
+
 # Threads that can mask at the same time (detection and waiting for the NER). A limiter of our
 # own: masking never takes the threads of anyio's shared default limiter from other work.
 MASK_THREADS = 8
@@ -57,12 +61,32 @@ def registered_paths(app: FastAPI) -> frozenset[str]:
     return frozenset(context.path for context in iter_route_contexts(app.routes) if context.path)
 
 
-def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | None:
+def base_url_parts(url: str) -> "UrlParts | None":
+    """A provider base URL exactly as httpx will use it (11c-3b): scheme, the ASCII host httpx
+    contacts (IDNA2008), the port and whether there is a user part. None if httpx refuses it.
+    Only for the panel's «Estado» facts, which keep nothing but the checked host[:port]."""
+    from antifaz.web.status import UrlParts
+
+    try:
+        parsed = httpx.URL(url)
+        host = parsed.raw_host.decode("ascii")
+        return UrlParts(parsed.scheme, host, parsed.port, parsed.userinfo != b"")
+    except (httpx.InvalidURL, ValueError, TypeError):  # UnicodeError is a ValueError
+        return None
+
+
+def _panel(
+    app: FastAPI, settings: Settings, ner: NerDetector | None
+) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
     antifaz.web is imported only here, so without the token nothing of the panel is loaded. The
     panel gets a PanelState and nothing else: the token's SHA-256, never the token or settings.
     Its static files are read, checked and hashed here, once (AssetError stops the startup).
+    The «Estado» view's facts (11c-3b) are made here too, without a secret: whether each
+    provider has a key, the checked host of a custom base URL (never the URL), counts, and a
+    callable that reads the NER state at each request (it holds the NER itself, never the
+    app). They are kept in app.state.panel_status, so the lifespan marks when start-up finished.
     """
     if settings.admin_token is None:
         return None
@@ -72,7 +96,28 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
     from antifaz.web.login_limit import FailureLimiter
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
+    from antifaz.web.status import NER_OFF, ProviderFacts, StatusFacts, is_default, provider_address
 
+    def provider(id_: Literal["openai", "anthropic"], key: object, url: str) -> ProviderFacts:
+        default = Settings.model_fields[f"{id_}_base_url"].default
+        parts = base_url_parts(url)
+        address, credentials = provider_address(parts, default=is_default(url, default))
+        return ProviderFacts(id_, key is not None, address, credentials)
+
+    def ner_state() -> object:
+        return NER_OFF if ner is None else ner.status()
+
+    status = StatusFacts(
+        version=__version__,
+        providers=(
+            provider("openai", settings.openai_api_key, settings.openai_base_url),
+            provider("anthropic", settings.anthropic_api_key, settings.anthropic_base_url),
+        ),
+        allowed_hosts=len(settings.allowed_hosts),
+        allowed_origins=len(settings.allowed_origins),
+        trusted_proxies=len(settings.trusted_proxies),
+        ner_state=ner_state,
+    )
     token = settings.admin_token.get_secret_value().encode()
     state = PanelState(
         token_fingerprint=hashlib.sha256(token).digest(),
@@ -80,7 +125,9 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
         sessions=MemorySessionStore(),
         limiter=FailureLimiter(),
         assets=load_assets(),
+        status=status,
     )
+    app.state.panel_status = status
     app.include_router(build_router(state))
     return functools.partial(PanelDoor, state=state)
 
@@ -117,6 +164,9 @@ def create_app(
         try:
             if ner is not None:
                 await anyio.to_thread.run_sync(ner.start, limiter=lifecycle)
+            panel_status = getattr(app.state, "panel_status", None)
+            if panel_status is not None:
+                panel_status.mark_started()  # the Status view's uptime counts from here
             yield
         finally:
             if ner is not None:
@@ -147,7 +197,7 @@ def create_app(
     app.include_router(anthropic.router)
     app.include_router(models.router)
     app.include_router(scan.router)
-    panel_door = _panel(app, settings)
+    panel_door = _panel(app, settings, ner)
     app.state.route_paths = registered_paths(app)
     # The last one added runs first: request id -> trusted host -> gate (the panel's door for
     # /panel*; the key, Origin and JSON for the rest).

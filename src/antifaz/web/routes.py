@@ -36,6 +36,13 @@ CSRF again.
   answers 401 and no cookie is touched. Two logouts of the same session at the same time can
   both answer 200 with the expired cookie: the door let both through before either closed it.
   That is idempotent and harmless (the session is closed once, its subscribers told once).
+- GET /panel/api/status (11c-3b): the «Estado» view's data, for a live session only (the door:
+  the API key never opens it, and it is not public). JSON with the closed schema of
+  web/status_response.py, built from PanelState.status (web/status.py): booleans, counts, enums,
+  the version and checked hosts, never a key or a base URL. It reads local state only (the NER
+  state at that moment and the uptime) and never calls a provider. No language: no Vary or
+  Content-Language. Only GET: POST and the others are 405 once the door let them through, HEAD
+  is 405 too.
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
@@ -67,6 +74,8 @@ from antifaz.http_errors import (
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
+from antifaz.web.status import snapshot
+from antifaz.web.status_response import StatusResponse
 from antifaz.web.templating import Pages
 
 MAX_LOGIN_BODY = 1024
@@ -171,6 +180,13 @@ def build_router(state: PanelState) -> APIRouter:
             raise PanelUnauthorizedError()
         lang = _language(request, pages)
         return _page(pages.panel(lang, session.csrf_token), lang)
+
+    @router.get("/panel/api/status")
+    async def status(request: Request) -> StatusResponse:
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        return StatusResponse.model_validate(snapshot(state.status, context.scheme))
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

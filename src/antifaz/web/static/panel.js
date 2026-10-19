@@ -42,6 +42,9 @@
       tab.focus();
     }
     reveal(tab);
+    if (view.id === "panel-status") {
+      statusFirstShown();
+    }
   }
 
   tabs.forEach(function (tab, index) {
@@ -240,6 +243,249 @@
   });
   dark.addEventListener("change", paint);
   paint();
+
+  var statusTab = document.getElementById("tab-status");
+  var statusGrid = document.getElementById("status-grid");
+  var statusTime = document.getElementById("status-time");
+  var statusButton = document.getElementById("status-refresh");
+  var statusAlert = document.getElementById("status-alert");
+  var statusAlertText = document.getElementById("status-alert-text");
+  var statusMessages = document.getElementById("status-messages");
+  var statusSequence = 0;
+  var statusStarted = false;
+  var statusCheckedAt = null;
+  var statusInFlight = null;
+  var TONES = ["ok", "warn", "danger", "neutral"];
+  var HOST_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.-:[]";
+  var VERSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.+-";
+
+  function statusText(key) {
+    var item = statusMessages.content.querySelector('[data-msg="' + key + '"]');
+    return item ? item.textContent : "";
+  }
+
+  function known(value, allowed) {
+    return typeof value === "string" && allowed.indexOf(value) !== -1;
+  }
+
+  function label(group, value, allowed) {
+    return known(value, allowed) ? statusText(group + "." + value) : statusText("unknown");
+  }
+
+  function onlyChars(value, chars, longest) {
+    if (typeof value !== "string" || value === "" || value.length > longest) {
+      return false;
+    }
+    for (var index = 0; index < value.length; index += 1) {
+      if (chars.indexOf(value.charAt(index)) === -1) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function setPill(pill, tone, text) {
+    TONES.forEach(function (name) {
+      pill.classList.toggle(name, name === tone);
+    });
+    pill.querySelector("[data-label]").textContent = text;
+  }
+
+  function count(value) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+      return statusText("unknown");
+    }
+    return value.toLocaleString(root.lang);
+  }
+
+  function uptime(seconds) {
+    if (typeof seconds !== "number" || !Number.isInteger(seconds) || seconds < 0) {
+      return statusText("unknown");
+    }
+    var minutes = Math.floor(seconds / 60);
+    var hours = Math.floor(minutes / 60);
+    var days = Math.floor(hours / 24);
+    if (days > 0) {
+      return statusText("uptime.days").replace("{days}", String(days))
+        .replace("{hours}", String(hours % 24));
+    }
+    if (hours > 0) {
+      return statusText("uptime.hours").replace("{hours}", String(hours))
+        .replace("{minutes}", String(minutes % 60));
+    }
+    if (minutes > 0) {
+      return statusText("uptime.minutes").replace("{minutes}", String(minutes));
+    }
+    return statusText("uptime.less");
+  }
+
+  function clockTime(date) {
+    return new Intl.DateTimeFormat(root.lang, {hour: "2-digit", minute: "2-digit"}).format(date);
+  }
+
+  function address(value) {
+    if (value === "default" || value === "custom") {
+      return statusText("address." + value);
+    }
+    return onlyChars(value, HOST_CHARS, 300) ? value : statusText("unknown");
+  }
+
+  function field(id, text) {
+    document.getElementById(id).textContent = text;
+  }
+
+  function renderProviders(providers) {
+    var list = Array.isArray(providers) ? providers : [];
+    document.querySelectorAll("[data-provider]").forEach(function (row) {
+      var found = null;
+      list.forEach(function (item) {
+        if (item && typeof item === "object" && item.id === row.getAttribute("data-provider")) {
+          found = item;
+        }
+      });
+      var info = found || {};
+      row.querySelector("[data-address]").textContent = address(info.address);
+      var hasKey = info.has_key;
+      setPill(row.querySelector("[data-key]"), hasKey === true ? "ok" : "neutral",
+        hasKey === true ? statusText("key.yes") : hasKey === false ? statusText("key.no")
+          : statusText("unknown"));
+      row.querySelector("[data-credentials]").hidden = info.has_credentials !== true;
+    });
+  }
+
+  function renderStatus(data) {
+    var detectors = data.detectors && typeof data.detectors === "object" ? data.detectors : {};
+    var limits = data.limits && typeof data.limits === "object" ? data.limits : {};
+    var overall = known(data.overall, ["ok", "warn", "danger"]) ? data.overall : "neutral";
+    setPill(document.getElementById("status-overall"), overall,
+      label("overall", data.overall, ["ok", "warn", "danger"]));
+    var version = typeof data.version === "string" ? data.version.toLowerCase() : "";
+    field("status-version", onlyChars(version, VERSION_CHARS, 64) ? data.version
+      : statusText("unknown"));
+    field("status-uptime", uptime(data.uptime_seconds));
+    field("status-scheme", label("scheme", data.panel_scheme, ["https", "http_localhost"]));
+    field("status-hosts", count(limits.allowed_hosts));
+    field("status-origins", count(limits.allowed_origins));
+    field("status-proxies", count(limits.trusted_proxies));
+    var states = ["off", "ok", "starting", "circuit_open", "closed"];
+    var ner = known(detectors.ner, states) ? detectors.ner : "";
+    var nerTone = {off: "neutral", ok: "ok", starting: "warn", circuit_open: "warn",
+      closed: "danger"};
+    setPill(document.getElementById("status-ner"), ner ? nerTone[ner] : "neutral",
+      label("ner", detectors.ner, states));
+    document.querySelectorAll("[data-ner]").forEach(function (item) {
+      var now = item.getAttribute("data-ner") === ner;
+      item.classList.toggle("now", now);
+      if (now) {
+        item.setAttribute("aria-current", "true");
+      } else {
+        item.removeAttribute("aria-current");
+      }
+      item.querySelector(".tag").hidden = !now;
+    });
+    renderProviders(data.providers);
+  }
+
+  function statusIdle(fromButton) {
+    statusInFlight = null;
+    statusGrid.setAttribute("aria-busy", "false");
+    statusButton.removeAttribute("aria-disabled");
+    if (fromButton) {
+      statusButton.focus();
+    }
+  }
+
+  function statusShown(data, fromButton) {
+    renderStatus(data);
+    statusCheckedAt = new Date();
+    statusGrid.classList.remove("is-stale");
+    statusGrid.hidden = false;
+    statusTime.textContent = statusText("checked").replace("{time}", clockTime(statusCheckedAt));
+    statusIdle(fromButton);
+  }
+
+  function statusFailed(key, fromButton) {
+    statusAlertText.textContent = statusText("error." + key);
+    statusAlert.hidden = false;
+    setPill(document.getElementById("status-overall"), "neutral", statusText("overall.stale"));
+    statusGrid.classList.add("is-stale");
+    statusTime.textContent = statusCheckedAt
+      ? statusText("checked.old").replace("{time}", clockTime(statusCheckedAt)) : "";
+    statusIdle(fromButton);
+  }
+
+  function loadStatus(fromButton) {
+    if (statusInFlight) {
+      if (!fromButton || statusInFlight.fromButton) {
+        return;
+      }
+      statusInFlight.controller.abort();
+    }
+    statusSequence += 1;
+    var sequence = statusSequence;
+    var controller = new AbortController();
+    statusInFlight = {controller: controller, fromButton: fromButton};
+    statusAlert.hidden = true;
+    statusAlertText.textContent = "";
+    statusGrid.setAttribute("aria-busy", "true");
+    statusButton.setAttribute("aria-disabled", "true");
+    statusTime.textContent = statusText("checking");
+    fetch("/panel/api/status", {
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal
+    }).then(function (response) {
+      if (sequence !== statusSequence) {
+        return;
+      }
+      if (response.status === 401) {
+        location.replace("/panel/login" + languageQuery());
+        return;
+      }
+      if (response.status !== 200) {
+        statusFailed("refused", fromButton);
+        return;
+      }
+      return response.json().then(function (data) {
+        if (sequence !== statusSequence) {
+          return;
+        }
+        if (data && typeof data === "object") {
+          statusShown(data, fromButton);
+        } else {
+          statusFailed("refused", fromButton);
+        }
+      }, function () {
+        if (sequence === statusSequence) {
+          statusFailed("refused", fromButton);
+        }
+      });
+    }, function () {
+      if (sequence === statusSequence) {
+        statusFailed("network", fromButton);
+      }
+    });
+  }
+
+  function statusFirstShown() {
+    if (!statusStarted) {
+      statusStarted = true;
+      loadStatus(false);
+    }
+  }
+
+  statusButton.addEventListener("click", function () {
+    loadStatus(true);
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && statusStarted &&
+        statusTab.getAttribute("aria-selected") === "true") {
+      loadStatus(false);
+    }
+  });
 
   window.addEventListener("pageshow", function (event) {
     if (event.persisted) {
