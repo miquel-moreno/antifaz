@@ -97,6 +97,11 @@ def _not_from_a_catalog(page: str) -> list[str]:
 PAGES = [
     *((f"login-{code}", TOKEN_PAGES.login(code)) for code in CATALOGS.codes),
     *((f"panel-{code}", TOKEN_PAGES.panel(code, "csrf-token-x")) for code in CATALOGS.codes),
+    # 11d-b: with the NER on, the word counter and the too-long callout are in the page too.
+    *(
+        (f"panel-ner-{code}", TOKEN_PAGES.panel(code, "csrf-token-x", ner_words=7))
+        for code in CATALOGS.codes
+    ),
 ]
 
 

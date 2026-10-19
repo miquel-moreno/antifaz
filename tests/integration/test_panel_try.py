@@ -674,6 +674,22 @@ def test_the_word_limit_is_one_constant_from_the_ner_windows() -> None:
     )
 
 
+@pytest.mark.parametrize("with_ner", [True, False])
+def test_the_panel_page_says_whether_the_ner_is_on_and_its_word_limit(with_ner: bool) -> None:
+    from antifaz.api.app import TRY_NER_MAX_WORDS
+    from tests.integration.panel_client import csrf_of
+
+    ner = fake_detector(NAMES)[0] if with_ner else None
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id = log_in(client)
+        csrf_of(client, session_id)
+        page = client.get("/panel", headers={"Cookie": f"{cookie_of(client)}={session_id}"}).text
+
+    assert f'data-ner="{"on" if with_ner else "off"}"' in page
+    assert (f'data-max-words="{TRY_NER_MAX_WORDS}"' in page) is with_ner
+    assert f'data-max-bytes="{try_text.MAX_TEXT_BYTES}"' in page
+
+
 def test_a_text_of_exactly_the_word_limit_passes_and_one_more_is_413() -> None:
     from antifaz.api.app import TRY_NER_MAX_WORDS
 
