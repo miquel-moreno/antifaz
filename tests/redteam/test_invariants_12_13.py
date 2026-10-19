@@ -233,6 +233,7 @@ PANEL_SESSION_ROUTES = frozenset(
         ("/panel/logout", "POST"),
         ("/panel/api/status", "GET"),
         ("/panel/api/try", "POST"),  # 11d-a: «Prueba un texto», session + CSRF token
+        ("/panel/api/session", "POST"),  # 11d-b: «Seguir» before expiry, session + CSRF token
     }
 )
 # 11c-1: public only for GET and only for the exact paths of the manifest (the door's rule);

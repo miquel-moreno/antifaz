@@ -744,6 +744,60 @@ def test_get_is_peek_then_touch(store: MemorySessionStore, clock: Clock) -> None
     assert found is not None and found.last_used == 1600.0
 
 
+# 11d-b: how long a session has left, for the panel's expiry warning (session.js).
+
+
+def test_seconds_left_counts_on_the_store_clock_without_a_use(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    session_id, session = store.create("https")
+    assert store.seconds_left(session.fingerprint) == (IDLE_SECONDS, MAX_AGE_SECONDS)
+
+    clock.advance(100)
+    assert store.seconds_left(session.fingerprint) == (IDLE_SECONDS - 100, MAX_AGE_SECONDS - 100)
+    clock.advance(IDLE_SECONDS - 101)
+    assert store.seconds_left(session.fingerprint) == (1, MAX_AGE_SECONDS - IDLE_SECONDS + 1)
+    clock.advance(1)  # asking was never a use: the idle limit did not move
+    assert store.seconds_left(session.fingerprint) is None
+    assert store.peek(session_id, "https") is None
+
+
+def test_seconds_left_after_a_use_moves_only_the_idle_part(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    _, session = store.create("https")
+    clock.advance(600)
+    store.touch(session.fingerprint)
+
+    assert store.seconds_left(session.fingerprint) == (IDLE_SECONDS, MAX_AGE_SECONDS - 600)
+
+
+def test_seconds_left_near_the_max_keeps_both_parts(
+    store: MemorySessionStore, clock: Clock
+) -> None:
+    """Raw values: the idle part may be longer than what the 8 hours leave (the caller caps)."""
+    _, session = store.create("https")
+    while clock.now - 1000.0 < MAX_AGE_SECONDS - 300:
+        clock.advance(min(IDLE_SECONDS / 2, MAX_AGE_SECONDS - 300 - (clock.now - 1000.0)))
+        store.touch(session.fingerprint)
+
+    assert store.seconds_left(session.fingerprint) == (IDLE_SECONDS, 300)
+    clock.advance(300)
+    assert store.seconds_left(session.fingerprint) is None  # the 8 hours, used or not
+
+
+def test_seconds_left_of_an_unknown_or_closed_session_is_none(store: MemorySessionStore) -> None:
+    session_id, session = store.create("https")
+    store.delete(session_id, "logout")
+
+    assert store.seconds_left(session.fingerprint) is None
+    assert store.seconds_left("0" * 64) is None
+
+
+def test_seconds_left_is_part_of_the_store_protocol() -> None:
+    assert "seconds_left" in vars(SessionStore)
+
+
 # D. A BaseException in a subscriber: everyone is still told, then it is raised again.
 
 
