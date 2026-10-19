@@ -440,3 +440,25 @@ def test_closing_during_a_call_blocks_that_call_without_errors(
 
 def test_the_pool_exposes_its_time_limit() -> None:
     assert NerPool(FAKE_FACTORY, OPTIONS, timeout=3.0).timeout == 3.0
+
+
+# --- status() never waits for the lock (review of 11c-3b) -----------------------------------
+
+# A hang guard only: status() reads plain attributes, so it returns at once; a status() that
+# took the lock would never return while the test holds it.
+STATUS_HANG_GUARD = 30.0
+
+
+def test_status_returns_while_another_thread_holds_the_lock() -> None:
+    ner_pool = NerPool(FAKE_FACTORY, OPTIONS, workers=1, timeout=TIMEOUT)  # never started
+    answers: list[str] = []
+    with ner_pool._lock:  # what join or spawn hold for a while
+        reader = threading.Thread(target=lambda: answers.append(ner_pool.status()), daemon=True)
+        reader.start()
+        reader.join(STATUS_HANG_GUARD)
+        finished = not reader.is_alive()
+
+    assert finished, "status() waited for the pool's lock"
+    assert answers == ["starting"]
+    ner_pool.close()
+    assert ner_pool.status() == "closed"

@@ -169,15 +169,21 @@ class NerPool:
 
         "starting": a worker was replaced and has not answered yet (it may be loading). The
         pipe is never read here: only the thread that holds a worker reads it.
+
+        Never takes the lock (review of 11c-3b): start(), close() and a replacement hold it while
+        they spawn, wait for or join worker processes, and /healthz and the panel's status
+        route call this on the event loop. Each attribute read here is one atomic read of a
+        value written under the lock, and the worker list is copied first, so a reading may mix
+        two moments of a change in progress but never blocks and never fails.
         """
-        with self._lock:
-            if self._closed:
-                return "closed"
-            if time.monotonic() < self._open_until:
-                return "circuit_open"
-            if not self._started or not all(worker.ready for worker in self._workers):
-                return "starting"
-            return "ok"
+        if self._closed:
+            return "closed"
+        if time.monotonic() < self._open_until:
+            return "circuit_open"
+        workers = tuple(self._workers)
+        if not self._started or not all(worker.ready for worker in workers):
+            return "starting"
+        return "ok"
 
     # --- workers ------------------------------------------------------------------------------
 
