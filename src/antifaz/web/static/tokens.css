@@ -141,13 +141,17 @@
   --font-features: "cv05", "cv08"; /* Inter: lowercase l with a tail, upper-case I with serifs */
   --font-numeric: tabular-nums; /* counters, times, ids: digits of equal width */
 
-  --text-title: clamp(30px, 4.4cqi, 50px); /* view title (cqi: the window is the container) */
-  --text-title-phone: 26px;
+  /* View title: follows the window (cqi: the window is the container) and the text size. The
+     (1rem - 16px) term is 0 at the default 16 px root, so at 100 % it is exactly the old
+     clamp(30px, 4.4cqi, 50px); with bigger text it adds 3.125 times the growth of 1rem, so
+     the title grows with the text even where the window term holds it (WCAG 1.4.4). */
+  --text-title: clamp(1.875rem, calc(4.4cqi + (1rem - 16px) * 3.125), 3.125rem);
+  --text-title-phone: 1.625rem; /* 26px */
   --weight-title: 650;
   --tracking-title: -0.034em;
   --leading-title: 1.08;
-  --text-body: 15px;
-  --text-body-lg: 16px; /* the composer text */
+  --text-body: 0.9375rem; /* 15px */
+  --text-body-lg: 1rem; /* 16px: the composer text */
   --tracking-body: -0.011em;
   --leading-body: 1.5;
 

@@ -241,6 +241,7 @@ def test_the_top_bar_holds_only_the_logo_and_the_settings_button(
         ".app-sidebar-foot",
         "a[hreflang]",
         ".theme-btn",
+        "[role=switch]",
         "[data-logout]",
     ):
         assert tab.page.locator(f"{hidden}:visible").count() == 0, hidden
@@ -254,7 +255,7 @@ def test_the_settings_menu_opens_closes_and_gives_the_focus_back(
 
     _open_menu(tab)
     assert tab.page.evaluate(ACTIVE_IN_MENU_JS)  # the focus moved into the menu
-    for item in ("a[hreflang=es]", ".theme-btn", "[data-logout]"):
+    for item in ("a[hreflang=es]", "[role=switch]", "[data-logout]"):
         assert tab.page.locator(f"#settings-menu {item}").is_visible(), item
     tab.page.keyboard.press("Tab")
     assert tab.page.evaluate(ACTIVE_IN_MENU_JS)  # Tab goes on inside the menu
@@ -273,25 +274,84 @@ def test_the_settings_menu_opens_closes_and_gives_the_focus_back(
     assert tab.page.evaluate(STORAGE_JS) == NOTHING_STORED
 
 
-def test_the_menu_theme_row_says_its_name_and_the_name_is_the_text(
+SWITCH = "#settings-menu [role=switch]"
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_the_menu_theme_row_is_a_switch_named_by_its_fixed_text(
+    new_tab: NewTab, server: PanelServer, lang: str, scheme: str
+) -> None:
+    """11c-3a: the theme row is a switch. Its visible label never changes («Tema oscuro» /
+    "Dark theme") and is its accessible name (WCAG 2.5.3: no aria-label of its own);
+    aria-checked says whether the dark theme is the one in effect, the system's included. The
+    desktop's icon button keeps its aria-label."""
+    tab = new_tab(width=390, locale=_locale(lang), color_scheme=scheme)
+    _log_in(tab, server, lang)
+    _open_menu(tab)
+    switch = tab.page.locator(SWITCH)
+    assert switch.count() == 1
+    assert switch.get_attribute("aria-label") is None
+    label = CATALOGS[lang].text("theme.dark")
+    assert switch.inner_text().strip() == label
+    assert tab.page.get_by_role("switch", name=label, exact=True).count() == 1
+    dark = "true" if scheme == "dark" else "false"
+    assert switch.get_attribute("aria-checked") == dark
+    track = tab.page.locator(f"{SWITCH} .switch-track")
+    assert track.get_attribute("aria-hidden") == "true" and track.is_visible()
+    text = _box(tab, f"{SWITCH} .switch-text")
+    knob = _box(tab, f"{SWITCH} .switch-track")
+    assert text["right"] <= knob["left"]  # the word, then the track, on one row
+    assert knob["top"] < (text["top"] + text["bottom"]) / 2 < knob["bottom"]
+
+    switch.click()
+    assert switch.get_attribute("aria-checked") == ("false" if scheme == "dark" else "true")
+    assert switch.inner_text().strip() == label  # the label stays
+    desktop_button = tab.page.locator(".app-header .theme-btn")
+    assert desktop_button.get_attribute("aria-label") is not None
+    assert tab.page.evaluate(STORAGE_JS) == NOTHING_STORED
+
+
+THUMB_JS = """() => {
+  const s = document.querySelector('#settings-menu [role=switch]');
+  const t = s.querySelector('.switch-track').getBoundingClientRect();
+  const k = s.querySelector('.switch-thumb').getBoundingClientRect();
+  return {centre: (k.left + k.right) / 2 - t.left, width: t.width,
+          track: getComputedStyle(s.querySelector('.switch-track')).backgroundColor};
+}"""
+
+
+def test_the_switch_shows_on_and_off_and_follows_the_keyboard_and_the_system(
     new_tab: NewTab, server: PanelServer
 ) -> None:
-    """WCAG 2.5.3 (label in name): in the menu the theme row shows a word from the catalog, and
-    that word is its accessible name (no aria-label of its own)."""
-    tab = new_tab(width=390, locale="es-ES")
-    _log_in(tab, server, "es")
+    tab = new_tab(width=390)
+    _log_in(tab, server)
     _open_menu(tab)
-    row = tab.page.locator("#settings-menu .theme-btn")
-    assert row.get_attribute("aria-label") is None
-    icon = _box(tab, "#settings-menu .theme-btn .ic")
-    text = _box(tab, "#settings-menu .theme-text")
-    assert icon["right"] <= text["left"]  # icon and word side by side, on one row
-    assert text["top"] < (icon["top"] + icon["bottom"]) / 2 < text["bottom"]
-    assert row.inner_text().strip() == CATALOGS["es"].text("theme.dark")  # light scheme
-    desktop_button = tab.page.locator(".app-header .theme-btn")  # icon only, named by aria-label
-    assert desktop_button.get_attribute("aria-label") == CATALOGS["es"].text("theme.to_dark")
-    row.click()
-    assert row.inner_text().strip() == CATALOGS["es"].text("theme.light")
+    switch = tab.page.locator(SWITCH)
+    off = tab.page.evaluate(THUMB_JS)
+    assert off["centre"] < off["width"] / 2  # off: the thumb on the left
+
+    switch.focus()
+    tab.page.keyboard.press("Space")
+    assert switch.get_attribute("aria-checked") == "true"
+    assert tab.page.evaluate(THEME_JS) == "dark"
+    on = tab.page.evaluate(THUMB_JS)
+    assert on["centre"] > on["width"] / 2  # on: the thumb on the right
+    assert on["track"] != off["track"]  # and the track changes too, not only the position
+    tab.page.keyboard.press("Enter")
+    assert switch.get_attribute("aria-checked") == "false"
+    assert tab.page.evaluate(THEME_JS) == "light"
+    assert tab.page.locator("#settings-menu").is_visible()  # it stays open
+
+    tab.page.reload(wait_until="load")
+    _open_menu(tab)
+    assert switch.get_attribute("aria-checked") == "false"  # system light, nothing kept
+    tab.page.emulate_media(color_scheme="dark")
+    tab.page.wait_for_function(
+        "() => document.querySelector('#settings-menu [role=switch]')"
+        ".getAttribute('aria-checked') === 'true'"
+    )
+    assert tab.page.evaluate(STORAGE_JS) == NOTHING_STORED
 
 
 def test_the_menu_closes_when_the_phone_layout_goes(new_tab: NewTab, server: PanelServer) -> None:
@@ -336,7 +396,7 @@ def test_the_settings_menu_changes_theme_and_language_and_logs_out(
     _log_in(tab, server)
 
     _open_menu(tab)
-    tab.page.click("#settings-menu .theme-btn")
+    tab.page.click(SWITCH)
     assert tab.page.evaluate(THEME_JS) == "dark"
     assert tab.page.locator("#settings-menu").is_visible()  # it stays open for another change
     tab.page.click("#settings-menu a[hreflang=es]")
@@ -415,3 +475,282 @@ def test_the_desktop_keeps_its_layout(new_tab: NewTab, server: PanelServer) -> N
         assert long_label.is_visible()
         assert long_label.inner_text() == CATALOGS["en"].text(f"tab.{name}")
         assert not tab.page.locator(f"#tab-{name} .app-tab-short").is_visible()
+
+
+# --- 11c-3a: twice the text size, the bar's fade, the login centred ----------------------------
+
+TEXT_200_CSS = "html{font-size:200%}"
+TWO_FRAMES_JS = (
+    "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+)
+# Each word of each short name: the lines its text really takes (a Range, one rect top per line).
+WORD_LINES_JS = """() => [...document.querySelectorAll('.app-tab-short')].flatMap((el) => {
+  const node = el.firstChild, text = node.textContent, out = [];
+  let at = 0;
+  for (const word of text.split(' ').filter(Boolean)) {
+    const start = text.indexOf(word, at); at = start + word.length;
+    const range = document.createRange();
+    range.setStart(node, start); range.setEnd(node, at);
+    const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0)
+      .map((r) => Math.round(r.top)));
+    out.push({word, lines: tops.size});
+  }
+  return out;
+})"""
+FADE_JS = """() => {
+  const list = document.querySelector('[role=tablist]');
+  const cs = getComputedStyle(list);
+  return {start: list.classList.contains('is-more-start'),
+          end: list.classList.contains('is-more-end'),
+          mask: cs.maskImage && cs.maskImage !== 'none' ? cs.maskImage
+                : (cs.webkitMaskImage || 'none'),
+          overflows: list.scrollWidth > list.clientWidth + 1,
+          left: list.scrollLeft, max: list.scrollWidth - list.clientWidth};
+}"""
+SELECTED_INSIDE_JS = """(id) => { const t = document.getElementById(id).getBoundingClientRect();
+  const l = document.querySelector('[role=tablist]').getBoundingClientRect();
+  return t.left >= l.left - 0.5 && t.right <= l.right + 0.5; }"""
+HAS_CLASS_JS = "(name) => document.querySelector('[role=tablist]').classList.contains(name)"
+# A hang guard only (about ten seconds of frames), never a measure of speed.
+CLASS_SET_JS = """(name) => new Promise((done) => {
+  const list = document.querySelector('[role=tablist]');
+  let frames = 0;
+  const check = () => list.classList.contains(name) ? done(true)
+    : (++frames > 600 ? done(false) : requestAnimationFrame(check));
+  check();
+})"""
+
+
+def _locale(lang: str) -> str:
+    return "es-ES" if lang == "es" else "en-US"
+
+
+def _text_200(tab: Tab) -> None:
+    tab.page.add_style_tag(content=TEXT_200_CSS)
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+    tab.page.evaluate(TWO_FRAMES_JS)
+
+
+def test_at_twice_the_text_size_the_end_of_the_view_clears_the_bar(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """11c-3a: the room kept under the content and the scroll padding grow with the bar (one
+    custom property, px for the fixed parts and rem for the label)."""
+    tab = new_tab(width=390, bypass_csp=True, locale="es-ES")
+    _log_in(tab, server, "es")
+    _text_200(tab)
+    tab.page.click("#tab-status")
+    tab.page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+    tab.page.evaluate(TWO_FRAMES_JS)
+    bar = _box(tab, "[role=tablist]")
+    last = _box(tab, "#panel-status > :last-child")
+    assert last["bottom"] <= bar["top"] + 0.5, (last, bar)
+
+    tab.page.evaluate(
+        "() => { const b = document.createElement('button'); b.id = 'probe-end';"
+        " b.className = 'btn'; b.textContent = 'x';"
+        " document.querySelector('#panel-status').appendChild(b); }"
+    )
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    tab.page.focus("#panel-status")
+    tab.page.keyboard.press("Tab")
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
+    tab.page.evaluate(TWO_FRAMES_JS)
+    probe = _box(tab, "#probe-end")
+    bar = _box(tab, "[role=tablist]")
+    assert probe["bottom"] <= bar["top"] + 0.5, (probe, bar)
+
+
+@pytest.mark.parametrize("width", [320, 390])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_at_twice_the_text_size_no_tab_name_breaks_inside_a_word(
+    new_tab: NewTab, server: PanelServer, lang: str, width: int
+) -> None:
+    tab = new_tab(width=width, bypass_csp=True, locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _text_200(tab)
+    words = tab.page.evaluate(WORD_LINES_JS)
+    assert len(words) >= 5
+    assert [word for word in words if word["lines"] != 1] == []
+    no_overflow = "() => document.documentElement.scrollWidth <= window.innerWidth"
+    assert tab.page.evaluate(no_overflow)  # the bar scrolls inside itself, never the page
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_the_bar_fades_on_the_side_that_has_more(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    tab = new_tab(width=320, bypass_csp=True, locale=_locale(lang))
+    _log_in(tab, server, lang)
+    assert tab.page.evaluate(FADE_JS)["mask"] == "none"  # it all fits: no fade at all
+    _text_200(tab)
+    tab.page.wait_for_function(HAS_CLASS_JS, arg="is-more-end")
+    fade = tab.page.evaluate(FADE_JS)
+    assert fade["overflows"] and fade["left"] == 0
+    assert fade["end"] and not fade["start"]
+    assert "gradient" in fade["mask"]
+
+    tab.page.evaluate(
+        "() => { const l = document.querySelector('[role=tablist]');"
+        " l.scrollLeft = l.scrollWidth; }"
+    )
+    tab.page.wait_for_function(HAS_CLASS_JS, arg="is-more-start")
+    fade = tab.page.evaluate(FADE_JS)
+    assert fade["left"] >= fade["max"] - 1
+    assert fade["start"] and not fade["end"]  # at the end, no fade on the far side
+    assert "gradient" in fade["mask"]
+
+    tab.page.focus("#tab-status")
+    for key, expected in [
+        ("Home", "tab-playground"),
+        ("ArrowRight", "tab-live"),
+        ("ArrowRight", "tab-keys"),
+        ("ArrowRight", "tab-policies"),
+        ("ArrowRight", "tab-status"),
+    ]:
+        tab.page.keyboard.press(key)
+        assert tab.page.evaluate(SELECTED_JS) == [expected], key
+        assert tab.page.evaluate(ACTIVE_ID_JS) == expected
+        assert tab.page.evaluate(SELECTED_INSIDE_JS, expected), expected  # scrolled into view
+    tab.page.wait_for_function(HAS_CLASS_JS, arg="is-more-start")
+    assert not tab.page.evaluate(FADE_JS)["end"]
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_axe_finds_no_violation_at_twice_the_text_size(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str
+) -> None:
+    tab = new_tab(width=320, bypass_csp=True, color_scheme=theme, locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _text_200(tab)
+    report = tab.axe()
+    assert report.passes > 0
+    assert report.violations == "", f"incomplete rules {report.incomplete}"
+
+
+LOGIN_BOXES_JS = """() => {
+  const card = document.querySelector('.login-card');
+  const cs = getComputedStyle(card), r = card.getBoundingClientRect();
+  const first = card.firstElementChild.getBoundingClientRect();
+  const last = card.querySelector('.login-note').getBoundingClientRect();
+  return {top: r.top + parseFloat(cs.paddingTop), bottom: r.bottom - parseFloat(cs.paddingBottom),
+          first: first.top, last: last.bottom, vh: window.innerHeight,
+          tools: document.querySelector('.login-tools').getBoundingClientRect().bottom,
+          scroll: document.documentElement.scrollHeight};
+}"""
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_the_phone_login_is_centred_vertically(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    tab = new_tab(width=390, height=844, locale=_locale(lang))
+    tab.goto(f"/panel/login?lang={lang}")
+    box = tab.page.evaluate(LOGIN_BOXES_JS)
+    assert box["scroll"] <= box["vh"], box  # it fits: the page does not scroll
+    middle = (box["first"] + box["last"]) / 2
+    screen_middle = (box["tools"] + box["vh"]) / 2  # the screen below the tools row
+    assert box["first"] - box["tools"] > 40, box  # really centred, not at the top
+    assert abs(middle - screen_middle) <= 8, box
+
+
+def test_a_tall_phone_login_starts_at_the_top_and_scrolls(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    tab = new_tab(width=320, height=568, bypass_csp=True, locale="es-ES")
+    tab.goto("/panel/login?lang=es")
+    _text_200(tab)
+    box = tab.page.evaluate(LOGIN_BOXES_JS)
+    assert box["first"] == pytest.approx(box["top"], abs=1)  # nothing clipped above
+    assert box["first"] >= 0
+    assert box["scroll"] > box["vh"]  # taller than the screen: the page scrolls
+    tab.page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+    tab.page.evaluate(TWO_FRAMES_JS)
+    box = tab.page.evaluate(LOGIN_BOXES_JS)
+    assert box["last"] <= box["vh"] + 0.5  # the end can be reached
+    assert box["last"] <= box["bottom"] + 0.5
+    card = _box(tab, ".login-card")
+    assert card["bottom"] >= card["vh"] - 1  # still fills the screen
+
+
+# --- 11c-3a review: the active tab clear of the fade, orientation, CSP --------------------------
+
+# How far the active tab is from each edge of the tab list, and whether that side has more.
+ACTIVE_GAPS_JS = """() => {
+  const list = document.querySelector('[role=tablist]');
+  const t = document.activeElement.getBoundingClientRect(), l = list.getBoundingClientRect();
+  const max = list.scrollWidth - list.clientWidth;
+  return {id: document.activeElement.id, left: t.left - l.left, right: l.right - t.right,
+          moreStart: list.scrollLeft > 1, moreEnd: list.scrollLeft < max - 1,
+          fade: parseFloat(getComputedStyle(list).getPropertyValue('--tabbar-fade'))};
+}"""
+
+
+def test_the_active_tab_never_sits_in_the_fade(new_tab: NewTab, server: PanelServer) -> None:
+    """WCAG 2.4.7 / 1.4.11: the focused and selected tab is scrolled clear of the fade on any
+    side that still has more, so its focus ring and selected look are never faded. On a short
+    screen with the page scrolled down, bringing a tab into view moves only the bar: the tab is
+    selected again with its number key (same view, same page height) after the bar was scrolled
+    away from it, and the page's scroll position must not change."""
+    tab = new_tab(width=320, height=500, bypass_csp=True, locale="es-ES")
+    _log_in(tab, server, "es")
+    _text_200(tab)
+    tab.page.focus("#tab-playground")
+    keys = ["ArrowRight"] * 4 + ["ArrowLeft"] * 4
+    for key in keys:
+        tab.page.keyboard.press(key)
+        tab.page.evaluate("() => window.scrollTo(0, 120)")
+        page_top = tab.page.evaluate("() => window.scrollY")
+        assert page_top > 0  # the page really is scrolled down
+        active = tab.page.evaluate(ACTIVE_ID_JS)
+        tab.page.evaluate(
+            """(id) => { const l = document.querySelector('[role=tablist]');
+              const t = document.getElementById(id);
+              l.scrollLeft = t.offsetLeft > l.scrollWidth / 2 ? 0 : l.scrollWidth; }""",
+            active,
+        )
+        tab.page.keyboard.press(str(TABS.index(active.removeprefix("tab-")) + 1))
+        tab.page.evaluate(TWO_FRAMES_JS)
+        assert tab.page.evaluate(ACTIVE_ID_JS) == active
+        assert tab.page.evaluate("() => window.scrollY") == page_top  # only the bar scrolls
+        gaps = tab.page.evaluate(ACTIVE_GAPS_JS)
+        assert gaps["fade"] > 0, gaps
+        assert gaps["left"] >= 0 and gaps["right"] >= 0, (key, gaps)  # revealed
+        if gaps["moreEnd"]:
+            assert gaps["right"] >= gaps["fade"], (key, gaps)
+        if gaps["moreStart"]:
+            assert gaps["left"] >= gaps["fade"], (key, gaps)
+
+
+def test_the_orientation_follows_the_layout_not_a_flex_declaration(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """The phone tab list is a grid: its arrows must not depend on a leftover flex-direction."""
+    tab = new_tab(width=390, bypass_csp=True)
+    _log_in(tab, server)
+    tab.page.add_style_tag(content=".app-tablist{flex-direction:column!important}")
+    tab.page.focus("#tab-playground")
+    tab.page.keyboard.press("ArrowRight")
+    assert tab.page.evaluate(SELECTED_JS) == ["tab-live"]
+
+
+def test_scrolling_the_tab_bar_keeps_the_csp_clean(new_tab: NewTab, server: PanelServer) -> None:
+    """With the real CSP (no bypass): a screen so narrow the names overflow at 100 % text; the
+    fade classes toggle as the bar scrolls, and nothing breaks the policy or leaves the page."""
+    tab = new_tab(width=240, locale="es-ES")
+    _log_in(tab, server, "es")  # the longer names: they overflow 240 px at 100 %
+    # evaluate(), not wait_for_function(): the latter needs eval in the page, which the CSP
+    # refuses. The promise checks once per frame until panel.js has set the class.
+    assert tab.page.evaluate(CLASS_SET_JS, "is-more-end")
+    tab.page.evaluate(
+        "() => { const l = document.querySelector('[role=tablist]');"
+        " l.scrollLeft = l.scrollWidth; }"
+    )
+    assert tab.page.evaluate(CLASS_SET_JS, "is-more-start")
+    assert not tab.page.evaluate(HAS_CLASS_JS, "is-more-end")
+    tab.page.click("#tab-live")
+    assert tab.csp_violations() == []
+    assert tab.errors == []
+    assert tab.blocked == []
+    assert tab.foreign_requests() == []

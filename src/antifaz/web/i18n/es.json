@@ -8,7 +8,6 @@
   "theme.to_dark": "Cambiar a tema oscuro",
   "theme.to_light": "Cambiar a tema claro",
   "theme.dark": "Tema oscuro",
-  "theme.light": "Tema claro",
   "login.title": "Entrar",
   "login.heading": "Panel de Antifaz",
   "login.intro": "Escribe el token de administrador para abrir el panel.",

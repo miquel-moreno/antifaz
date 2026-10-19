@@ -13,7 +13,12 @@ otherwise, never the system's), a pixel ratio and:
 - an init script that records every `securitypolicyviolation` of every document
   (`csp_violations()`, read after a frame and a microtask); a canary test proves it works;
 - `goto()` settles on `load` and `document.fonts.ready`, never on a fixed wait, and keeps the
-  response, so a test can check the CSP header the browser really got (`csp_header()`).
+  response, so a test can check the CSP header the browser really got (`csp_header()`);
+- the colour scheme asked for, emulated again on the page after every `goto()` and checked
+  there (fail-closed): Playwright's Firefox drops the context's `color_scheme` on the first
+  navigation into a page with `Cross-Origin-Opener-Policy: same-origin` (the gateway's pages),
+  so before this the "dark" checks ran light in Firefox. Once emulated on the page it holds
+  through later navigations and reloads.
 
 Secret values never reach a test: `cookie_names()` and `cookie_attributes()` drop the values,
 and only this module reads the cookie jar (tests/unit/test_browser_harness_rules.py). The
@@ -64,6 +69,7 @@ CSP_VIOLATIONS_JS = """async () => {
   await new Promise((done) => requestAnimationFrame(() => queueMicrotask(done)));
   return [...window.__antifazCsp];
 }"""
+DARK_JS = "() => matchMedia('(prefers-color-scheme: dark)').matches"
 CSRF_META_JS = """() => {
   const meta = document.querySelector('meta[name="antifaz-csrf"]');
   return meta ? meta.content : null;
@@ -102,6 +108,7 @@ class Tab:
         self.failed: list[str] = []
         self.seen_secrets: set[str] = set()
         self.response: Response | None = None
+        self.color_scheme = color_scheme
         self.context = browser.new_context(
             bypass_csp=bypass_csp,
             color_scheme=color_scheme,  # type: ignore[arg-type]
@@ -151,6 +158,9 @@ class Tab:
     def goto(self, path: str) -> None:
         """Open a path of the gateway and settle: load, then every font ready."""
         self.response = self.page.goto(self.origin + path, wait_until="load")
+        self.page.emulate_media(color_scheme=self.color_scheme)  # type: ignore[arg-type]
+        dark: bool = self.page.evaluate(DARK_JS)
+        assert dark == (self.color_scheme == "dark"), "the page lost the requested colour scheme"
         self.page.evaluate(SETTLED_JS)
         self.remember_secrets()
 
