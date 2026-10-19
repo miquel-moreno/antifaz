@@ -130,3 +130,54 @@ def test_only_the_masker_and_the_try_module_touch_the_spans() -> None:
     assert readers <= READERS, readers - READERS
     for forbidden in ("audit/", "web/status", "api/", "logging.py"):
         assert not any(reader.startswith(forbidden) for reader in readers), forbidden
+
+
+# --- review fixes -----------------------------------------------------------------------------
+
+
+def test_the_result_repr_leaves_the_spans_out() -> None:
+    result = mask(f"{SENTINEL_DNI} {EMAIL}")
+
+    assert "found_spans" not in repr(result)
+    assert "FoundSpan" not in repr(result)
+
+
+def _calls(tree: ast.AST) -> set[str]:
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            names.add(func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", ""))
+    return names
+
+
+def test_no_module_dumps_a_dataclass_wholesale() -> None:
+    """dataclasses.asdict/astuple would copy a MaskResult (spans and vault) into plain data that
+    a log line or a JSON answer could carry: no module of the package calls them."""
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if _calls(tree) & {"asdict", "astuple"}:
+            offenders.append(path.relative_to(SRC).as_posix())
+
+    assert offenders == []
+    assert _calls(ast.parse("dataclasses.asdict(r)\nastuple(r)")) >= {"asdict", "astuple"}
+
+
+def test_a_propagated_ner_value_is_reported_at_every_appearance() -> None:
+    """The NER saw the name once; propagate() hides its other appearance (ADR-0016), and the
+    spans say so with the same marker."""
+    name = "Zoraya"
+    text = f"{name} llama. Luego {name} vuelve."
+
+    def ner_once(value: str) -> list[Span]:
+        start = value.find(name)
+        return [Span(start, start + len(name), EntityType.PERSON, Layer.NER, Confidence.MEDIUM)]
+
+    result = mask(text, detector=ner_once)
+
+    (spans,) = result.found_spans
+    assert [text[s.start : s.end] for s in spans] == [name, name]
+    assert [s.token for s in spans] == ["PERSON_1", "PERSON_1"]
+    assert all(s.hidden for s in spans)
+    assert name not in result.text

@@ -114,3 +114,14 @@ def test_every_model_forbids_extras_is_strict_and_hides_the_input() -> None:
         assert config.get("strict") is True, model
         assert config.get("hide_input_in_errors") is True, model
         assert config.get("frozen") is True, model
+
+
+def test_the_policy_version_rule_is_the_policy_s_own() -> None:
+    from antifaz.policy import DEFAULT_POLICY, VERSION_PATTERN, Policy
+    from antifaz.web.try_response import POLICY_VERSION_PATTERN
+
+    assert POLICY_VERSION_PATTERN == VERSION_PATTERN
+    assert TryResponse.model_validate(_good(policy_version=DEFAULT_POLICY.version))
+    for bad in ("", "v 1", "v1/../x", "a" * 65, "-v1", f"v{SENTINEL_DNI}<"):
+        with pytest.raises(ValueError):
+            Policy(version=bad)

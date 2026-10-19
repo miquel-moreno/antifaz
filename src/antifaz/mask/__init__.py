@@ -9,7 +9,7 @@ Never returns clear text when the detector fails.
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from antifaz.detect.scan import scan
@@ -65,7 +65,8 @@ class MaskResult:
     texts: tuple[str, ...]
     vault: Vault
     hidden: tuple[EntityType, ...]
-    found_spans: tuple[tuple[FoundSpan, ...], ...] = ()
+    # Out of the repr: positions and types only, but a log line has no use for them.
+    found_spans: tuple[tuple[FoundSpan, ...], ...] = field(default=(), repr=False)
 
     @property
     def text(self) -> str:

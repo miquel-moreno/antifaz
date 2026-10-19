@@ -22,10 +22,11 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 
 from antifaz.detect.types import EntityType
+from antifaz.policy import VERSION_PATTERN
 from antifaz.web.status import NerState
 
 MARKER_PATTERN = r"^\[\[[A-Z]+(?:_[A-Z]+)*_[0-9]+\]\]$"
-POLICY_VERSION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+POLICY_VERSION_PATTERN = VERSION_PATTERN  # the policy's own rule (antifaz.policy)
 MAX_SEGMENT_CHARACTERS = 65_536
 
 
