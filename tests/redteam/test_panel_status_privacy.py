@@ -139,6 +139,7 @@ def test_no_secret_and_no_fragment_of_one_in_the_status_the_page_or_the_logs(
     assert [p["address"] for p in body["providers"]] == ["proxy.example", "proxy-two.example:8443"]
     assert [p["has_credentials"] for p in body["providers"]] == [True, True]
     assert _leaks("\n".join(texts)) == []
+    assert caplog.records  # the log check below is not vacuous
     assert _leaks(caplog.text) == []
     assert _leaks("\n".join(str(record.__dict__) for record in caplog.records)) == []
 
@@ -154,9 +155,14 @@ def _send_the_sentinel_everywhere(client: TestClient) -> None:
     text = f"Mi DNI es {SENTINEL_DNI}"
     chat = {"model": "m", "messages": [{"role": "user", "content": text}]}
     message = {"model": "m", "max_tokens": 8, "messages": [{"role": "user", "content": text}]}
-    client.post("/v1/chat/completions", json=chat, headers=auth)
-    client.post("/v1/messages", json=message, headers={**auth, "anthropic-version": "2023-06-01"})
-    client.post("/antifaz/scan", json={"text": text}, headers=auth)
+    sent = [
+        client.post("/v1/chat/completions", json=chat, headers=auth),
+        client.post(
+            "/v1/messages", json=message, headers={**auth, "anthropic-version": "2023-06-01"}
+        ),
+        client.post("/antifaz/scan", json={"text": text}, headers=auth),
+    ]
+    assert [response.status_code for response in sent] == [200, 200, 200]
     refused = client.post("/antifaz/scan", json={"text": text, "x": SENTINEL_DNI}, headers=auth)
     assert refused.status_code >= 400
     client.get("/v1/models", headers={**auth, "X-Note": SENTINEL_DNI})
@@ -169,6 +175,7 @@ def test_the_sentinel_dni_never_reaches_the_status_nor_the_page(
     caplog.set_level(logging.DEBUG)
     session_id = _admin_log_in(canary_client)
     _send_the_sentinel_everywhere(canary_client)
+    assert caplog.records  # the gateway logged while the sentinel went through
 
     texts = "\n".join(_panel_texts(canary_client, session_id))
 
