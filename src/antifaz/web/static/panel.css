@@ -465,15 +465,22 @@ mark.pii{position:relative;background:var(--color-pii-bg);color:var(--color-text
 .ner .mono{font-size:.71875rem;color:var(--color-text-faint)}
 .ner p{grid-column:2/4;color:var(--color-text-muted);font-size:.78125rem}
 .ner .dot.ok{color:var(--color-ok)} .ner .dot.warn{color:var(--color-warn)} .ner .dot.danger{color:var(--color-danger)}
-/* One grid for the three rows (each row is a subgrid): the name column is as wide as the longest
-   host, so a host never breaks and the bars line up */
-.prov{display:grid;grid-template-columns:max-content minmax(48px,1fr) minmax(0,max-content);column-gap:12px;padding:0 20px 8px}
+/* One grid for the rows (each row is a subgrid): the name and its address, then the key state.
+   The real panel has no latency bars (11c-3b: it never calls a provider). A warning about the
+   address takes a whole line under its row. */
+.prov{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,max-content);column-gap:12px;padding:0 20px 8px}
 .prov li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;row-gap:12px;padding:11px 0;border-top:1px solid var(--color-line);font-size:.875rem}
 .prov .nm{display:flex;flex-direction:column;min-width:0}
 .prov .nm span{font-size:var(--text-xs);color:var(--color-text-faint);font-family:var(--font-mono);letter-spacing:0}
 .prov .status{justify-self:end;font-size:var(--text-sm);white-space:normal;text-align:right}
 .prov .status b{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--weight-semibold);color:var(--color-text)}
 .prov .meter.is-down>i{transform:scaleX(0)}
+.prov .prov-warn{grid-column:1/-1;display:flex;align-items:flex-start;gap:8px;margin-top:-4px;font-size:var(--text-sm);color:var(--color-warn)}
+.prov .prov-warn .ic{width:16px;height:16px;flex:none;margin-top:2px}
+.ner .dot.neutral{color:var(--color-text-faint)}
+/* While the status is being read the cards dim a little; the live region says "Checking". */
+.sgrid{transition:opacity var(--duration-base) var(--ease-out)}
+.sgrid[aria-busy="true"]{opacity:.6}
 
 /* Identifiers (key, team, model and policy names, ids, versions, markers, codes, commands) never
    break inside: each one is an atomic inline box, so it moves whole to the next line and the text

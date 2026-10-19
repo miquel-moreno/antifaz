@@ -27,6 +27,7 @@ SECRET_ATTRIBUTES = frozenset(
         "admin_token",
         "api_key",
         "throwaway_tokens",
+        "provider_keys",
         "cookies",
         "all_headers",
         "header_values",

@@ -1,13 +1,17 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 44 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 54 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
 320x844 the panel with the text at 200 % (11c-3a): where the names do not fit, the bottom bar
 scrolls and fades on the side that has more, on the first tab (`*-5-text200-first.png`) and on
-«Estado», the last (`*-6-text200-status.png`). With reduced motion, animations disabled, the
-caret hidden and after every font is ready.
+«Estado», the last (`*-6-text200-status.png`). 11c-3b: the «Estado» view with its data (both
+providers with a key on their official addresses, the NER working), the whole page on the
+desktop and the window on a phone (its tab bar is fixed), for both
+languages, themes and sizes (`*-7-status.png`), and its error state, Spanish light at both sizes
+(`es-light-*-8-status-error.png`: the request refused by the browser, the last data kept). With
+reduced motion, animations disabled, the caret hidden and after every font is ready.
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
 throwaway. Right before every capture the token field is checked to be empty (an error shows
@@ -20,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
-from tests.browser.server import PanelServer
+from tests.browser.server import PanelServer, ServerOptions
 
 pytestmark = pytest.mark.browser
 
@@ -36,19 +40,32 @@ FADE_SETTLED_JS = """() => {
 }"""
 
 
+# Idle and filled in: the button enabled again and the line says when it was checked.
+STATUS_IDLE_JS = """() => !document.getElementById('status-refresh').disabled &&
+  document.getElementById('status-time').textContent !== ''"""
+
+
+@pytest.fixture
+def server_options() -> ServerOptions:
+    """Both providers with a throwaway key (never called) and a NER that says "ok"."""
+    return ServerOptions(provider_keys=True, ner_state="ok")
+
+
 @pytest.fixture(autouse=True)
 def _only_with_the_option(request: pytest.FixtureRequest) -> None:
     if not request.config.getoption("--panel-captures"):
         pytest.skip("reference captures: run `make panel-captures`")
 
 
-def _capture(tab: Tab, name: str) -> Path:
+def _capture(tab: Tab, name: str, *, full_page: bool = False) -> Path:
     if tab.page.locator("#login-token").count():
         value = tab.page.input_value("#login-token")
         assert value == "", "the token field must be empty in every capture"
     tab.page.evaluate("() => document.fonts.ready.then(() => true)")
     path = CAPTURES / f"{name}.png"
-    tab.page.screenshot(path=path, animations="disabled", caret="hide", timeout=TIMEOUT_MS)
+    tab.page.screenshot(
+        path=path, animations="disabled", caret="hide", timeout=TIMEOUT_MS, full_page=full_page
+    )
     return path
 
 
@@ -107,3 +124,52 @@ def test_capture_the_phone_at_twice_the_text_size(
     written.append(_capture(tab, f"{stem}-6-text200-status"))
 
     assert all(path.stat().st_size > 0 for path in written)
+
+
+def _log_in(tab: Tab, server: PanelServer, lang: str) -> None:
+    tab.goto(f"/panel/login?lang={lang}")
+    tab.page.fill("#login-token", server.admin_token)
+    tab.page.click("#login-form button[type=submit]")
+    tab.page.wait_for_url(f"{server.origin}/panel?lang={lang}")
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+
+
+def _open_status(tab: Tab) -> None:
+    tab.page.click("#tab-status")
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#tab-status").blur()  # no focus ring in the reference
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_capture_the_status_view(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str, width: int
+) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme=theme, width=width, scale=2)
+    _log_in(tab, server, lang)
+    _open_status(tab)
+
+    # Whole page on the desktop; the phone's tab bar is fixed, so there the window only.
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-7-status", full_page=width >= 768)
+
+    assert path.stat().st_size > 0
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+def test_capture_the_status_error(new_tab: NewTab, server: PanelServer, width: int) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme="light", width=width, scale=2)
+    _log_in(tab, server, "es")
+    _open_status(tab)
+    tab.page.route(f"{tab.origin}/panel/api/status", lambda route: route.abort())
+    tab.page.click("#status-refresh")
+    tab.page.locator("#status-alert").wait_for(state="visible")
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#status-refresh").blur()
+    tab.page.mouse.move(0, 0)  # no hover on the button in the reference
+
+    path = _capture(tab, f"es-light-{SIZES[width]}-8-status-error", full_page=width >= 768)
+
+    assert path.stat().st_size > 0

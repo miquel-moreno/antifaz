@@ -11,7 +11,9 @@ it is given `tests/browser` without --panel, and then nothing here may need the 
 - `browser_name` comes from --panel-browser (default chromium, firefox, webkit) and every test
   that uses a browser runs once per browser. One browser process per engine for the session.
 - `server`: a new gateway per test (tests/browser/server.py), stopped afterwards; no provider
-  may have been called. A new context per test (`tab`, or `new_tab(...)` for several).
+  may have been called. A test module changes what it has by overriding `server_options`
+  (11c-3b: throwaway provider keys, a fake NER state). A new context per test (`tab`, or
+  `new_tab(...)` for several).
 - On a failure, a screenshot and a redacted text log go to test-results/panel-browser/ (the CI
   artefact). Never a trace, a video or a HAR.
 """
@@ -26,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.browser.server import OtherSite, PanelServer, isolated_variable
+from tests.browser.server import OtherSite, PanelServer, ServerOptions, isolated_variable
 from tests.conftest import forbid_network, panel_browsers
 
 if TYPE_CHECKING:
@@ -101,10 +103,19 @@ def browser(playwright: Playwright, browser_name: str) -> Iterator[Browser]:
 
 
 @pytest.fixture
+def server_options() -> ServerOptions:
+    """The defaults: no provider key, the NER off. A test module overrides this fixture."""
+    return ServerOptions()
+
+
+@pytest.fixture
 def server(
-    request: pytest.FixtureRequest, isolated: None, panel_notes: list[str]
+    request: pytest.FixtureRequest,
+    isolated: None,
+    panel_notes: list[str],
+    server_options: ServerOptions,
 ) -> Iterator[PanelServer]:
-    gateway = PanelServer()
+    gateway = PanelServer(server_options)
     try:
         gateway.start()
         yield gateway
