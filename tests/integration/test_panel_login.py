@@ -268,6 +268,10 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
     from antifaz.web.status import NER_OFF, StatusFacts
+    from antifaz.web.try_limit import TryLimiter
+
+    async def _no_try(text: str, lang: str) -> dict[str, object]:
+        raise AssertionError("the Try runner must not run without the door")
 
     state = PanelState(
         token_fingerprint=hashlib.sha256(b"x").digest(),
@@ -276,13 +280,20 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
         limiter=FailureLimiter(),
         assets=load_assets(),
         status=StatusFacts(__version__, (), 1, 0, 0, lambda: NER_OFF),
+        try_runner=_no_try,
+        try_limiter=TryLimiter(),
     )
     app = FastAPI()
     register_error_handlers(app)
     app.include_router(build_router(state))
     client = TestClient(app, base_url=LOCAL_URL)
 
-    for method, path in (("GET", "/panel"), ("POST", "/panel/login"), ("GET", "/panel/api/status")):
+    for method, path in (
+        ("GET", "/panel"),
+        ("POST", "/panel/login"),
+        ("GET", "/panel/api/status"),
+        ("POST", "/panel/api/try"),
+    ):
         response = client.request(method, path, json={"token": "x"})
 
         assert response.status_code == 401, path

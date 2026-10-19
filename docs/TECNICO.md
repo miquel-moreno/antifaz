@@ -945,6 +945,62 @@ Con el contraste alto de Windows (`forced-colors: active`) el navegador quita to
 - `make panel-captures` añade 2 capturas con colores forzados, español claro 1280x800: el login con el campo del token enfocado (`es-light-1280x800-10-forced-login-focus.png`) y «Estado» (`es-light-1280x800-11-forced-status.png`). En total, 58 PNG.
 - En la captura del login con colores forzados se ve el cursor del campo: `caret-color` es una de las propiedades que el navegador fuerza, así que el `caret="hide"` de Playwright (un `caret-color: transparent`) no lo oculta. El campo está vacío, así que no enseña nada.
 
+## Panel: Prueba un texto (API, 11d-a)
+
+En pocas palabras: `POST /panel/api/try` recibe un texto, lo pasa por el **mismo** enmascarado que el proxy (detector, NER si está encendido, política por defecto y guardia de salida), se inventa una respuesta con **solo los marcadores** que salieron y la restaura. Devuelve qué se encontró, qué recibiría la IA y qué volvería a ti. **No llama a ninguna IA** y no guarda nada. La pantalla llega en 11d-b. Ver la nota del 2026-10-19 (11d-a) en [ADR-0018](adr/0018-el-panel-y-su-puerta.md).
+
+### La ruta
+
+- **Sesión y CSRF**, como «Salir»: la puerta exige sesión del esquema, `X-Antifaz-CSRF`, `Origin` y `Sec-Fetch-Site: same-origin` y JSON; la clave de la API no la abre. `GET` y `HEAD`: 405. Es `async def`. Cabeceras de la puerta y `no-store`; sin `Vary` ni `Content-Language`.
+- **En este orden**:
+  1. **Límite**: 30 intentos en cualquier ventana de 60 s por sesión (`web/try_limit.py`), con la huella de la sesión como clave (la calcula el servidor; el cliente no elige su cubo). Se toma **antes de leer el cuerpo y antes de cualquier `await`**: comprobar y contar es una sola llamada. Todo intento cuenta, bueno o malo. Al pasarse, 429 `too_many_tries` con `Retry-After`. La tabla está acotada (256 sesiones como mucho, y el almacén guarda 32) y la entrada de una sesión se borra cuando se cierra (`SessionStore.on_close`: salir, otro login, caducidad).
+  2. **Cuerpo**: un `Content-Length` declarado de más de 128 KiB es 413 sin leer nada; si no, se lee por trozos y se corta en cuanto pasa de 128 KiB (413), con o sin `Content-Length`, en 5 s como mucho (408 `body_timeout`). Nunca se lee como formulario. En 128 KiB cabe el texto más largo escrito entero con escapes `\uXXXX`.
+  3. **Formato**: exactamente `{"text": str, "lang": un idioma cargado}`. Claves repetidas o de más, `NaN`/`Infinity`, surrogates sueltos, tipos que no son texto, BOM o UTF-8 roto: 400 `invalid_try_body` con un mensaje fijo, sin repetir nada de lo recibido. Un texto de más de **20 480 bytes en UTF-8** es 413 `text_too_large`.
+  4. **El recorrido** (`web/try_text.py`, `run_try`): `antifaz.mask.mask()` con el detector y la política de la pasarela → `antifaz.guard.check()` sobre el texto enmascarado → respuesta simulada → `antifaz.restore.restore()`. Es el código del proxy, sin copia. Un detector que falla da `outcome: "blocked"`, `blocked_reason: "detector_failed"`; si la guardia aún ve un valor, `"egress_guard"`. Bloqueado es un 200 sin `sent` ni `reply`. Cualquier otro error es un 500 fijo y **una línea de log con el tipo del error, nunca su mensaje** (podría llevar el texto).
+- **Concurrencia**: `api/app.py` da al panel un `try_runner` (nunca el detector, la política ni los `Settings`): ejecuta `run_try` en un hilo detrás de un **limitador propio de un hilo**, que se toma **antes** del limitador de enmascarado del proxy (`MASK_THREADS` = 8). Así el panel nunca ocupa más de uno de esos ocho hilos y una ráfaga de pruebas no deja sin hilo al proxy (test de red team).
+
+### Sin IA y sin camino hacia una IA
+
+- La respuesta simulada (`simulate_reply(tokens, lang)`) recibe **solo** los tokens (`"ES_DNI_1"`), comprueba uno a uno que lo son y nunca ve el texto ni la tabla de marcadores. Frases fijas por idioma (español e inglés; inglés para otro idioma), nombra cada marcador una vez y como mucho 10 («…y N más»). Las frases viven en el módulo y no en los catálogos: los catálogos son los textos de la página y un test prohíbe claves que ninguna plantilla usa.
+- `web/try_text.py` no importa `antifaz.providers`, `antifaz.api`, `httpx`, `socket` ni `ssl`, y no recibe ningún cliente. Un test recorre su **cierre de importaciones** dentro del proyecto (ningún módulo alcanzado importa esas piezas) y otro lo importa en un intérprete limpio y comprueba que no se cargan `httpx`, `antifaz.providers`, `antifaz.api` ni `antifaz.config`. `socket` y `ssl` no se pueden comprobar así: python-stdnum (los validadores) los importa para sus consultas en línea, que el detector nunca usa. Un test de integración arranca la app con un transporte de proveedor que falla en cuanto se usa: cero llamadas.
+
+### La respuesta (esquema cerrado, `web/try_response.py`)
+
+Pydantic estricto, `extra="forbid"`, congelado y con `hide_input_in_errors=True` (un error de validación no imprime los valores):
+
+```json
+{"outcome": "masked" | "blocked", "blocked_reason": null | "detector_failed" | "egress_guard",
+ "length_utf16": 30,
+ "entities": [{"type": "ES_DNI", "start": 10, "end": 19, "hidden": true}],
+ "sent":  [{"text": "Mi DNI es "}, {"marker": "[[ES_DNI_1]]", "type": "ES_DNI"}],
+ "reply": [{"text": "Respuesta simulada … "}, {"marker": "[[ES_DNI_1]]", "type": "ES_DNI", "value": "…"}],
+ "counts": [{"type": "ES_DNI", "found": 1, "hidden": 1}],
+ "policy_version": "builtin-1", "ner": "off", "elapsed_ms": 2}
+```
+
+- `sent` unido es exactamente el texto enmascarado que recibiría el proveedor: los tipos permitidos (el CIF de empresa) siguen en claro y un marcador escrito por el usuario sale escapado (`[[!ES_DNI_9]]`) como texto, nunca como marcador.
+- `reply` unido (textos y valores) es exactamente `restore()` de la respuesta simulada entera. Los dos se cortan con el patrón del propio restaurador (`antifaz.restore.placeholder_parts`, junto a `placeholder_tokens`), así que no hay un segundo patrón que pueda discrepar.
+- El texto original **nunca** vuelve como campo: la página ya lo tiene.
+- Para saber qué partes del texto se encontraron, `MaskResult` lleva ahora `found_spans` (`FoundSpan`: inicio, fin, tipo, oculto o permitido y token; **sin campo para el valor**). Un test estático impide que lo lea nada fuera de `mask/` y `web/try_text.py` (ni evidencias, ni «Estado», ni el proxy, ni los logs).
+
+### La unidad de las posiciones: UTF-16
+
+Python cuenta un texto por puntos de código; JavaScript, por unidades UTF-16. Un emoji fuera del plano básico (👍, 𝐀) es un punto de código pero dos unidades, así que con posiciones de Python la página marcaría letras equivocadas a partir del primer emoji. Por eso la API **convierte en el servidor** y da `start`/`end` en unidades UTF-16, más `length_utf16`, la longitud UTF-16 del texto que procesó: la página la compara con su copia del texto antes de marcar nada (si no coincide, no marca). Un grupo que se ve como un solo carácter (una familia unida con ZWJ, una bandera, una letra con acentos combinados) son varias unidades; una entidad nunca empieza ni acaba dentro de un par sustituto porque las dos posiciones salen de puntos de código.
+
+Pruebas: una tabla con emoji (astrales, secuencias ZWJ, banderas), acentos precompuestos y descompuestos, CRLF, texto RTL, controles bidi y valores pegados a todos ellos; para cada entidad, el trozo UTF-16 del texto original (simulado con `text.encode("utf-16-le")`) es exactamente el valor detectado. Y dos propiedades con Hypothesis: con cualquier texto alrededor (sin surrogates sueltos), el trozo UTF-16 de cada entidad es su trozo en puntos de código, y las posiciones son crecientes y acaban en la longitud UTF-16.
+
+### Privacidad (la única excepción a la invariante 15)
+
+- El valor solo vuelve en la respuesta a esa misma petición, con `no-store`. Nunca en los logs (todo en `DEBUG`, también los registradores de uvicorn; el log de acceso de uvicorn sigue apagado en `antifaz serve`), en los contadores, en «Estado», en las páginas, en la respuesta de otra sesión ni en ningún cuerpo de error (400, 413, 429 y 500 forzado con un `restore` que falla con el centinela en el mensaje). Un detector que falla con el centinela en el mensaje da `blocked` sin el centinela. Mientras corre una prueba no se escribe nada en disco (el test vigila `open` para escribir, `os.open` con banderas de escritura y `tempfile`). Las evidencias aún no existen (punto 9); el test estático de `found_spans` ya las deja fuera.
+- **Memoria, con honestidad**: el texto y los valores viven en cadenas de Python mientras dura la petición. Python no puede borrar una cadena: se libera cuando nadie la usa y el asignador puede reutilizar esa memoria más tarde, pero sus bytes pueden quedar ahí hasta entonces (y en un volcado de memoria del proceso). Nada guarda una referencia después de responder, escribe en disco ni lo registra.
+- El contador de «En directo» (11e) todavía no recibe nada de aquí.
+
+### Pruebas
+
+- Unitarias: `parse_body` (cada forma mala, el límite en bytes UTF-8, el error nunca cita la entrada), las posiciones UTF-16 (tabla y propiedades), `simulate_reply` (propiedad: quitando los marcadores, el texto es el mismo para cualquier lista de tokens del mismo tamaño; solo acepta tokens; firma `(tokens, lang)`), los segmentos (`sent` unido = texto enmascarado; `reply` unido = `restore()` de la respuesta entera), el cierre de importaciones, el límite (ventana deslizante, tabla acotada, `forget`), el esquema (campos de más, tipos, bloqueado sin segmentos, sin imprimir la entrada) y `found_spans` (sin valores en campos ni `repr`; invariante 1 intacta).
+- Integración (`tests/integration/test_panel_try.py`): sin sesión, solo la clave, sesión cerrada, cada capa CSRF, `text/plain` y formularios, 405, 400, 413 de las dos maneras y por bytes UTF-8, 408 con un cuerpo que no acaba, 429 con `Retry-After` en el intento 31, otra sesión no se ve afectada, al salir la tabla se vacía, NER falso que enmascara `PERSON`, NER que falla → `detector_failed`, guardia → `egress_guard`, transporte que falla → cero llamadas, posiciones UTF-16, cabeceras y `no-store`. La ruta entra en el recorrido de la invariante 12.
+- Red team (`tests/redteam/test_panel_try_privacy.py`): el centinela en todos los sitios de arriba; XSS (solo viaja dentro de JSON con `nosniff` y CSP `default-src 'none'`, sin tocarse); un marcador inventado (`[[ES_DNI_9]]`, `[[ es_dni_1 ]]`…) nunca se restaura (invariante 6); formulario `text/plain` de otra web y `fetch` `no-cors` desde otro puerto de `localhost`: 403 antes de la ruta (ni cuentan en el límite); y una ráfaga de pruebas con un detector lento no bloquea una petición del proxy.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |

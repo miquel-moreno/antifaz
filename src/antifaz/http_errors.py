@@ -88,6 +88,46 @@ class CsrfRejectedError(AppError):
         super().__init__("request refused: it must come from the panel's own page, as JSON")
 
 
+class InvalidTryBodyError(AppError):
+    """«Prueba un texto» (11d-a): a body that is not exactly {"text", "lang"}. Never quoted."""
+
+    status_code = 400
+    code = "invalid_try_body"
+
+    def __init__(self) -> None:
+        super().__init__("the body must be JSON with exactly a text and a loaded language")
+
+
+class TextTooLargeError(AppError):
+    """«Prueba un texto»: a body over its raw cap or a text over its UTF-8 limit."""
+
+    status_code = 413
+    code = "text_too_large"
+
+    def __init__(self) -> None:
+        super().__init__("the text is too long")
+
+
+class TryBodyTimeoutError(AppError):
+    """«Prueba un texto»: the body did not arrive in time."""
+
+    status_code = 408
+    code = "body_timeout"
+
+    def __init__(self) -> None:
+        super().__init__("the body did not arrive in time")
+
+
+class TooManyTriesError(AppError):
+    status_code = 429
+    code = "too_many_tries"
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            "too many tries: wait and try again", headers={"Retry-After": str(retry_after)}
+        )
+
+
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 

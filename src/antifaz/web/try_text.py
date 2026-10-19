@@ -48,7 +48,7 @@ to simulate_reply. Importing a provider client or an HTTP library.
 import json
 import re
 import time
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,10 +64,6 @@ MAX_BODY_BYTES = 128 * 1024
 MAX_TEXT_BYTES = 20_480
 BODY_SECONDS = 5
 MAX_LISTED = 10
-
-# What the gateway hands the panel (PanelState.try_runner): text and language in, the answer
-# out. It runs run_try() in a worker thread behind the Try limiter and the mask limiter.
-type TryRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 
 _TOKEN = re.compile(r"[A-Z]+(?:_[A-Z]+)*_[0-9]+")
 _KEYS = frozenset({"text", "lang"})
@@ -317,7 +313,6 @@ __all__ = [
     "REPLIES",
     "TextTooLongError",
     "TryBodyError",
-    "TryRunner",
     "parse_body",
     "run_try",
     "simulate_reply",

@@ -43,21 +43,41 @@ CSRF again.
   state at that moment and the uptime) and never calls a provider. No language: no Vary or
   Content-Language. Only GET: POST and the others are 405 once the door let them through, HEAD
   is 405 too.
+- POST /panel/api/try (11d-a): «Prueba un texto», for a live session with its CSRF token (the
+  door). In this order:
+  1. The rate limit (web/try_limit.py), keyed by the session's fingerprint: at most 30 tries
+     in 60 s, else 429 too_many_tries with Retry-After. Taken BEFORE anything awaits or the body
+     is read: a refused try costs nothing. Every try counts, good or bad.
+  2. The body: a declared Content-Length over MAX_BODY_BYTES (128 KiB) is 413 at once; else it
+     is read as a stream and cut as soon as it passes that cap (413), with or without
+     Content-Length, within TRY_BODY_SECONDS (else 408 body_timeout). Never parsed as a form.
+  3. Exactly {"text": str, "lang": a loaded catalog code} (web/try_text.parse_body), else 400
+     invalid_try_body (never quoting it); a text over 20 480 UTF-8 bytes is 413 text_too_large.
+  4. PanelState.try_runner (the gateway's: mask -> guard -> simulated reply -> restore, in a
+     worker thread, no AI) and the closed schema of web/try_response.py, with the NER state at
+     that moment. Any error there is a fixed 500 and one log line with the error's type only:
+     an exception's message could hold the text.
+  The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
+  values come back only in it (the scoped exception to invariant 15); the original text never.
+  When a session closes, its entry in the rate limit goes too (SessionStore.on_close).
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
 in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
-`logout` never awaits. tests/unit/test_web_concurrency.py checks it: every route is a coroutine
-function, no await, async for or async with comes after `limiter.allowed(` in `login`, and
-`logout` has none at all.
+`logout` never awaits; `try_a_text` takes its try before its first await.
+tests/unit/test_web_concurrency.py checks it: every route is a coroutine function, no await,
+async for or async with comes after `limiter.allowed(` in `login`, `logout` has none at all, and
+none comes before `.take(` in `try_a_text`.
 
-Forbidden: logging or echoing the token, the body, the session id or the CSRF token. Comparing
+Forbidden: logging or echoing the token, the body, the session id or the CSRF token.
+Logging, echoing in an error or writing anywhere the text or a value of «Prueba un texto». Comparing
 before checking the limit. Answering a failed login with anything that depends on why.
 """
 
 import hashlib
 import hmac
 import json
+import logging
 
 import anyio
 from fastapi import APIRouter, Request
@@ -66,21 +86,38 @@ from starlette.requests import ClientDisconnect
 
 from antifaz import __version__
 from antifaz.http_errors import (
+    InvalidTryBodyError,
+    PanelInternalError,
     PanelLoginFailedError,
     PanelNotFoundError,
     PanelUnauthorizedError,
+    TextTooLargeError,
     TooManyAttemptsError,
+    TooManyTriesError,
+    TryBodyTimeoutError,
 )
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
-from antifaz.web.status import snapshot
+from antifaz.web.sessions import CloseReason
+from antifaz.web.status import ner_state, snapshot
 from antifaz.web.status_response import StatusResponse
 from antifaz.web.templating import Pages
+from antifaz.web.try_response import TryResponse
+from antifaz.web.try_text import (
+    BODY_SECONDS,
+    MAX_BODY_BYTES,
+    TextTooLongError,
+    TryBodyError,
+    parse_body,
+)
 
 MAX_LOGIN_BODY = 1024
 LOGIN_BODY_SECONDS = 5
 MAX_TOKEN_CHARACTERS = 256
+TRY_BODY_SECONDS = BODY_SECONDS
+
+logger = logging.getLogger("antifaz.panel")
 
 
 def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -106,14 +143,52 @@ def _token(body: bytes | None) -> str | None:
     return token
 
 
-async def _read_capped(request: Request) -> bytes | None:
-    """The body, or None as soon as it passes MAX_LOGIN_BODY (nothing more is read)."""
+async def _read_capped(request: Request, limit: int = MAX_LOGIN_BODY) -> bytes | None:
+    """The body, or None as soon as it passes `limit` (nothing more is read)."""
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_LOGIN_BODY:
+        if len(body) > limit:
             return None
     return bytes(body)
+
+
+async def _try_body(request: Request) -> bytes:
+    """The Try body: 413 over MAX_BODY_BYTES (declared or streamed), 408 past the deadline."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise TextTooLargeError()
+    raw: bytes | None = None
+    problem: type[Exception] | None = None
+    try:
+        with anyio.fail_after(TRY_BODY_SECONDS):
+            raw = await _read_capped(request, MAX_BODY_BYTES)
+    except TimeoutError:
+        problem = TryBodyTimeoutError
+    except ClientDisconnect:
+        problem = InvalidTryBodyError  # nobody is listening any more; never a 500
+    if problem is not None:
+        raise problem()
+    if raw is None:
+        raise TextTooLargeError()
+    return raw
+
+
+def _try_input(raw: bytes, languages: tuple[str, ...]) -> tuple[str, str]:
+    """(text, lang), or the fixed 400 or 413 (raised outside the except block)."""
+    parsed: tuple[str, str] | None = None
+    too_long = False
+    try:
+        parsed = parse_body(raw, languages)
+    except TextTooLongError:
+        too_long = True
+    except TryBodyError:
+        parsed = None
+    if too_long:
+        raise TextTooLargeError()
+    if parsed is None:
+        raise InvalidTryBodyError()
+    return parsed
 
 
 def _fingerprint(token: str) -> bytes:
@@ -135,6 +210,11 @@ def build_router(state: PanelState) -> APIRouter:
     rendered from the templates and catalogs here, once (a broken one stops the startup)."""
     router = APIRouter(include_in_schema=False)
     pages = Pages(state.assets, version=__version__)
+
+    def forget_tries(key: str, _reason: CloseReason) -> None:
+        state.try_limiter.forget(key)  # a closed session leaves nothing in the rate limit
+
+    state.sessions.on_close(forget_tries)
 
     @router.get("/panel/login")
     async def login_page(request: Request) -> HTMLResponse:
@@ -187,6 +267,29 @@ def build_router(state: PanelState) -> APIRouter:
         if context.session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         return StatusResponse.model_validate(snapshot(state.status, context.scheme))
+
+    @router.post("/panel/api/try")
+    async def try_a_text(request: Request) -> TryResponse:
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        # Before anything awaits: the check and the count are one plain call.
+        wait = state.try_limiter.take(context.session.fingerprint)
+        if wait:
+            raise TooManyTriesError(wait)
+        text, lang = _try_input(await _try_body(request), pages.languages)
+        answer: TryResponse | None = None
+        failure = ""
+        try:
+            result = await state.try_runner(text, lang)
+            ner = ner_state(state.status.ner_state())
+            answer = TryResponse.model_validate({**result, "ner": ner})
+        except Exception as error:
+            failure = type(error).__name__  # only the type: the message could hold the text
+        if answer is None:
+            logger.error("panel try failed: %s", failure)
+            raise PanelInternalError()
+        return answer
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

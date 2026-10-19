@@ -228,7 +228,12 @@ def test_local_routes_never_call_a_provider(
 # of these on purpose.
 PANEL_PUBLIC_ROUTES = frozenset({("/panel/login", "GET"), ("/panel/login", "POST")})
 PANEL_SESSION_ROUTES = frozenset(
-    {("/panel", "GET"), ("/panel/logout", "POST"), ("/panel/api/status", "GET")}
+    {
+        ("/panel", "GET"),
+        ("/panel/logout", "POST"),
+        ("/panel/api/status", "GET"),
+        ("/panel/api/try", "POST"),  # 11d-a: «Prueba un texto», session + CSRF token
+    }
 )
 # 11c-1: public only for GET and only for the exact paths of the manifest (the door's rule);
 # any other name under it follows the general rule (a session).
