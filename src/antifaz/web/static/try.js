@@ -250,6 +250,7 @@
       item.appendChild(amount);
       found.appendChild(item);
     });
+    found.hidden = !found.querySelector("dd");
     return hidden;
   }
 
