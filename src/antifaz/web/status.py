@@ -21,7 +21,8 @@ a base URL or any other free text (tests/unit/test_web_status.py).
   user part; else "ok".
 - `snapshot(facts, scheme)`: the JSON of GET /panel/api/status (its closed schema is
   web/status_response.py). The NER state is read at that moment; the uptime comes from the
-  injected clock.
+  injected clock and counts from `mark_started()`, which the gateway calls once its start-up
+  finished (after the NER workers loaded); 0 before that.
 
 Forbidden: putting a base URL, a key or any text from the settings in StatusFacts; showing the
 raw NER state; reading the settings here.
@@ -171,16 +172,21 @@ class StatusFacts:
     trusted_proxies: int
     ner_state: Callable[[], object] = field(repr=False)  # NER_OFF without the NER, else its state
     clock: Callable[[], float] = field(default=time.monotonic, repr=False)
-    started: float = field(default=-1.0)
+    started: float | None = None  # set once by mark_started()
 
     def __post_init__(self) -> None:
         if min(self.allowed_hosts, self.allowed_origins, self.trusted_proxies) < 0:
             raise ValueError("a count cannot be negative")
-        if self.started < 0:
-            object.__setattr__(self, "started", self.clock())
+
+    def mark_started(self) -> None:
+        """The gateway finished its start-up: the uptime counts from now (once)."""
+        if self.started is None:
+            object.__setattr__(self, "started", self.clock())  # frozen: the one change it allows
 
     def uptime_seconds(self) -> int:
-        """Whole seconds since the facts were built (never negative)."""
+        """Whole seconds since mark_started() (0 before it, never negative)."""
+        if self.started is None:
+            return 0
         return max(0, int(self.clock() - self.started))
 
 

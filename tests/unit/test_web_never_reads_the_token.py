@@ -47,7 +47,17 @@ TEMPLATING_THIRD_PARTY = {"jinja2"}
 SHARED_RULE = Path(antifaz.trusted_networks.__file__)
 # A pure piece may use another pure piece (each is checked here itself).
 ALLOWED_OWN_MODULES = {"antifaz.trusted_networks", *(f"antifaz.web.{n[:-3]}" for n in PURE)}
-FORBIDDEN_NAMES = {"get_secret_value", "admin_token", "_secret_value", "model_dump", "__dict__"}
+FORBIDDEN_NAMES = {
+    "get_secret_value",
+    "admin_token",
+    "_secret_value",
+    "model_dump",
+    "__dict__",
+    # 11c-3b review: no reaching into a callable's closure or globals (the NER state callable).
+    "__closure__",
+    "cell_contents",
+    "__globals__",
+}
 FORBIDDEN_IMPORTS = ("antifaz.config", "pydantic", "pydantic_settings")
 # The only web module that may import pydantic (11c-3b), and the only names it may take from it.
 SCHEMA = "status_response.py"
@@ -167,11 +177,14 @@ def test_the_guard_itself_catches_what_it_forbids() -> None:
         "y = vars(s)\n"
         "z = getattr(s, name)\n"
         "w = s.__dict__\n"
+        "v = f.__closure__[0].cell_contents\n"
+        "u = f.__globals__\n"
     )
     imports = _imports(bad)
     assert "pydantic" in imports and "antifaz.config" in imports
     attributes = {n.attr for n in ast.walk(bad) if isinstance(n, ast.Attribute)}
     assert {"admin_token", "get_secret_value", "__dict__"} <= attributes
+    assert {"__closure__", "cell_contents", "__globals__"} <= attributes & FORBIDDEN_NAMES
     assert _calls_to(bad, "vars")
     (dynamic,) = _calls_to(bad, "getattr")
     assert not isinstance(dynamic.args[1], ast.Constant)

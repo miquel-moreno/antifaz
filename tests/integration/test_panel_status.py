@@ -293,6 +293,38 @@ def test_custom_addresses_show_only_the_host() -> None:
         assert fragment not in str(body)
 
 
+class StartingNer(FakeNer):
+    """Records whether the status facts were already marked started while the NER starts."""
+
+    def __init__(self) -> None:
+        super().__init__("ok")
+        self.app: Any = None
+        self.started_during_start: object = "not called"
+
+    def start(self) -> None:
+        self.started_during_start = self.app.state.panel_status.started
+
+
+def test_the_uptime_counts_from_when_start_up_finished() -> None:
+    ner = StartingNer()
+    client = panel_client(HTTPS_URL, ner=ner)
+    ner.app = client.app
+    with client:
+        facts = client.app.state.panel_status  # type: ignore[attr-defined]
+        assert ner.started_during_start is None  # not yet while the NER was loading
+        assert facts.started is not None
+
+
+def test_the_ner_state_callable_holds_the_ner_not_the_app() -> None:
+    ner = FakeNer("ok")
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        facts = client.app.state.panel_status  # type: ignore[attr-defined]
+        cells = [cell.cell_contents for cell in facts.ner_state.__closure__ or ()]
+
+    assert ner in cells
+    assert client.app not in cells
+
+
 def test_the_counts_follow_the_settings() -> None:
     body = _status_of(
         allowed_origins=["https://a.example", "https://b.example"],

@@ -15,6 +15,7 @@
 
 import dataclasses
 import re
+import types
 import typing
 from collections.abc import Callable
 
@@ -229,10 +230,13 @@ def _facts(
     return StatusFacts(**fields)  # type: ignore[arg-type]
 
 
-def test_the_uptime_comes_from_the_injected_clock() -> None:
+def test_the_uptime_counts_from_mark_started_on_the_injected_clock() -> None:
     clock = _Clock()
     facts = _facts(clock)
+    clock.now += 500  # start-up (the NER loading its model) does not count
 
+    assert facts.uptime_seconds() == 0
+    facts.mark_started()
     assert facts.uptime_seconds() == 0
     clock.now += 59.9
     assert facts.uptime_seconds() == 59
@@ -301,6 +305,9 @@ def test_the_facts_hold_no_secret_and_no_free_text(cls: type) -> None:
             assert all(isinstance(value, str) for value in typing.get_args(hint))
         else:
             allowed = (bool, int, float, tuple, Callable)
+            if typing.get_origin(hint) is types.UnionType:  # "float | None"
+                assert set(typing.get_args(hint)) == {float, type(None)}, field.name
+                continue
             origin = typing.get_origin(hint) or hint
             assert origin in allowed or getattr(origin, "__name__", "") == "Callable", field.name
 

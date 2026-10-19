@@ -75,7 +75,9 @@ def base_url_parts(url: str) -> "UrlParts | None":
         return None
 
 
-def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | None:
+def _panel(
+    app: FastAPI, settings: Settings, ner: NerDetector | None
+) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
     antifaz.web is imported only here, so without the token nothing of the panel is loaded. The
@@ -83,7 +85,8 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
     Its static files are read, checked and hashed here, once (AssetError stops the startup).
     The «Estado» view's facts (11c-3b) are made here too, without a secret: whether each
     provider has a key, the checked host of a custom base URL (never the URL), counts, and a
-    callable that reads the NER state at each request.
+    callable that reads the NER state at each request (it holds the NER itself, never the
+    app). They are kept in app.state.panel_status, so the lifespan marks when start-up finished.
     """
     if settings.admin_token is None:
         return None
@@ -102,7 +105,6 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
         return ProviderFacts(id_, key is not None, address, credentials)
 
     def ner_state() -> object:
-        ner = app.state.ner
         return NER_OFF if ner is None else ner.status()
 
     status = StatusFacts(
@@ -125,6 +127,7 @@ def _panel(app: FastAPI, settings: Settings) -> Callable[[ASGIApp], ASGIApp] | N
         assets=load_assets(),
         status=status,
     )
+    app.state.panel_status = status
     app.include_router(build_router(state))
     return functools.partial(PanelDoor, state=state)
 
@@ -161,6 +164,9 @@ def create_app(
         try:
             if ner is not None:
                 await anyio.to_thread.run_sync(ner.start, limiter=lifecycle)
+            panel_status = getattr(app.state, "panel_status", None)
+            if panel_status is not None:
+                panel_status.mark_started()  # the Status view's uptime counts from here
             yield
         finally:
             if ner is not None:
@@ -191,7 +197,7 @@ def create_app(
     app.include_router(anthropic.router)
     app.include_router(models.router)
     app.include_router(scan.router)
-    panel_door = _panel(app, settings)
+    panel_door = _panel(app, settings, ner)
     app.state.route_paths = registered_paths(app)
     # The last one added runs first: request id -> trusted host -> gate (the panel's door for
     # /panel*; the key, Origin and JSON for the rest).
