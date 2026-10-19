@@ -1,6 +1,7 @@
 """The pure pieces of «Prueba un texto» (issue 53, PR 11d-a, ADR-0018): web/try_text.py.
 
-- parse_body(): exactly {"text": str, "lang": a loaded code}; anything else is TryBodyError,
+- parse_body(): exactly {"text": str, "lang": a loaded code}, or that and "ner": a real JSON
+  boolean (11d-b: false asks for a Try without the name detector); anything else is TryBodyError,
   whose message never quotes the input. A text over MAX_TEXT_BYTES UTF-8 bytes is TextTooLongError.
 - utf16_offsets() / utf16_length(): Python indexes code points, JavaScript indexes UTF-16 code
   units. The API answers in UTF-16, so the page can slice its own string. The table below checks,
@@ -64,8 +65,23 @@ def test_a_good_body() -> None:
     assert parse_body(_body(text=f"DNI {SENTINEL_DNI}", lang="es"), LANGS) == (
         f"DNI {SENTINEL_DNI}",
         "es",
+        True,
     )
-    assert parse_body(b'{"lang": "en", "text": ""}', LANGS) == ("", "en")
+    assert parse_body(b'{"lang": "en", "text": ""}', LANGS) == ("", "en", True)
+
+
+def test_without_ner_the_name_detector_is_asked_for() -> None:
+    parsed = parse_body(_body(text="x", lang="es"), LANGS)
+
+    assert (parsed.text, parsed.lang, parsed.ner) == ("x", "es", True)
+
+
+@pytest.mark.parametrize("ner", [True, False])
+def test_ner_is_a_real_json_boolean(ner: bool) -> None:
+    parsed = parse_body(_body(text="x", lang="en", ner=ner), LANGS)
+
+    assert parsed.ner is ner
+    assert parse_body(b'{"ner": false, "lang": "en", "text": "y"}', LANGS) == ("y", "en", False)
 
 
 @pytest.mark.parametrize(
@@ -99,6 +115,17 @@ def test_a_good_body() -> None:
         b'{"text": "\xff", "lang": "en"}',  # not UTF-8
         b'{"text": "x", "lang": "en"',
         b'{"Text": "x", "lang": "en"}',
+        # 11d-b: "ner" is only a real JSON boolean, once, and never with another key.
+        b'{"text": "x", "lang": "en", "ner": 0}',
+        b'{"text": "x", "lang": "en", "ner": 1}',
+        b'{"text": "x", "lang": "en", "ner": "false"}',
+        b'{"text": "x", "lang": "en", "ner": null}',
+        b'{"text": "x", "lang": "en", "ner": []}',
+        b'{"text": "x", "lang": "en", "ner": false, "ner": false}',
+        b'{"text": "x", "lang": "en", "ner": false, "extra": 1}',
+        b'{"text": "x", "ner": false}',
+        b'{"lang": "en", "ner": false}',
+        b'{"text": "x", "lang": "en", "NER": false}',
     ],
 )
 def test_a_bad_body_is_one_fixed_error(raw: bytes) -> None:
