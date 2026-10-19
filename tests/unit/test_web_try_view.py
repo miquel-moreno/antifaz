@@ -161,7 +161,7 @@ def test_with_the_ner_the_page_shows_exactly_the_server_word_limit(lang: str) ->
 
     assert form["data-max-words"] == str(TRY_NER_MAX_WORDS)
     assert form["data-max-bytes"] == str(MAX_TEXT_BYTES)
-    assert form["data-ner"] == "on"
+    assert form["data-ner-detector"] == "on"
     body = CATALOGS[lang].text("try.too_long.body", max=TRY_NER_MAX_WORDS)
     assert body in str(_by_id(tree, "try-too-long")["text"])
     assert f" {TRY_NER_MAX_WORDS} " in body
@@ -183,7 +183,7 @@ def test_without_the_ner_there_is_no_word_limit_nor_its_callout(lang: str) -> No
     form = _attrs(tree, "try-form")
 
     assert "data-max-words" not in form
-    assert form["data-ner"] == "off"
+    assert form["data-ner-detector"] == "off"
     assert not [e for e in tree.elements if e["attrs"].get("id") == "try-too-long"]  # type: ignore[union-attr]
     assert form["data-max-bytes"] == str(MAX_TEXT_BYTES)
 
@@ -233,7 +233,7 @@ def test_every_entity_type_has_a_label(lang: str) -> None:
         if "try-types" in e["ids"] and "data-type" in e["attrs"]  # type: ignore[operator]
     }
 
-    assert set(labels) == {entity.value for entity in EntityType}
+    assert set(labels) == {entity.value.lower() for entity in EntityType}
     assert all(labels.values())
 
 

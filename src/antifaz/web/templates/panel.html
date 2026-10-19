@@ -69,6 +69,60 @@
 </div>
 <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>{{ t("status.foot") }}</p>
 {%- endmacro %}
+{#- «Prueba un texto» (11d-b): the approved prototype's playground without what depends on later
+    work (policy selector, timing, model, 504, broken chain, mask animation). try.js fills it
+    from POST /panel/api/try with textContent and createElement only. The field has no name and
+    every browser helper off; the form posts nothing (no named field) to the fixed /panel. The
+    limits are server values: the bytes always, and with the NER on (ner_words) the words a Try
+    may give the name detector, which the too-long callout says. The panes hold the WHOLE text and
+    scroll inside (named regions, tabindex 0). The live region gets counts only, never a value. -#}
+{#- (entity type, its label): the keys written out, so a test can tell every key is used. -#}
+{% set entity_labels = [
+  ("ES_DNI", t("try.type.es_dni")), ("ES_NIE", t("try.type.es_nie")), ("ES_NIF", t("try.type.es_nif")),
+  ("ES_CIF", t("try.type.es_cif")), ("ES_NSS", t("try.type.es_nss")), ("ES_CCC", t("try.type.es_ccc")),
+  ("IBAN", t("try.type.iban")), ("IT_CODICE_FISCALE", t("try.type.it_codice_fiscale")),
+  ("EU_VAT", t("try.type.eu_vat")), ("CREDIT_CARD", t("try.type.credit_card")), ("EMAIL", t("try.type.email")),
+  ("IP", t("try.type.ip")), ("PHONE", t("try.type.phone")), ("ES_PASSPORT", t("try.type.es_passport")),
+  ("ES_PLATE", t("try.type.es_plate")), ("ADDRESS", t("try.type.address")),
+  ("DATE_OF_BIRTH", t("try.type.date_of_birth")), ("PT_NIF", t("try.type.pt_nif")),
+  ("FR_NIR", t("try.type.fr_nir")), ("DE_IDNR", t("try.type.de_idnr")), ("PERSON", t("try.type.person")),
+] %}
+{% macro try_view() -%}
+<form class="composer" id="try-form" method="post" action="/panel" novalidate data-max-bytes="{{ max_text_bytes }}"{% if ner_words %} data-max-words="{{ ner_words }}"{% endif %} data-ner-detector="{{ 'on' if ner_words else 'off' }}">
+<label class="cap" for="try-text">{{ t("try.label") }}</label>
+<textarea id="try-text" rows="3" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" writingsuggestions="false" aria-keyshortcuts="Control+Enter Meta+Enter" aria-describedby="try-hint" placeholder="{{ t('try.placeholder') }}"></textarea>
+<p class="tcount" id="try-counter"><span id="try-bytes"></span>{% if ner_words %}<span id="try-words"></span><span class="over" id="try-over" hidden>{{ t("try.count.over") }}</span>{% endif %}</p>
+<div class="bar">
+<span class="kh" aria-hidden="true"><kbd id="try-mod">{{ t("try.key.ctrl") }}</kbd> <kbd>{{ t("try.key.enter") }}</kbd> {{ t("try.shortcut") }}</span>
+<span class="sp"></span>
+<button class="btn" type="button" id="try-example" aria-label="{{ t('try.example') }}"><span class="full">{{ t("try.example") }}</span><span class="short">{{ t("try.example.short") }}</span></button>
+<button class="btn primary" type="submit" id="try-submit">{{ t("try.submit") }}</button>
+</div>
+</form>
+<p class="hint" id="try-hint"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>{{ t("try.hint") }}</p>
+<noscript><p class="hint">{{ t("try.noscript") }}</p></noscript>
+<p class="hint" id="try-example-note" hidden>{{ t("try.example.note") }}</p>
+<div class="callout danger" id="try-error" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("try.error.title") }}</strong><p id="try-error-text"></p></div>
+{%- if ner_words %}
+<div class="callout warn" id="try-too-long" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("try.too_long.title") }}</strong><p id="try-too-long-text">{{ t("try.too_long.body", max=ner_words) }}</p><p class="callout-actions"><button class="btn" type="button" id="try-without-ner" aria-describedby="try-too-long-text">{{ t("try.too_long.action") }}</button></p></div>
+{%- endif %}
+<div class="empty" id="try-empty">
+<span class="orb"><svg class="ic" aria-hidden="true"><use href="#i-eye-off"/></svg></span>
+<p>{{ t("view.playground.empty") }}</p>
+</div>
+<div class="callout warn" id="try-names" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("try.names.title") }}</strong><p id="try-names-text"></p></div>
+<div class="try-result" id="try-result" hidden>
+<div class="pswitch" role="group" aria-label="{{ t('try.switch.label') }}" aria-controls="try-panes" data-p="2"><span class="thumb" aria-hidden="true"></span>
+{%- for number, label in [(1, t("try.switch.input")), (2, t("try.switch.sent")), (3, t("try.switch.reply"))] %}<button type="button" data-p="{{ number }}" aria-pressed="{{ 'true' if number == 2 else 'false' }}">{{ label }}</button>{% endfor %}</div>
+<div class="panes" id="try-panes" data-p="2">
+<article class="pane p1" aria-labelledby="try-pane1-t"><div class="ph"><span class="num" aria-hidden="true">1</span><h2 id="try-pane1-t">{{ t("try.pane.input") }}</h2></div><div class="ptext" id="try-input" role="region" tabindex="0" aria-labelledby="try-pane1-t"></div><p class="pfoot">{{ t("try.foot.input") }}</p></article>
+<article class="pane p2" aria-labelledby="try-pane2-t"><div class="ph"><span class="num" aria-hidden="true">2</span><h2 id="try-pane2-t">{{ t("try.pane.sent") }}</h2></div><div class="ptext" id="try-sent" role="region" tabindex="0" aria-labelledby="try-pane2-t"></div><div class="note danger" id="try-blocked" hidden><strong><svg class="ic" aria-hidden="true"><use href="#i-block"/></svg>{{ t("try.blocked.title") }}</strong><p id="try-blocked-text"></p><p class="sub">{{ t("try.blocked.reason") }} <span class="code ident" id="try-blocked-code"></span></p></div><p class="pfoot" id="try-sent-foot">{{ t("try.foot.sent") }}</p></article>
+<article class="pane p3" aria-labelledby="try-pane3-t"><div class="ph"><span class="num" aria-hidden="true">3</span><h2 id="try-pane3-t">{{ t("try.pane.reply") }}</h2></div><div class="ptext" id="try-reply" role="region" tabindex="0" aria-labelledby="try-pane3-t"></div><p class="pfoot" id="try-reply-foot">{{ t("try.foot.reply") }}</p><p class="pfoot" id="try-reply-blocked" hidden>{{ t("try.foot.blocked") }}</p></article>
+</div>
+<div class="summary"><dl class="found" id="try-found"><dt>{{ t("try.found") }}</dt></dl><p class="meta" id="try-meta"></p></div>
+</div>
+<p class="sr-only" id="try-live" role="status" aria-live="polite"></p>
+{%- endmacro %}
 {#- 11d-b: the whole seconds the session has left before the inactivity limit (already capped by
     the end) and before the 8 hours from the login; session.js warns from them. -#}
 {% block meta %}<meta name="{{ csrf_meta }}" content="{{ csrf_token }}">
@@ -76,7 +130,11 @@
 <meta name="antifaz-session-max" content="{{ max_seconds }}">
 {% endblock %}
 {% block title %}{{ t("panel.title") }}{% endblock %}
-{% block script %}{{ static['panel.js'] }}{% endblock %}
+{#- 11d-b: three standalone scripts that talk through DOM events: panel.js (tabs, menu, theme,
+    «Salir», «Estado»), session.js (the expiry warning, the only timer) and try.js. -#}
+{% block scripts %}<script src="{{ static['panel.js'] }}" defer></script>
+<script src="{{ static['session.js'] }}" defer></script>
+<script src="{{ static['try.js'] }}" defer></script>{% endblock %}
 {% block body %}
 <div class="app-window"><div class="app-shell">
 <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
@@ -106,6 +164,10 @@
 {{ parts.languages_nav() }}{{ parts.theme_button() }}
 </header>
 <main class="app-content" id="main" tabindex="-1">
+{#- 11d-b: the session warning (session.js), in the flow at the top of the content: it never
+    covers anything and never takes the focus. A polite status that is always there (an empty one
+    takes no room, panel.css), so a screen reader hears it when session.js fills it. -#}
+<div class="session-warn" id="session-warning" role="status"></div>
 <div class="alerts">
 <div class="callout danger" id="logout-alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("logout.error.title") }}</strong><p id="logout-alert-text"></p></div>
 </div>
@@ -121,6 +183,8 @@
 </div>
 {%- if name == "status" %}
 {{ status_view() }}
+{%- elif name == "playground" %}
+{{ try_view() }}
 {%- else %}
 <div class="empty">
 <span class="orb"><svg class="ic" aria-hidden="true"><use href="#{{ orb }}"/></svg></span>
@@ -165,4 +229,44 @@
 <span data-msg="uptime.minutes">{{ t("status.uptime.minutes") }}</span>
 <span data-msg="uptime.less">{{ t("status.uptime.less") }}</span>
 </template>
+<template id="try-messages">
+<span data-msg="example">{{ t("try.example.text") }}</span>
+<span data-msg="cmd">{{ t("try.key.cmd") }}</span>
+<span data-msg="count.bytes">{{ t("try.count.bytes") }}</span>
+<span data-msg="count.words">{{ t("try.count.words") }}</span>
+<span data-msg="count.words_not_used">{{ t("try.count.words_not_used") }}</span>
+<span data-msg="names.title">{{ t("try.names.title") }}</span>
+<span data-msg="names.body">{{ t("try.names.body") }}</span>
+<span data-msg="names.off">{{ t("try.names.off") }}</span>
+<span data-msg="blocked.title">{{ t("try.blocked.title") }}</span>
+<span data-msg="blocked.detector_failed">{{ t("try.blocked.detector_failed") }}</span>
+<span data-msg="blocked.egress_guard">{{ t("try.blocked.egress_guard") }}</span>
+<span data-msg="meta.hidden">{{ t("try.meta.hidden") }}</span>
+<span data-msg="meta.hidden_one">{{ t("try.meta.hidden_one") }}</span>
+<span data-msg="meta.policy">{{ t("try.meta.policy") }}</span>
+<span data-msg="meta.local">{{ t("try.meta.local") }}</span>
+<span data-msg="mismatch">{{ t("try.mismatch") }}</span>
+<span data-msg="live.unchecked">{{ t("try.live.unchecked") }}</span>
+<span data-msg="error.bad_body">{{ t("try.error.bad_body") }}</span>
+<span data-msg="error.refused">{{ t("try.error.refused") }}</span>
+<span data-msg="error.timeout">{{ t("try.error.timeout") }}</span>
+<span data-msg="error.too_large">{{ t("try.error.too_large") }}</span>
+<span data-msg="error.too_many">{{ t("try.error.too_many") }}</span>
+<span data-msg="error.too_many_later">{{ t("try.error.too_many_later") }}</span>
+<span data-msg="error.try_busy">{{ t("try.error.try_busy") }}</span>
+<span data-msg="error.ner_busy">{{ t("try.error.ner_busy") }}</span>
+<span data-msg="error.internal">{{ t("try.error.internal") }}</span>
+<span data-msg="error.network">{{ t("try.error.network") }}</span>
+</template>
+<template id="try-types">
+{%- for entity, entity_label in entity_labels %}
+<span data-type="{{ entity|lower }}">{{ entity_label }}</span>
+{%- endfor %}
+</template>
+<template id="session-messages">
+<span data-msg="idle">{{ t("session.warn.idle") }}</span>
+<span data-msg="max">{{ t("session.warn.max") }}</span>
+<span data-msg="failed">{{ t("session.warn.failed") }}</span>
+</template>
+<template id="session-banner"><div class="callout warn"><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("session.warn.title") }}</strong><p data-text></p><p class="callout-actions" data-actions><button class="btn" type="button" data-continue>{{ t("session.warn.continue") }}</button></p></div></template>
 {% endblock %}

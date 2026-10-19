@@ -685,7 +685,7 @@ def test_the_panel_page_says_whether_the_ner_is_on_and_its_word_limit(with_ner: 
         csrf_of(client, session_id)
         page = client.get("/panel", headers={"Cookie": f"{cookie_of(client)}={session_id}"}).text
 
-    assert f'data-ner="{"on" if with_ner else "off"}"' in page
+    assert f'data-ner-detector="{"on" if with_ner else "off"}"' in page
     assert (f'data-max-words="{TRY_NER_MAX_WORDS}"' in page) is with_ner
     assert f'data-max-bytes="{try_text.MAX_TEXT_BYTES}"' in page
 

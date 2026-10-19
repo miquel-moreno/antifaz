@@ -124,6 +124,12 @@
     return item ? item.textContent : "";
   }
 
+  function activity(status) {
+    if (status !== 401 && status !== 403) {
+      document.dispatchEvent(new CustomEvent("antifaz:activity"));
+    }
+  }
+
   function failed(key, button) {
     alertText.textContent = message(key);
     alertBox.hidden = false;
@@ -147,6 +153,7 @@
       headers: {"Content-Type": "application/json", "X-Antifaz-CSRF": meta ? meta.content : ""},
       body: "{}"
     }).then(function (response) {
+      activity(response.status);
       if (response.status === 200 || response.status === 401) {
         location.replace("/panel/login" + languageQuery());
       } else {
@@ -437,6 +444,7 @@
       referrerPolicy: "no-referrer",
       signal: controller.signal
     }).then(function (response) {
+      activity(response.status);
       if (sequence !== statusSequence) {
         return;
       }

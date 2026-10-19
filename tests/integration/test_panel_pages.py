@@ -250,7 +250,8 @@ def test_no_navigation_landmark_is_nested(client: TestClient) -> None:
         landmarks.feed(str(page))
         assert landmarks.navs and set(landmarks.navs) == {0}
     groups = _all(_panel(client).text, "div", role="group")  # type: ignore[attr-defined]
-    assert [group["class"] for group in groups] == ["langs"]
+    # 11d-b: the other group is the column switcher of «Prueba un texto».
+    assert [group["class"] for group in groups] == ["langs", "pswitch"]
     assert groups[0]["aria-label"] == CATALOGS["en"].text("language.label")
 
 

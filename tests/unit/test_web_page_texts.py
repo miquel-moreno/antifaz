@@ -4,7 +4,8 @@ The pages are rendered with "token catalogs": every text is replaced by ⟦its k
 text node and every attribute a person can see or hear (aria-label, title, alt, placeholder, the
 value of a button, and the data-text-* attributes the scripts copy into the page) must be made
 only of those tokens, white space and the middle dot. The only other things allowed: the version
-(a server value), the shortcut digits 1-5 inside <kbd>, and {placeholders} the scripts fill.
+(a server value), the shortcut digits 1-5 inside <kbd>, the pane numbers 1-3 of «Prueba un texto»
+(11d-b, decoration), its word limit (a server value) and {placeholders} the scripts fill.
 
 And the other way round: every key of en.json is used by a template (no dead keys).
 """
@@ -63,7 +64,9 @@ class _Texts(HTMLParser):
         if button_value and "value" in values:
             self.found.append((f"<{tag} value>", values["value"]))
         if tag not in ("meta", "link", "input", "br", "img", "use", "path", "stop", "rect"):
-            self.stack.append(tag)
+            # 11d-b: the pane numbers of «Prueba un texto» (decoration, aria-hidden).
+            numbered = tag == "span" and "num" in values.get("class", "").split()
+            self.stack.append("num" if numbered else tag)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
@@ -71,8 +74,9 @@ class _Texts(HTMLParser):
             self.stack.pop()
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self.stack:
-            while self.stack.pop() != tag:
+        names = [("span" if name == "num" else name) for name in self.stack]
+        if tag in names:
+            while ("span" if (name := self.stack.pop()) == "num" else name) != tag:
                 pass
 
     def handle_data(self, data: str) -> None:
@@ -80,7 +84,7 @@ class _Texts(HTMLParser):
             self.found.append((f"<{self.stack[-1] if self.stack else '?'}> text", data))
 
 
-def _not_from_a_catalog(page: str) -> list[str]:
+def _not_from_a_catalog(page: str, server_values: tuple[str, ...] = ()) -> list[str]:
     parser = _Texts()
     parser.feed(page)
     parser.close()
@@ -88,18 +92,24 @@ def _not_from_a_catalog(page: str) -> list[str]:
     for where, text in parser.found:
         if where == "<kbd> text" and re.fullmatch(r"[1-5]", text.strip()):
             continue
+        if where == "<num> text" and re.fullmatch(r"[1-3]", text.strip()):
+            continue
         rest = PLACEHOLDER.sub("", TOKEN.sub("", text)).replace(__version__, "")
+        for value in server_values:
+            rest = rest.replace(value, "")
         if not LEFTOVER_OK.fullmatch(rest):
             problems.append(f"{where}: {text!r}")
     return problems
 
 
+NER_WORDS = 4321
 PAGES = [
     *((f"login-{code}", TOKEN_PAGES.login(code)) for code in CATALOGS.codes),
     *((f"panel-{code}", TOKEN_PAGES.panel(code, "csrf-token-x")) for code in CATALOGS.codes),
-    # 11d-b: with the NER on, the word counter and the too-long callout are in the page too.
+    # 11d-b: with the NER on, the word counter and the too-long callout are in the page too; the
+    # word limit in that callout is a server value (TRY_NER_MAX_WORDS), like the version.
     *(
-        (f"panel-ner-{code}", TOKEN_PAGES.panel(code, "csrf-token-x", ner_words=7))
+        (f"panel-ner-{code}", TOKEN_PAGES.panel(code, "csrf-token-x", ner_words=NER_WORDS))
         for code in CATALOGS.codes
     ),
 ]
@@ -108,7 +118,7 @@ PAGES = [
 @pytest.mark.parametrize(("name", "page"), PAGES, ids=[name for name, _ in PAGES])
 def test_every_visible_text_comes_from_a_catalog(name: str, page: str) -> None:
     assert TOKEN.search(page)  # the token catalogs were really used
-    assert _not_from_a_catalog(page) == []
+    assert _not_from_a_catalog(page, (str(NER_WORDS),)) == []
 
 
 def test_the_check_sees_a_text_that_is_not_from_a_catalog() -> None:
@@ -122,6 +132,12 @@ def test_the_check_sees_a_text_that_is_not_from_a_catalog() -> None:
     for expected in ("Salir", "Close", "logo", "Send", "Hola", "'x'", "'9'"):
         assert any(expected in problem for problem in problems), expected
     assert _not_from_a_catalog("<p>⟦a⟧ · <b>⟦b⟧</b></p><kbd>3</kbd><i>⟦v⟧{seconds}</i>") == []
+    assert _not_from_a_catalog("<span class='num'>2</span><p>⟦a⟧12</p>", ("12",)) == []
+    assert _not_from_a_catalog("<span class='num'>4</span><span>1</span><p>⟦a⟧12</p>") == [
+        "<num> text: '4'",
+        "<span> text: '1'",
+        "<p> text: '⟦a⟧12'",
+    ]
 
 
 def test_every_catalog_key_is_used_by_a_template() -> None:
