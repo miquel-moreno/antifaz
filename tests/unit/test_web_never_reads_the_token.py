@@ -5,6 +5,9 @@ antifaz/web may reach a secret: no get_secret_value(), no `admin_token`, `_secre
 `model_dump` or `__dict__`, no vars(), no getattr() with a name that is not a literal, and no
 import of antifaz.config or pydantic (where SecretStr lives). The door's pure pieces are standard
 library only (plus antifaz.trusted_networks and each other, themselves standard library only).
+One exception (11c-3b): web/status_response.py, the closed JSON schema of GET /panel/api/status,
+imports pydantic, and only BaseModel, ConfigDict, Field, StrictBool and StrictInt (never a
+Secret type); the facts it is built from (web/status.py) are a pure piece.
 Indirect imports are checked too (end of this file): no antifaz.web module loads the settings
 through another project module.
 """
@@ -35,6 +38,7 @@ PURE = (
     "csrf.py",
     "assets.py",
     "i18n.py",
+    "status.py",
 )
 # The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
 # FastAPI, no other project module).
@@ -45,6 +49,10 @@ SHARED_RULE = Path(antifaz.trusted_networks.__file__)
 ALLOWED_OWN_MODULES = {"antifaz.trusted_networks", *(f"antifaz.web.{n[:-3]}" for n in PURE)}
 FORBIDDEN_NAMES = {"get_secret_value", "admin_token", "_secret_value", "model_dump", "__dict__"}
 FORBIDDEN_IMPORTS = ("antifaz.config", "pydantic", "pydantic_settings")
+# The only web module that may import pydantic (11c-3b), and the only names it may take from it.
+SCHEMA = "status_response.py"
+SCHEMA_MODULE = "antifaz.web.status_response"
+SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictBool", "StrictInt"})
 
 
 def _tree(path: Path) -> ast.Module:
@@ -96,9 +104,34 @@ def test_the_web_package_never_calls_vars_nor_a_dynamic_getattr() -> None:
             assert isinstance(name, ast.Constant) and isinstance(name.value, str), path.name
 
 
+def _pydantic_names(tree: ast.Module) -> list[str]:
+    """What a file takes from pydantic: the names of `from pydantic import ...`, and the module
+    itself for any other form (`import pydantic`, `from pydantic.x import ...`)."""
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "pydantic":
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("pydantic"):
+            names.append(node.module or "")
+        elif isinstance(node, ast.Import):
+            names += [a.name for a in node.names if a.name.split(".")[0].startswith("pydantic")]
+    return names
+
+
+def test_only_the_status_schema_imports_pydantic_and_only_plain_model_pieces() -> None:
+    names = _pydantic_names(_tree(WEB / SCHEMA))
+    assert names  # not an empty pass
+    assert set(names) <= SCHEMA_PYDANTIC_NAMES, names
+    assert not any("Secret" in name for name in names)
+    bad = ast.parse("from pydantic import BaseModel, SecretStr\nimport pydantic_settings\n")
+    assert set(_pydantic_names(bad)) - SCHEMA_PYDANTIC_NAMES == {"SecretStr", "pydantic_settings"}
+
+
 def test_the_web_package_never_imports_the_settings_or_pydantic() -> None:
     for path in SOURCES:
         for module in _imports(_tree(path)):
+            if path.name == SCHEMA and module.split(".")[0] == "pydantic":
+                continue  # its own test above: only plain model pieces
             for forbidden in FORBIDDEN_IMPORTS:
                 assert module != forbidden and not module.startswith(f"{forbidden}."), (
                     path.name,
@@ -166,9 +199,10 @@ WEB_MODULES = sorted(
     "antifaz.web" if path.stem == "__init__" else f"antifaz.web.{path.stem}" for path in SOURCES
 )
 LOADED_SETTINGS = ("antifaz.config", "pydantic_settings", "pydantic")
-# FastAPI (APIRouter) needs pydantic: the only web module allowed to load it, and only through
-# third-party code (check 2 makes sure no project module in its closure imports it).
-NEEDS_FASTAPI = {"antifaz.web.routes"}
+# FastAPI (APIRouter) needs pydantic, and so does the status schema (11c-3b): the only web
+# modules allowed to load it. Check 2 makes sure no other project module in their closure
+# imports it.
+NEEDS_FASTAPI = {"antifaz.web.routes", SCHEMA_MODULE}
 _PROBE = (
     "import importlib, sys\n"
     "importlib.import_module(sys.argv[1])\n"
@@ -235,8 +269,11 @@ def _imported_names(path: Path, name: str) -> list[str]:
     return names
 
 
-def _project_closure(root: Path, package: str, start: str) -> tuple[set[str], set[str]]:
-    """(project modules reached from `start`, third-party top-level names they import)."""
+def _project_closure(
+    root: Path, package: str, start: str, own_pydantic: frozenset[str] = frozenset()
+) -> tuple[set[str], set[str]]:
+    """(project modules reached from `start`, third-party top-level names they import). The
+    pydantic import of a module in `own_pydantic` is not counted (it has its own check)."""
     seen: set[str] = set()
     external: set[str] = set()
     queue = _with_parents(start)
@@ -251,7 +288,7 @@ def _project_closure(root: Path, package: str, start: str) -> tuple[set[str], se
         for imported in _imported_names(path, name):
             if imported == package or imported.startswith(f"{package}."):
                 queue += [n for n in _with_parents(imported) if n not in seen]
-            elif imported:
+            elif imported and not (name in own_pydantic and imported.startswith("pydantic")):
                 external.add(imported.split(".")[0])
     return seen, external
 
@@ -259,9 +296,11 @@ def _project_closure(root: Path, package: str, start: str) -> tuple[set[str], se
 SRC = WEB.parent.parent  # src/
 
 
-def _settings_in_closure(root: Path, package: str, start: str) -> list[str]:
-    modules, external = _project_closure(root, package, start)
-    problems = sorted(m for m in modules if m == f"{package}.config")
+def _settings_in_closure(
+    root: Path, package: str, start: str, own_pydantic: frozenset[str] = frozenset()
+) -> list[str]:
+    modules, external = _project_closure(root, package, start, own_pydantic)
+    problems = sorted(m for m in modules if m in (f"{package}.config", f"{package}.providers"))
     problems += sorted(external & {"pydantic", "pydantic_settings"})
     return problems
 
@@ -271,7 +310,15 @@ def test_no_project_import_of_a_web_module_reaches_the_settings(module: str) -> 
     modules, _ = _project_closure(SRC, "antifaz", module)
     assert module in modules  # the walk found the module itself: not an empty pass
 
-    assert _settings_in_closure(SRC, "antifaz", module) == []
+    assert _settings_in_closure(SRC, "antifaz", module, frozenset({SCHEMA_MODULE})) == []
+
+
+@pytest.mark.parametrize("module", ["antifaz.web.status", SCHEMA_MODULE])
+def test_the_status_pieces_never_reach_the_settings_or_the_providers(module: str) -> None:
+    modules, _ = _project_closure(SRC, "antifaz", module)
+    assert module in modules
+
+    assert not {m for m in modules if m.startswith(("antifaz.config", "antifaz.providers"))}
 
 
 def _fake_package(tmp_path: Path, door_imports: str) -> Path:
