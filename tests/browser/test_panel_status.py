@@ -4,7 +4,8 @@ The gateway of these tests has throwaway provider keys and a fake NER that says 
 transport still refuses every provider call, and the fixture checks nothing tried).
 
 - When it asks: never at page load; exactly once when the view is first shown; again on
-  «Actualizar» (the live region says when); with the page's clock moved 30 minutes on, never;
+  «Actualizar» (the live region says when); with the page's clock moved 27 minutes on (just
+  before the session warning, 11d-b), never;
   when the page comes back to visible only if «Estado» is the selected view; never while the
   page is hidden or another view is selected.
 - Failures: a network error shows the catalog's callout in the page's language, keeps the last
@@ -162,15 +163,15 @@ def test_refresh_asks_again_and_the_live_region_says_when(
     _clean(tab, browser_name)
 
 
-def test_thirty_minutes_later_nothing_was_asked(
-    tab: Tab, server: PanelServer, browser_name: str
-) -> None:
+def test_minutes_later_nothing_was_asked(tab: Tab, server: PanelServer, browser_name: str) -> None:
     tab.page.clock.install()
     _log_in(tab, server, "en")
     _open_status(tab, "en")
     before = _status_requests(tab)
 
-    tab.page.clock.run_for(30 * 60 * 1000)
+    # 11d-b: just under the inactivity warning (at 28 minutes session.js warns, at 30 the page
+    # goes to the login); nothing may have asked for the status meanwhile.
+    tab.page.clock.run_for(27 * 60 * 1000)
     tab.page.evaluate(SETTLE_JS)
 
     assert _status_requests(tab) == before == 1
