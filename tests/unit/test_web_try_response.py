@@ -29,6 +29,7 @@ def _good(**changes: Any) -> dict[str, Any]:
         "counts": [{"type": EntityType.ES_DNI, "found": 1, "hidden": 1}],
         "policy_version": "builtin-1",
         "ner": "off",
+        "names_checked": False,
     }
     body.update(changes)
     return body
@@ -86,6 +87,11 @@ def test_a_blocked_answer() -> None:
         {"counts": [{"type": EntityType.ES_DNI, "found": 0, "hidden": 0}]},
         {"policy_version": f"v {SENTINEL_DNI} <script>"},
         {"ner": "maybe"},
+        # 11d-b: whether the name detector really checked this text, a real boolean.
+        {"names_checked": 1},
+        {"names_checked": "false"},
+        {"names_checked": None},
+        {"names_checked": True},  # with the NER off for the whole gateway it never can
         {"entities": [{"type": EntityType.ES_DNI, "start": 9, "end": 4, "hidden": True}]},
     ],
 )
@@ -95,6 +101,16 @@ def test_anything_else_is_refused_without_printing_the_input(changes: dict[str, 
 
     assert SENTINEL_DNI not in str(caught.value)
     assert SENTINEL_DNI not in repr(caught.value)
+
+
+def test_names_checked_is_required_and_true_only_with_the_ner_there() -> None:
+    body = _good()
+    del body["names_checked"]
+    with pytest.raises(ValidationError):
+        TryResponse.model_validate(body)
+
+    assert TryResponse.model_validate(_good(ner="ok", names_checked=True)).names_checked
+    assert not TryResponse.model_validate(_good(ner="ok", names_checked=False)).names_checked
 
 
 def test_every_model_forbids_extras_is_strict_and_hides_the_input() -> None:

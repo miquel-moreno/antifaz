@@ -26,6 +26,7 @@ from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.middleware import request_id_middleware
 from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
+from antifaz.detect.ner.chunker import OVERLAP_TOKENS, WINDOW_TOKENS
 from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.setup import ner_from_settings
 from antifaz.detect.scan import Scanner
@@ -57,6 +58,10 @@ TRY_THREADS = 1
 TRY_NER_SECONDS = 5.0
 TRY_NER_MAX_CHUNKS = 2
 TRY_NER_BATCH_CHUNKS = 1
+# 11d-b: the most NER tokens (about words: chunker.py) TRY_NER_MAX_CHUNKS windows can hold, the
+# only source of the «unas N palabras» the panel shows (rendered into the page; a test forbids
+# the number in the templates, scripts and catalogs). A longer text is 413 text_too_long_for_ner.
+TRY_NER_MAX_WORDS = WINDOW_TOKENS + (TRY_NER_MAX_CHUNKS - 1) * (WINDOW_TOKENS - OVERLAP_TOKENS)
 
 
 @dataclass
@@ -128,6 +133,10 @@ def _panel(
     TRY_NER_SECONDS deadline; a worker only if no proxy request waits for one (checked before
     every batch; else 503 ner_busy), no effect on the circuit breaker and a Try-only cooldown
     after a Try breaks a worker. The proxy waits for one Try batch at most.
+    A Try with "ner": false (11d-b) runs over the plain scanner (detect.scan.scan): never the NER,
+    never the proxy's detector (app.state.detector) and so never its span cache. The answer says
+    names_checked: true only when the Try's own NER detector read the text (a NER failure is the
+    blocked answer, or 503 ner_busy: never a result without names unless the user asked).
     run_try never calls a provider; the runner holds no client.
     """
     if settings.admin_token is None:
@@ -165,7 +174,7 @@ def _panel(
     )
     detector, policy = app.state.detector, app.state.policy
 
-    async def try_runner(text: str, lang: str) -> dict[str, Any]:
+    async def try_runner(text: str, lang: str, use_ner: bool) -> dict[str, Any]:
         mask_limiter, try_limiter = limiters.mask, limiters.try_
         if mask_limiter is None or try_limiter is None:
             raise RuntimeError("the gateway has not started")
@@ -178,20 +187,19 @@ def _panel(
             raise TryBusyError("try_busy")
         isolated = (
             None
-            if try_ner is None
+            if try_ner is None or not use_ner
             else try_ner.for_try(
                 TRY_NER_SECONDS, max_chunks=TRY_NER_MAX_CHUNKS, batch_chunks=TRY_NER_BATCH_CHUNKS
             )
         )
+        chosen: Detector = scan_text  # "ner": false: the plain scanner, nothing of the proxy's
+        if isolated is not None:
+            chosen = Scanner(isolated)
+        elif use_ner:
+            chosen = detector
         try:
             answer = await anyio.to_thread.run_sync(
-                functools.partial(
-                    run_try,
-                    text,
-                    lang,
-                    detector=detector if isolated is None else Scanner(isolated),
-                    policy=policy,
-                ),
+                functools.partial(run_try, text, lang, detector=chosen, policy=policy),
                 limiter=mask_limiter,
             )
         finally:
@@ -200,7 +208,8 @@ def _panel(
             raise TextTooLongForNerError()
         if isolated is not None and isolated.was_busy():
             raise TryBusyError("ner_busy")
-        return answer
+        checked = isolated is not None and answer["blocked_reason"] != "detector_failed"
+        return {**answer, "names_checked": checked}
 
     token = settings.admin_token.get_secret_value().encode()
     state = PanelState(
@@ -212,6 +221,7 @@ def _panel(
         status=status,
         try_runner=try_runner,
         try_limiter=TryLimiter(),
+        try_ner_words=None if try_ner is None else TRY_NER_MAX_WORDS,
     )
     app.state.panel_status = status
     app.state.panel_state = state

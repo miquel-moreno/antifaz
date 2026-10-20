@@ -163,7 +163,8 @@ def test_a_focused_element_is_never_hidden_under_the_bars(
         " b.className = 'btn'; b.textContent = 'x';"
         " document.querySelector('#panel-playground').appendChild(b); }"
     )
-    tab.page.focus("#panel-playground")
+    # 11d-b: the view's last control before the probe is «Probar» (the empty state has none).
+    tab.page.focus("#try-submit")
     tab.page.keyboard.press("Tab")
     assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
     # WebKit may scroll the focused element into view on the next frame: let two frames pass.

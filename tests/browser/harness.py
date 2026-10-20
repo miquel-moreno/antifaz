@@ -20,6 +20,9 @@ otherwise, never the system's), a pixel ratio and:
   so before this the "dark" checks ran light in Firefox. Once emulated on the page it holds
   through later navigations and reloads. The forced colours asked for (`forced_colors`,
   "none" unless a test says "active", issue 53 PR 11c-4) are emulated and checked the same way.
+- `javascript=False` (11d-b): a context with scripts off, for what the page does without them.
+  It cannot log in by itself: `share_session_with()` copies another tab's cookies into it (inside
+  the harness, like every read of the jar), and goto() checks nothing in such a page.
 
 Secret values never reach a test: `cookie_names()` and `cookie_attributes()` drop the values,
 and only this module reads the cookie jar (tests/unit/test_browser_harness_rules.py). The
@@ -99,6 +102,7 @@ class Tab:
         height: int | None = None,
         extra_origin: str | None = None,
         forced_colors: str = "none",
+        javascript: bool = True,
     ) -> None:
         self.origin = origin
         self.extra_origin = extra_origin
@@ -122,7 +126,9 @@ class Tab:
             device_scale_factor=scale,
             locale=locale or DEFAULT_LOCALE,
             forced_colors=forced_colors,  # type: ignore[arg-type]
+            java_script_enabled=javascript,
         )
+        self.javascript = javascript
         self.context.set_default_timeout(TIMEOUT_MS)
         self.context.set_default_navigation_timeout(TIMEOUT_MS)
         self.context.add_init_script(CSP_RECORDER)
@@ -163,6 +169,8 @@ class Tab:
     def goto(self, path: str) -> None:
         """Open a path of the gateway and settle: load, then every font ready."""
         self.response = self.page.goto(self.origin + path, wait_until="load")
+        if not self.javascript:  # 11d-b: nothing can be evaluated in the page to check
+            return
         self.page.emulate_media(
             color_scheme=self.color_scheme,  # type: ignore[arg-type]
             forced_colors=self.forced_colors,  # type: ignore[arg-type]
@@ -210,6 +218,13 @@ class Tab:
             {key: value for key, value in cookie.items() if key != "value"}
             for cookie in self.context.cookies()
         ]
+
+    def share_session_with(self, other: "Tab") -> None:
+        """Give `other` this tab's cookies (11d-b: a context without JavaScript cannot log in by
+        itself). Only the harness reads the jar; no value reaches the test."""
+        cookies = self.context.cookies()
+        other.context.add_cookies(cookies)  # type: ignore[arg-type]
+        other.seen_secrets.update(cookie["value"] for cookie in cookies)
 
     def remember_secrets(self) -> None:
         """Keep the cookie values and the CSRF meta of now, for the redactor."""
@@ -267,4 +282,5 @@ class NewTab(Protocol):
         height: int | None = None,
         extra_origin: str | None = None,
         forced_colors: str = "none",
+        javascript: bool = True,
     ) -> Tab: ...

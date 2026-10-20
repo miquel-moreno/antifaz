@@ -119,9 +119,20 @@
     return "?lang=" + encodeURIComponent(root.lang);
   }
 
+  function leave() {
+    document.dispatchEvent(new CustomEvent("antifaz:wipe"));
+    location.replace("/panel/login" + languageQuery());
+  }
+
   function message(key) {
     var item = messages.content.querySelector('[data-msg="' + key + '"]');
     return item ? item.textContent : "";
+  }
+
+  function activity(status) {
+    if (status >= 200 && status < 500 && status !== 401 && status !== 403) {
+      document.dispatchEvent(new CustomEvent("antifaz:activity"));
+    }
   }
 
   function failed(key, button) {
@@ -147,8 +158,9 @@
       headers: {"Content-Type": "application/json", "X-Antifaz-CSRF": meta ? meta.content : ""},
       body: "{}"
     }).then(function (response) {
+      activity(response.status);
       if (response.status === 200 || response.status === 401) {
-        location.replace("/panel/login" + languageQuery());
+        leave();
       } else {
         failed("refused", button);
       }
@@ -437,11 +449,12 @@
       referrerPolicy: "no-referrer",
       signal: controller.signal
     }).then(function (response) {
+      activity(response.status);
       if (sequence !== statusSequence) {
         return;
       }
       if (response.status === 401) {
-        location.replace("/panel/login" + languageQuery());
+        leave();
         return;
       }
       if (response.status !== 200) {

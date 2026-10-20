@@ -94,6 +94,7 @@ def test_the_sentinel_comes_back_only_in_its_own_answer(
     # Error bodies, each with the sentinel in what was sent.
     leaks.append(_try(client, mine, _body(extra=SENTINEL_DNI)).text)  # 400
     leaks.append(_try(client, mine, _body(lang=SENTINEL_DNI)).text)  # 400
+    leaks.append(_try(client, mine, _body(ner=SENTINEL_DNI)).text)  # 400 (11d-b: only a boolean)
     too_long = _body(f"{SENTINEL_DNI} " + "a" * try_text.MAX_TEXT_BYTES)
     leaks.append(_try(client, mine, too_long).text)  # 413
     # Another session's answer.
@@ -150,6 +151,34 @@ def test_a_failing_detector_blocks_without_the_sentinel_anywhere(
     assert response.json()["blocked_reason"] == "detector_failed"
     assert SENTINEL_DNI not in response.text
     assert SENTINEL_DNI not in _log_text(caplog)
+
+
+def test_a_try_without_the_ner_keeps_the_sentinel_to_its_own_answer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """11d-b: `"ner": false` takes the plain scanner; the same invariant 15 holds."""
+    from tests.nerfakes import CARMEN, NAMES, fake_detector
+
+    _debug_everywhere(caplog)
+    ner, predictor = fake_detector(NAMES)
+    with panel_client(HTTPS_URL, ner=ner, settings=panel_settings(log_level="DEBUG")) as client:
+        session = logged_in(client)
+
+        response = _try(client, session, _body(f"{CARMEN}: {TEXT}", ner=False))
+        status = client.get(
+            "/panel/api/status",
+            headers={
+                "Cookie": f"{cookie_of(client)}={session[0]}",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["names_checked"] is False
+    assert response.text.count(SENTINEL_DNI) == 1
+    assert predictor.texts == []  # the text never went to the NER
+    for text in (status.text, _log_text(caplog)):
+        assert SENTINEL_DNI not in text and CARMEN not in text
 
 
 def test_the_uvicorn_access_log_stays_off() -> None:

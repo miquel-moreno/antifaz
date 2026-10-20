@@ -10,6 +10,8 @@ only. Here, in a context with `forced_colors="active"`:
   settings menu open; «Estado» loaded), when focused from the keyboard, has an outline of 2 px
   or more; where the engine really forces the colours (Chromium, Firefox), that outline is not
   transparent;
+- the «Prueba un texto» field (11d-b) has its ring on its card, the composer, as in the approved
+  design: for it, the composer's outline and shadow are the ones checked;
 - in normal mode the same elements keep today's ring (a `box-shadow`) and nothing else shows:
   their outline is transparent;
 - the states keep a cue that is not colour: each status pill has its word, each dot sits with
@@ -54,14 +56,16 @@ COLLECT_JS = """(root) => {
 FOCUS_JS = """(i) => {
   const el = window.__antifazFocusable[i];
   el.focus();
-  const s = getComputedStyle(el);
+  // 11d-b: the Try field's ring is its card's (the composer draws it around the whole field).
+  const ringEl = el.matches('.composer textarea') ? el.closest('.composer') : el;
+  const s = getComputedStyle(ringEl);
   const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
     (typeof el.className === 'string' && el.className ? '.' + el.className.trim()
       .split(/\\s+/).join('.') : '') + ' "' + (el.textContent || '').trim().slice(0, 16) + '"';
   // The ring (the element's box grown by 3 px) must fit inside every ancestor that clips.
-  const r = el.getBoundingClientRect();
+  const r = ringEl.getBoundingClientRect();
   const clippedBy = [];
-  for (let a = el.parentElement; a; a = a.parentElement) {
+  for (let a = ringEl.parentElement; a; a = a.parentElement) {
     const as = getComputedStyle(a);
     if (as.overflowX === 'visible' && as.overflowY === 'visible') continue;
     const b = a.getBoundingClientRect();

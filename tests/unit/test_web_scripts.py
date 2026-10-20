@@ -1,4 +1,12 @@
-"""The panel's two scripts, read as text (issue 53, PR 11c-2b): static/login.js and panel.js.
+"""The panel's scripts, read as text (issue 53, PRs 11c-2b and 11d-b): static/login.js, panel.js,
+try.js («Prueba un texto») and session.js (the expiry warning).
+
+11d-b: each script is a standalone IIFE that talks to the others only through DOM events (it
+never sets a global). Across every static script there is exactly ONE `setTimeout(`, in
+session.js (the only timer: the next moment the warning or the expiry is due), and no
+setInterval or requestAnimationFrame. Each script fetches only its own literal URL: try.js
+"/panel/api/try", session.js "/panel/api/session". panel.js and try.js tell session.js about
+every panel answer that counted as a use (not 401 or 403) with an "antifaz:activity" event.
 
 - In the manifest, served byte for byte as text/javascript (web/assets.py).
 - No visible text: every string literal is a selector, a key, an attribute or event name, a
@@ -23,7 +31,17 @@ import pytest
 
 from antifaz.web.assets import SERVED, STATIC_DIR
 
-SCRIPTS = ("login.js", "panel.js")
+SCRIPTS = ("login.js", "panel.js", "try.js", "session.js")
+# The only script with a timer (11d-b).
+TIMER_SCRIPT = "session.js"
+# The one URL each script may fetch (11d-b for the last two).
+FETCHES = {
+    "login.js": {"/panel/login"},
+    "panel.js": {"/panel/logout", "/panel/api/status"},
+    "try.js": {"/panel/api/try"},
+    "session.js": {"/panel/api/session"},
+}
+ACTIVITY_EVENT = "antifaz:activity"
 # A string literal that is all lowercase ASCII without spaces is a key, a selector, an attribute,
 # an event or a relative path: never prose a person reads.
 PLAIN_TOKEN = re.compile(r"""[a-z0-9_\-.#\[\]="':/?&{}()*>+,]*""")
@@ -43,6 +61,7 @@ ALLOWED_LITERALS = frozenset(
         "Home",
         "End",
         "Escape",
+        "Enter",
     }
 )
 FORBIDDEN = {
@@ -59,7 +78,10 @@ FORBIDDEN = {
     "console": re.compile(r"\bconsole\b"),
     "on* handler": re.compile(r"\.\s*on[a-z]+\s*="),
     "style": re.compile(r"\.\s*style\b"),
-    "setTimeout/setInterval": re.compile(r"\bset(?:Timeout|Interval)\b"),
+    "setInterval": re.compile(r"\bsetInterval\b"),
+    "requestAnimationFrame": re.compile(r"\brequestAnimationFrame\b"),
+    "RegExp": re.compile(r"\bRegExp\b"),
+    "a global set": re.compile(r"\b(?:window|globalThis|self|top|parent)\s*\.\s*\w+\s*=(?!=)"),
     "import()": re.compile(r"\bimport\s*\("),
     "postMessage": re.compile(r"\bpostMessage\b"),
     "window.open": re.compile(r"\bopen\s*\("),
@@ -124,9 +146,14 @@ def _strict_first(source: str) -> bool:
     return STRICT_OPENER.sub("", code).startswith('"";') and strings[:1] == ["use strict"]
 
 
-def _problems(source: str) -> list[str]:
+TIMEOUT = re.compile(r"\bsetTimeout\b")
+
+
+def _problems(source: str, timer_allowed: bool = False) -> list[str]:
     code, scanned = _scan(source)
     problems = [] if _strict_first(source) else ['"use strict" is not first']
+    if not timer_allowed and TIMEOUT.search(code):
+        problems.append("setTimeout")
     previous = ""
     for literal, before in scanned:
         # A non-empty literal written where a person reads it: assigned to a visible property,
@@ -161,7 +188,79 @@ def test_the_script_is_in_the_manifest(name: str) -> None:
 
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_the_script_has_no_visible_text_and_nothing_forbidden(name: str) -> None:
-    assert _problems(_source(name)) == []
+    assert _problems(_source(name), timer_allowed=name == TIMER_SCRIPT) == []
+
+
+def test_every_static_script_is_checked() -> None:
+    assert {path.name for path in STATIC_DIR.glob("*.js")} == set(SCRIPTS)
+
+
+def test_exactly_one_timer_in_all_the_scripts_and_it_is_in_session_js() -> None:
+    timers = {name: _split(_source(name))[0].count("setTimeout(") for name in SCRIPTS}
+
+    assert timers == {name: int(name == TIMER_SCRIPT) for name in SCRIPTS}
+    assert sum(len(TIMEOUT.findall(_split(_source(name))[0])) for name in SCRIPTS) == 1
+
+
+@pytest.mark.parametrize("name", SCRIPTS)
+def test_each_script_fetches_only_its_own_literal_urls(name: str) -> None:
+    _, strings = _scan(_source(name))
+    fetched = {literal for literal, before in strings if before.endswith("fetch(")}
+
+    assert fetched == FETCHES[name]
+
+
+@pytest.mark.parametrize("name", SCRIPTS)
+def test_each_script_is_a_standalone_iife(name: str) -> None:
+    source = _source(name)
+
+    assert source.startswith("(function () {\n")
+    assert source.rstrip().endswith("}());")
+
+
+def test_the_scripts_talk_through_the_activity_event() -> None:
+    """panel.js and try.js tell session.js about every answer that was a use."""
+    for name in ("panel.js", "try.js"):
+        source = _source(name)
+        assert f'new CustomEvent("{ACTIVITY_EVENT}")' in source, name
+        assert "dispatchEvent(" in source, name
+    assert f'addEventListener("{ACTIVITY_EVENT}"' in _source("session.js")
+
+
+USE = "status >= 200 && status < 500 && status !== 401 && status !== 403"
+
+
+@pytest.mark.parametrize("name", ["panel.js", "try.js"])
+def test_only_answers_the_door_handled_count_as_a_use(name: str) -> None:
+    """Review 1 of 11d-b: 2xx and 4xx but 401 and 403 move the inactivity limit; never a 5xx."""
+    code, _ = _split(_source(name))
+
+    assert "function activity(status)" in code
+    assert USE in code
+    assert code.count("activity(response.status)") >= (2 if name == "panel.js" else 1)
+
+
+def test_every_way_out_wipes_the_try_first() -> None:
+    """Review 1 of 11d-b: before the page leaves (logout, a 401, the expiry) the scripts say
+    "antifaz:wipe" and try.js empties the field and the result while the page is still there."""
+    assert 'addEventListener("antifaz:wipe"' in _source("try.js")
+    for name in ("panel.js", "session.js"):
+        assert 'new CustomEvent("antifaz:wipe")' in _source(name), name
+
+
+def test_try_js_drops_answers_that_are_out_of_date() -> None:
+    code, _ = _split(_source("try.js"))
+
+    assert "new AbortController()" in code
+    assert ".abort()" in code
+    assert "sequence" in code and "ended" in code
+
+
+def test_session_js_expires_a_little_before_the_server() -> None:
+    code, _ = _split(_source("session.js"))
+
+    match = re.search(r"var SAFETY_MS = (\d+);", code)
+    assert match and 1000 <= int(match.group(1)) <= 30000
 
 
 @pytest.mark.parametrize("name", SCRIPTS)
@@ -215,6 +314,32 @@ def test_the_login_clears_the_field_before_it_waits() -> None:
         ('"aria-busy"', "panel.js"),
         ("Intl.DateTimeFormat(root.lang", "panel.js"),
         ('location.replace("/panel/login" + languageQuery())', "panel.js"),
+        # «Prueba un texto» (11d-b): JSON with the CSRF token, never cached or redirected.
+        *(
+            (needle, script)
+            for script in ("try.js", "session.js")
+            for needle in (
+                'credentials: "same-origin"',
+                'cache: "no-store"',
+                'redirect: "error"',
+                'referrerPolicy: "no-referrer"',
+                '"X-Antifaz-CSRF"',
+                "meta[name=antifaz-csrf]",
+                'method: "POST"',
+            )
+        ),
+        ("isWellFormed", "try.js"),
+        ('"Retry-After"', "try.js"),
+        ('"text_too_long_for_ner"', "try.js"),
+        ("length_utf16", "try.js"),
+        ("names_checked", "try.js"),
+        ('"pagehide"', "try.js"),
+        ("JSON.stringify(", "try.js"),
+        ('"visibilitychange"', "session.js"),
+        ("meta[name=antifaz-session-idle]", "session.js"),
+        ("meta[name=antifaz-session-max]", "session.js"),
+        ('location.replace("/panel/login" + languageQuery())', "session.js"),
+        ("clearTimeout(", "session.js"),
     ],
 )
 def test_the_fetch_options_and_navigation(needle: str, name: str) -> None:
@@ -246,7 +371,7 @@ def test_the_check_sees_what_it_forbids() -> None:
         "on* handler",
         "style",
         "style or HTML by name",
-        "setTimeout/setInterval",
+        "setTimeout",
         "'No se ha podido salir'",
         "'Salir'",
         "fetch with a variable URL",
@@ -263,6 +388,12 @@ def test_the_check_sees_what_it_forbids() -> None:
         ('el.setAttribute("title", "salir");', "prose position"),
         ('fetch("" + url);', "fetch with a variable URL"),
         ('fetch("/panel/" + name);', "fetch with a variable URL"),
+        # 11d-b: the one timer is session.js's; no other kind of timer, regex or global.
+        ("setInterval(f, 1000);", "setInterval"),
+        ("requestAnimationFrame(f);", "requestAnimationFrame"),
+        ('var r = new RegExp("[a-z]");', "RegExp"),
+        ("window.antifaz = {};", "a global set"),
+        ("globalThis.x = 1;", "a global set"),
     ):
         found = _problems('"use strict";\n' + sneaky + "\n")
         assert any(expected in problem for problem in found), sneaky
@@ -271,8 +402,11 @@ def test_the_check_sees_what_it_forbids() -> None:
         'fetch("/panel/login", {method: "POST"});',
         'el.setAttribute("aria-selected", "true");',
         'el.setAttribute("aria-label", other.getAttribute("data-text-dark"));',
+        'window.addEventListener("pageshow", f);',
+        "if (window.x === 1) {}",
     ):
         assert _problems('"use strict";\n' + fine + "\n") == [], fine
+    assert _problems('"use strict";\nsetTimeout(f, 1);\n', timer_allowed=True) == []
     assert '"use strict" is not first' in _problems('var a = 1;\n"use strict";\n')
     assert _strict_first('(function () {\n  "use strict";\n}());')
     with pytest.raises(AssertionError):

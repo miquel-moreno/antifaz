@@ -16,6 +16,7 @@ nothing awaits in the middle of their read-modify-write. These tests keep it tha
 6. «Prueba un texto» (11d-a): the rate limit (web/try_limit.py) is lock-free too, and the route
    takes its try (`.take(`) before anything awaits: the check and the count are one plain call,
    and the body is read only afterwards.
+7. The session times (11d-b, POST /panel/api/session) have no await at all, like the logout.
 """
 
 import ast
@@ -178,6 +179,11 @@ def _async_nodes_in(tree: ast.Module, function: str) -> list[int]:
 def test_the_logout_never_awaits() -> None:
     """Closing the session and answering happen in one go: no await, async for or async with."""
     assert _async_nodes_in(_tree("routes.py"), "logout") == []
+
+
+def test_the_session_route_never_awaits() -> None:
+    """11d-b: reading what is left of the session and answering happen in one go."""
+    assert _async_nodes_in(_tree("routes.py"), "session_times") == []
 
 
 def test_the_logout_check_catches_an_await() -> None:

@@ -27,7 +27,14 @@ CSRF again.
   5. A session cookie that came in is closed (reason "replaced": no session fixation), a new
      session bound to the request's scheme is made and the cookie of that scheme is set.
 - GET /panel: the panel (templates/panel.html, 11c-2b) in the request's language, with the
-  session's CSRF token in a meta.
+  session's CSRF token in a meta, and (11d-b) the whole seconds the session has left before the
+  inactivity limit (capped by the end) and before the 8 hours, in two metas, and the words a Try
+  may give the name detector (PanelState.try_ner_words; none when the NER is off).
+- POST /panel/api/session (11d-b): «Seguir» before the session expires (static/session.js), for
+  a live session with its CSRF token (the door). The door counted the request as a use, as any
+  panel request: so it extends the inactivity part only, and never past the 8 hours from the
+  login (it never touches `created`). The answer is the closed SessionResponse, exactly
+  {"idle_seconds", "max_seconds"}, the first capped by the second. The body is not read.
 - POST /panel/logout: the door let it through with a live session and its CSRF token. The
   session is closed in the store (reason "logout"; its subscribers are told before the answer
   leaves), and the answer is {"ok": true} with exactly one Set-Cookie, the expired cookie of the
@@ -51,15 +58,20 @@ CSRF again.
   2. The body: a declared Content-Length over MAX_BODY_BYTES (128 KiB) is 413 at once; else it
      is read as a stream and cut as soon as it passes that cap (413), with or without
      Content-Length, within TRY_BODY_SECONDS (else 408 body_timeout). Never parsed as a form.
-  3. Exactly {"text": str, "lang": a loaded catalog code} (web/try_text.parse_body), else 400
-     invalid_try_body (never quoting it); a text over 20 480 UTF-8 bytes is 413 text_too_large.
+  3. Exactly {"text": str, "lang": a loaded catalog code}, with an optional "ner": a real JSON
+     boolean (web/try_text.parse_body, 11d-b), else 400 invalid_try_body (never quoting it); a
+     text over 20 480 UTF-8 bytes is 413 text_too_large.
   4. PanelState.try_runner (the gateway's: mask -> guard -> simulated reply -> restore, in a
-     worker thread, no AI) and the closed schema of web/try_response.py, with the NER state at
-     that moment. Any error there is a fixed 500 and one log line with the error's type only:
-     an exception's message could hold the text. Busy is a fixed 503 with Retry-After: 1 and
-     never a queue: `try_busy` (another Try is running) or `ner_busy` (the NER would make a
-     proxy request wait, has no free loaded worker, or is in the Try-only cooldown). A text that
-     needs more NER windows than a Try may use is 413 text_too_long_for_ner.
+     worker thread, no AI; with "ner": false, the plain scanner, never the NER nor the proxy's
+     detector) and the closed schema of web/try_response.py, with the NER state at that moment
+     and names_checked (whether the name detector read the text). With the NER on and no
+     "ner": false, a failing NER is the blocked answer or 503 ner_busy, never a result without
+     names (tests/integration/test_panel_try_ner_failures.py). Any error there is a fixed 500
+     and one log line with the error's type only: an exception's message could hold the text.
+     Busy is a fixed 503 with Retry-After: 1 and never a queue: `try_busy` (another Try is
+     running) or `ner_busy` (the NER would make a proxy request wait, has no free loaded
+     worker, or is in the Try-only cooldown). A text that needs more NER windows than a Try
+     may use is 413 text_too_long_for_ner.
      No response_model: the answer is validated once, here, and FastAPI never re-validates it.
   The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
   values come back only in it (the scoped exception to invariant 15); the original text never.
@@ -68,7 +80,7 @@ CSRF again.
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
 in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
-`logout` never awaits; `try_a_text` takes its try before its first await.
+`logout` and `session_times` never await; `try_a_text` takes its try before its first await.
 tests/unit/test_web_concurrency.py checks it: every route is a coroutine function, no await,
 async for or async with comes after `limiter.allowed(` in `login`, `logout` has none at all, and
 none comes before `.take(` in `try_a_text`.
@@ -82,6 +94,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 
 import anyio
 from fastapi import APIRouter, Request
@@ -106,16 +119,18 @@ from antifaz.http_errors import (
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
-from antifaz.web.sessions import CloseReason
+from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
-from antifaz.web.status_response import StatusResponse
+from antifaz.web.status_response import SessionResponse, StatusResponse
 from antifaz.web.templating import Pages
 from antifaz.web.try_response import TryResponse
 from antifaz.web.try_text import (
     BODY_SECONDS,
     MAX_BODY_BYTES,
+    MAX_TEXT_BYTES,
     TextTooLongError,
     TryBodyError,
+    TryInput,
     parse_body,
 )
 
@@ -181,9 +196,9 @@ async def _try_body(request: Request) -> bytes:
     return raw
 
 
-def _try_input(raw: bytes, languages: tuple[str, ...]) -> tuple[str, str]:
-    """(text, lang), or the fixed 400 or 413 (raised outside the except block)."""
-    parsed: tuple[str, str] | None = None
+def _try_input(raw: bytes, languages: tuple[str, ...]) -> TryInput:
+    """(text, lang, ner), or the fixed 400 or 413 (raised outside the except block)."""
+    parsed: TryInput | None = None
     too_long = False
     try:
         parsed = parse_body(raw, languages)
@@ -196,6 +211,16 @@ def _try_input(raw: bytes, languages: tuple[str, ...]) -> tuple[str, str]:
     if parsed is None:
         raise InvalidTryBodyError()
     return parsed
+
+
+def _times(sessions: SessionStore, key: str) -> tuple[int, int] | None:
+    """(idle, max) whole seconds left of the live session `key` (a server fingerprint): the idle
+    part capped by the end, never more than the server allows. None if it is not live."""
+    left = sessions.seconds_left(key)
+    if left is None:
+        return None
+    idle, end = (max(0, math.floor(value)) for value in left)
+    return min(idle, end), end
 
 
 def _fingerprint(token: str) -> bytes:
@@ -266,7 +291,19 @@ def build_router(state: PanelState) -> APIRouter:
         if session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         lang = _language(request, pages)
-        return _page(pages.panel(lang, session.csrf_token), lang)
+        times = _times(state.sessions, session.fingerprint)
+        if times is None:  # pragma: no cover - the door found it live a moment ago, no await
+            raise PanelUnauthorizedError()
+        idle, end = times
+        page = pages.panel(
+            lang,
+            session.csrf_token,
+            idle_seconds=idle,
+            max_seconds=end,
+            ner_words=state.try_ner_words,
+            max_text_bytes=MAX_TEXT_BYTES,
+        )
+        return _page(page, lang)
 
     @router.get("/panel/api/status")
     async def status(request: Request) -> StatusResponse:
@@ -286,12 +323,12 @@ def build_router(state: PanelState) -> APIRouter:
         wait = state.try_limiter.take(context.session.fingerprint)
         if wait:
             raise TooManyTriesError(wait)
-        text, lang = _try_input(await _try_body(request), pages.languages)
+        text, lang, use_ner = _try_input(await _try_body(request), pages.languages)
         answer: bytes | None = None
         refused: AppError | None = None
         failure = ""
         try:
-            result = await state.try_runner(text, lang)
+            result = await state.try_runner(text, lang, use_ner)
             ner = ner_state(state.status.ner_state())
             answer = TryResponse.model_validate({**result, "ner": ner}).model_dump_json().encode()
         except (TryBusyError, TextTooLongForNerError) as error:
@@ -304,6 +341,19 @@ def build_router(state: PanelState) -> APIRouter:
             logger.error("panel try failed: %s", failure)
             raise PanelInternalError()
         return Response(answer, media_type="application/json")
+
+    @router.post("/panel/api/session")
+    async def session_times(request: Request) -> Response:
+        # The door already counted this request as a use (it extends the inactivity part, as
+        # any panel request does); this only says what is left. The body is never read.
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        times = _times(state.sessions, context.session.fingerprint)
+        if times is None:  # pragma: no cover - the door found it live, and nothing awaited
+            raise PanelUnauthorizedError()
+        answer = SessionResponse(idle_seconds=times[0], max_seconds=times[1])
+        return Response(answer.model_dump_json().encode(), media_type="application/json")
 
     @router.post("/panel/logout")
     async def logout(request: Request) -> Response:

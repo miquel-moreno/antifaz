@@ -1,4 +1,5 @@
-"""The closed JSON schema of GET /panel/api/status (issue 53, PR 11c-3b, ADR-0018).
+"""The closed JSON schemas of GET /panel/api/status (issue 53, PR 11c-3b, ADR-0018) and of
+POST /panel/api/session (11d-b: SessionResponse, two whole numbers of seconds).
 
 Every model refuses extra fields and is strict: each leaf is a boolean, a non-negative integer,
 one of its enums, the version (VERSION_PATTERN) or a provider address ("default", "custom" or
@@ -49,3 +50,11 @@ class StatusResponse(_Closed):
     providers: list[Provider] = Field(max_length=2)
     limits: Limits
     overall: Overall
+
+
+class SessionResponse(_Closed):
+    """What is left of the session (11d-b): before the inactivity limit, already capped by the
+    end (never more), and before the 8 hours from the login."""
+
+    idle_seconds: StrictInt = Field(ge=0)
+    max_seconds: StrictInt = Field(ge=0)

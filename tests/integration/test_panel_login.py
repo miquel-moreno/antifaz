@@ -8,6 +8,7 @@
 """
 
 import json
+import re
 import subprocess
 import sys
 
@@ -116,7 +117,13 @@ def test_the_same_session_keeps_the_same_csrf_token() -> None:
         first = client.get("/panel", headers=cookie).text
         second = client.get("/panel", headers=cookie).text
 
-        assert first == second
+        # 11d-b: both session metas (whole seconds on the real clock) may tick between the two
+        # pages; the CSRF token and everything else stay the same.
+        def without_the_times(page: str) -> str:
+            return re.sub(r'(name="antifaz-session-(?:idle|max)" content=")\d+', r"\1", page)
+
+        assert without_the_times(first) == without_the_times(second)
+        assert 'name="antifaz-session-idle"' in first and 'name="antifaz-session-max"' in first
 
 
 @pytest.mark.parametrize("path", ["/panel", "/panel/login", "/panel/x"])
@@ -293,6 +300,7 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
         ("POST", "/panel/login"),
         ("GET", "/panel/api/status"),
         ("POST", "/panel/api/try"),
+        ("POST", "/panel/api/session"),
     ):
         response = client.request(method, path, json={"token": "x"})
 

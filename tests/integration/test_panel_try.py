@@ -48,8 +48,8 @@ def client(request: pytest.FixtureRequest) -> Iterator[TestClient]:
     yield from clients(request.param)
 
 
-def body(text: str = f"Mi DNI es {SENTINEL_DNI}", lang: str = "es") -> bytes:
-    return json.dumps({"text": text, "lang": lang}).encode()
+def body(text: str = f"Mi DNI es {SENTINEL_DNI}", lang: str = "es", **extra: object) -> bytes:
+    return json.dumps({"text": text, "lang": lang, **extra}).encode()
 
 
 def post_try(
@@ -172,6 +172,11 @@ def test_get_and_head_are_405(client: TestClient, method: str) -> None:
         b'{"text": NaN, "lang": "es"}',
         b'{"text": "\\ud800", "lang": "es"}',
         b"not json",
+        b'{"text": "x", "lang": "es", "ner": 0}',
+        b'{"text": "x", "lang": "es", "ner": "false"}',
+        b'{"text": "x", "lang": "es", "ner": null}',
+        b'{"text": "x", "lang": "es", "ner": false, "ner": false}',
+        b'{"text": "x", "lang": "es", "ner": false, "more": 1}',
     ],
 )
 def test_a_bad_body_is_400_without_quoting_it(client: TestClient, content: bytes) -> None:
@@ -566,3 +571,144 @@ def test_without_the_ner_the_byte_limit_is_the_only_one() -> None:
         response = post_try(client, session_id, token, body("palabra " * 2500))
 
     assert response.status_code == 200
+
+
+# --- 11d-b: a Try without the name detector, and whether names were checked ------------------
+
+
+def test_names_checked_is_true_only_when_the_ner_was_on_and_used() -> None:
+    ner, predictor = fake_detector(NAMES)
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+
+        used = post_try(client, session_id, token, body(f"Soy {CARMEN}"))
+        asked = post_try(client, session_id, token, body(f"Soy {CARMEN}", ner=True))
+
+    for response in (used, asked):
+        assert response.status_code == 200
+        assert response.json()["names_checked"] is True
+        assert response.json()["ner"] == "ok"
+    assert predictor.calls == 2
+
+
+@pytest.mark.parametrize("ner", [True, False])
+def test_with_the_ner_off_for_the_gateway_names_are_never_checked(ner: bool) -> None:
+    with panel_client(HTTPS_URL) as client:
+        session_id, token = logged_in(client)
+
+        response = post_try(client, session_id, token, body(f"Soy {CARMEN}", ner=ner))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["names_checked"] is False
+    assert data["ner"] == "off"
+    assert data["outcome"] == "masked"
+
+
+def test_ner_false_masks_without_the_ner_and_never_asks_it() -> None:
+    ner, predictor = fake_detector(NAMES)
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+        calls = predictor.calls
+
+        response = post_try(
+            client, session_id, token, body(f"Soy {CARMEN}, DNI {SENTINEL_DNI}", ner=False)
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert predictor.calls == calls  # the NER was never asked
+    assert data["names_checked"] is False
+    assert data["ner"] == "ok"  # the gateway's NER is still on: only this Try went without it
+    assert [s for s in data["sent"] if "marker" in s] == [
+        {"marker": "[[ES_DNI_1]]", "type": "ES_DNI"}
+    ]
+    sent = "".join(s.get("text", "") for s in data["sent"])
+    assert CARMEN in sent  # not checked: the name would go to the AI as it is
+
+
+def test_ner_false_never_uses_the_gateway_detector(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the NER on through the real Try path (no injected detector, so the Try has its own
+    NER detector): `"ner": false` reaches neither the proxy's detector (app.state.detector, a
+    Scanner over the NER), nor any Scanner (the Try's own one is one too), nor the NER (its
+    predictor and its pool), nor its span cache. A Try with the NER, in the same gateway, does
+    reach them: the spies really watch."""
+    from antifaz.detect.scan import Scanner
+
+    scanned: list[int] = []
+    real_scan_many = Scanner.scan_many
+
+    def counting(self: Scanner, texts: Any) -> Any:
+        scanned.append(len(texts))
+        return real_scan_many(self, texts)
+
+    monkeypatch.setattr(Scanner, "scan_many", counting)
+    ner, predictor = fake_detector(NAMES)
+    cache = ner._cache  # type: ignore[attr-defined]
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        assert isinstance(client.app.state.detector, Scanner)  # type: ignore[attr-defined]
+        session_id, token = logged_in(client)
+
+        without = post_try(client, session_id, token, body(f"Soy {CARMEN}", ner=False))
+        assert (scanned, predictor.calls, len(cache)) == ([], 0, 0)
+        with_ner = post_try(client, session_id, token, body(f"Soy {CARMEN}"))
+
+    assert without.status_code == with_ner.status_code == 200
+    assert without.json()["names_checked"] is False
+    assert with_ner.json()["names_checked"] is True
+    assert scanned and predictor.calls == 1  # the control: the spies see a Try with the NER
+    assert len(cache) == 0  # and even that one never touches the proxy's cache
+
+
+def test_ner_false_has_no_word_limit_only_the_byte_one() -> None:
+    ner, predictor = fake_detector(NAMES)
+    long_text = f"{CARMEN} " + "palabra " * 600 + SENTINEL_DNI
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+
+        response = post_try(client, session_id, token, body(long_text, ner=False))
+
+    assert response.status_code == 200
+    assert response.json()["names_checked"] is False
+    assert predictor.calls == 0
+
+
+def test_the_word_limit_is_one_constant_from_the_ner_windows() -> None:
+    from antifaz.api import app as app_module
+    from antifaz.detect.ner.chunker import OVERLAP_TOKENS, WINDOW_TOKENS
+
+    assert app_module.TRY_NER_MAX_WORDS == WINDOW_TOKENS + (app_module.TRY_NER_MAX_CHUNKS - 1) * (
+        WINDOW_TOKENS - OVERLAP_TOKENS
+    )
+
+
+@pytest.mark.parametrize("with_ner", [True, False])
+def test_the_panel_page_says_whether_the_ner_is_on_and_its_word_limit(with_ner: bool) -> None:
+    from antifaz.api.app import TRY_NER_MAX_WORDS
+    from tests.integration.panel_client import csrf_of
+
+    ner = fake_detector(NAMES)[0] if with_ner else None
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id = log_in(client)
+        csrf_of(client, session_id)
+        page = client.get("/panel", headers={"Cookie": f"{cookie_of(client)}={session_id}"}).text
+
+    assert f'data-ner-detector="{"on" if with_ner else "off"}"' in page
+    assert (f'data-max-words="{TRY_NER_MAX_WORDS}"' in page) is with_ner
+    assert f'data-max-bytes="{try_text.MAX_TEXT_BYTES}"' in page
+
+
+def test_a_text_of_exactly_the_word_limit_passes_and_one_more_is_413() -> None:
+    from antifaz.api.app import TRY_NER_MAX_WORDS
+
+    ner, _ = fake_detector(NAMES)
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        session_id, token = logged_in(client)
+
+        fits = post_try(client, session_id, token, body("palabra " * TRY_NER_MAX_WORDS))
+        over = post_try(client, session_id, token, body("palabra " * (TRY_NER_MAX_WORDS + 1)))
+
+    assert fits.status_code == 200
+    assert fits.json()["names_checked"] is True
+    assert over.status_code == 413
+    assert over.json()["error"]["code"] == "text_too_long_for_ner"
