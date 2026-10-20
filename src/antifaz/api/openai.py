@@ -21,6 +21,7 @@ from antifaz.api.errors import (
     NotConfiguredError,
     json_body,
 )
+from antifaz.api.live_record import mark_masked, mark_upstream_error
 from antifaz.api.proxy import (
     answer_json,
     configured_keys,
@@ -72,6 +73,7 @@ async def chat_completions(request: Request) -> Response:
         partial(mask_request, body, policy=state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
+    mark_masked(request.scope, vault.type_counts())  # «En directo»: types and counts only
     url = settings.openai_base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"}
     keys = configured_keys(settings)
@@ -79,6 +81,7 @@ async def chat_completions(request: Request) -> Response:
         state.http_client, url, headers, masked, vault, keys, stream=stream
     )
     if upstream.status_code >= 400:
+        mark_upstream_error(request.scope)
         return passthrough(upstream)
     if stream and is_event_stream(upstream):
         return stream_response(upstream, OpenAIChatStream(vault), keys, state.stream_counters)

@@ -21,6 +21,7 @@ import httpx
 from fastapi import APIRouter, Request, Response
 
 from antifaz.api.errors import PROXY_ERRORS, InvalidHeaderError, NotConfiguredError, json_body
+from antifaz.api.live_record import mark_masked, mark_upstream_error
 from antifaz.api.proxy import (
     answer_json,
     client_values_hold_a_key,
@@ -97,6 +98,7 @@ async def _prepare(request: Request, path: str, *, can_stream: bool) -> _Call:
         partial(mask_request, body, policy=state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
+    mark_masked(request.scope, vault.type_counts())  # «En directo»: types and counts only
     url = settings.anthropic_base_url.rstrip("/") + path
     return _Call(url, headers, masked, vault, configured_keys(settings), stream)
 
@@ -118,6 +120,7 @@ async def messages(request: Request) -> Response:
     call = await _prepare(request, "/v1/messages", can_stream=True)
     upstream = await _send(request, call)
     if upstream.status_code >= 400:
+        mark_upstream_error(request.scope)
         return passthrough(upstream)
     if call.stream and is_event_stream(upstream):
         counters = request.app.state.stream_counters
@@ -136,4 +139,7 @@ async def count_tokens(request: Request) -> Response:
     """Anthropic token count of the masked request. It never streams."""
     # The answer only has numbers (input_tokens): returned as it is.
     call = await _prepare(request, "/v1/messages/count_tokens", can_stream=False)
-    return passthrough(await _send(request, call))
+    upstream = await _send(request, call)
+    if upstream.status_code >= 400:
+        mark_upstream_error(request.scope)
+    return passthrough(upstream)

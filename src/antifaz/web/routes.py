@@ -76,6 +76,14 @@ CSRF again.
   The answer is JSON with the door's headers and no-store; no Vary or Content-Language. The
   values come back only in it (the scoped exception to invariant 15); the original text never.
   When a session closes, its entry in the rate limit goes too (SessionStore.on_close).
+  «En directo» (11e-1): a Try that answered notes, by type only, what it decided (the distinct
+  markers per type it would send, or the block's reason); the gateway records it once
+  (api/live_record.py). A failing note is logged by type and never changes the answer.
+- GET /panel/api/live (11e-1): «En directo» over SSE (web/live_stream.py) for a live session
+  (the door; it is never a use of it, door.NOT_A_USE). `Accept: text/event-stream` or 406
+  not_acceptable; other methods 405, HEAD too. 200 text/event-stream with the door's headers,
+  no-store and `X-Accel-Buffering: no`; the events have the closed schema of
+  web/live_response.py.
 
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
@@ -95,16 +103,20 @@ import hmac
 import json
 import logging
 import math
+from typing import Any
 
 import anyio
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.requests import ClientDisconnect
+from starlette.types import Scope
 
 from antifaz import __version__
+from antifaz.detect.types import EntityType
 from antifaz.http_errors import (
     AppError,
     InvalidTryBodyError,
+    NotAcceptableError,
     PanelInternalError,
     PanelLoginFailedError,
     PanelNotFoundError,
@@ -116,9 +128,11 @@ from antifaz.http_errors import (
     TryBodyTimeoutError,
     TryBusyError,
 )
+from antifaz.live import NullLiveFeed, Reason, note_of
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
+from antifaz.web.live_stream import LiveStreams, accepts_event_stream
 from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
 from antifaz.web.status_response import SessionResponse, StatusResponse
@@ -223,6 +237,24 @@ def _times(sessions: SessionStore, key: str) -> tuple[int, int] | None:
     return min(idle, end), end
 
 
+def _note_try(scope: Scope, result: dict[str, Any]) -> None:
+    """«En directo»: what a Try decided, by type only. Masked: the distinct markers per type it
+    would send (allowed types have none); blocked: the reason. Never a value or a marker."""
+    note = note_of(scope)
+    if note is None:
+        return
+    if result["outcome"] != "masked":
+        note.blocked(Reason(result["blocked_reason"]))  # detector_failed or egress_guard
+        return
+    markers = {
+        (EntityType(part["type"]), part["marker"]) for part in result["sent"] if "marker" in part
+    }
+    counts: dict[EntityType, int] = {}
+    for entity, _ in markers:
+        counts[entity] = counts.get(entity, 0) + 1
+    note.masked(counts)
+
+
 def _fingerprint(token: str) -> bytes:
     return hashlib.sha256(token.encode("utf-8", "surrogatepass")).digest()
 
@@ -247,6 +279,7 @@ def build_router(state: PanelState) -> APIRouter:
         state.try_limiter.forget(key)  # a closed session leaves nothing in the rate limit
 
     state.sessions.on_close(forget_tries)
+    streams = state.live_streams or LiveStreams(NullLiveFeed(), state.sessions)
 
     @router.get("/panel/login")
     async def login_page(request: Request) -> HTMLResponse:
@@ -340,7 +373,25 @@ def build_router(state: PanelState) -> APIRouter:
         if answer is None:
             logger.error("panel try failed: %s", failure)
             raise PanelInternalError()
+        try:
+            _note_try(request.scope, result)
+        except Exception as error:  # the counter never breaks a Try; only the error's type
+            logger.error("live note failed: %s", type(error).__name__)
         return Response(answer, media_type="application/json")
+
+    @router.get("/panel/api/live", response_model=None)
+    async def live(request: Request) -> Response:
+        # The door found the session live and did not count this as a use (NOT_A_USE).
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        if not accepts_event_stream(request.headers.getlist("accept")):
+            raise NotAcceptableError()
+        return StreamingResponse(
+            streams.stream(context.session.fingerprint),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no"},
+        )
 
     @router.post("/panel/api/session")
     async def session_times(request: Request) -> Response:

@@ -40,7 +40,8 @@ key does not open the panel. In this order:
 6. Only once every check of the request passed, and only for a request of the panel's own
    page (Sec-Fetch-Site same-origin, none or absent: csrf.counts_as_use), the session's last
    use is refreshed (touch). A refused request, or a page of another localhost port (same-site,
-   which carries the cookie), never keeps a session alive.
+   which carries the cookie), never keeps a session alive. Nor does a route of NOT_A_USE (11e-1):
+   only GET /panel/api/live, the «En directo» stream, so that watching never extends a session.
 
 The router then runs with a PanelContext in scope["state"], so a route never parses the
 cookie or the scheme again.
@@ -58,7 +59,7 @@ of an untrusted peer. Building the redirect from the Host header. Logging a cook
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.responses import HTMLResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -87,6 +88,9 @@ from antifaz.web.sessions import Session, SessionStore
 from antifaz.web.status import StatusFacts
 from antifaz.web.try_limit import TryLimiter
 
+if TYPE_CHECKING:  # the streams load the live schema (pydantic): the door never imports it
+    from antifaz.web.live_stream import LiveStreams
+
 # The methods that change nothing: no CSRF check. Everything else gets all the layers.
 SAFE_METHODS = frozenset({"GET", "HEAD"})
 # Not safe, yet without the session and token layers (it keeps layer 3 and JSON). Only the
@@ -99,8 +103,10 @@ LOGIN_PATH = "/panel/login"
 # The panel's JSON routes (11c-3b): only the panel's own fetch may read them (step 2b).
 API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
-# 11e-1 (red stub): requests that never count as a use of the session.
-NOT_A_USE: frozenset[tuple[str, str]] = frozenset()
+# 11e-1: requests that pass the door and still never count as a use of the session (step 6):
+# watching «En directo» never keeps a session alive (owner decision). Exact pairs; a test keeps it
+# to this one route.
+NOT_A_USE = frozenset({("/panel/api/live", "GET")})
 
 # «Prueba un texto» (11d-a): text, language and whether to use the name detector (11d-b) in, the
 # answer (web/try_response.py, without `ner`) out. The gateway builds it (api/app.py _panel):
@@ -125,6 +131,9 @@ class PanelState:
     # 11d-b: the words (NER tokens) a Try may give the name detector, None when a Try never uses
     # it (the NER is off). The page shows this number; the gateway derives it (api/app.py).
     try_ner_words: int | None = None
+    # 11e-1: «En directo»'s SSE streams over the gateway's live feed (web/live_stream.py). None:
+    # the router makes its own over a feed that keeps nothing (only in tests of other routes).
+    live_streams: "LiveStreams | None" = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -217,7 +226,7 @@ class PanelDoor:
                 refused = error_response(CsrfRejectedError())
             else:
                 # Every check passed: only now, and only for the panel's own page, it is a use.
-                if counts_as_use(headers):
+                if counts_as_use(headers) and (path, method) not in NOT_A_USE:
                     session = sessions.touch(session.fingerprint) or session
                 context = PanelContext(scheme, host, context.session_id, session)
             if refused is not None:

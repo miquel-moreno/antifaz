@@ -132,8 +132,13 @@ async def test_the_sentinel_never_reaches_the_stream_the_logs_or_a_file(
     assert not MARKER.search(raw)
     assert b"retry:" not in raw
     assert SENTINEL_DNI not in caplog.text
+    # The access line names the registered route ("/v1/messages/count_tokens"): that is the path,
+    # not an event. Without the route paths, no word of an event is in any log line.
+    logged = caplog.text
+    for path in sorted(app.state.route_paths, key=len, reverse=True):
+        logged = logged.replace(path, "")
     for word in EVENT_WORDS:
-        assert word not in caplog.text, word
+        assert word not in logged, word
 
 
 # --- The door ------------------------------------------------------------------------------------

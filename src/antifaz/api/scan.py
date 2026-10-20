@@ -19,10 +19,12 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from antifaz.api.errors import InvalidScanBodyError, error_responses
+from antifaz.api.live_record import mark_masked
 from antifaz.api.proxy import read_json
 from antifaz.config import Settings
-from antifaz.detect.types import EntityType
+from antifaz.detect.types import EntityType, Span
 from antifaz.mask import find_spans
+from antifaz.policy import Action, Policy
 
 router = APIRouter(tags=["antifaz"])
 
@@ -69,6 +71,20 @@ async def scan_text(request: Request) -> ScanResponse:
         partial(find_spans, [text], state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
+    mark_masked(request.scope, _hidden_counts(text, spans, state.policy))
     return ScanResponse(
         entities=[Entity(type=span.type, start=span.start, end=span.end) for span in spans]
     )
+
+
+def _hidden_counts(text: str, spans: list[Span], policy: Policy) -> dict[EntityType, int]:
+    """«En directo»: distinct values per type the policy would hide (counts, never a value)."""
+    distinct = {
+        (span.type, text[span.start : span.end])
+        for span in spans
+        if policy.action_for(span.type) is Action.MASK
+    }
+    counts: dict[EntityType, int] = {}
+    for entity, _ in distinct:
+        counts[entity] = counts.get(entity, 0) + 1
+    return counts

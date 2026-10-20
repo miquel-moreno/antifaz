@@ -23,6 +23,7 @@ from antifaz import __version__
 from antifaz.api import anthropic, health, models, openai, scan
 from antifaz.api.errors import register_error_handlers
 from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
+from antifaz.api.live_record import LiveRecorder
 from antifaz.api.middleware import request_id_middleware
 from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
@@ -31,6 +32,7 @@ from antifaz.detect.ner.engine import NerDetector
 from antifaz.detect.ner.setup import ner_from_settings
 from antifaz.detect.scan import Scanner
 from antifaz.detect.scan import scan as scan_text
+from antifaz.live import MemoryLiveFeed, NullLiveFeed
 from antifaz.logging import configure_logging
 from antifaz.mask import Detector
 from antifaz.policy import DEFAULT_POLICY, Policy
@@ -55,7 +57,9 @@ MASK_THREADS = 8
 # is a conservative bound, so 2 windows take about 3 s, under a 5 s deadline. Measure on the
 # target machine before raising them.
 TRY_THREADS = 1
-# 11e-1: worker processes of `antifaz serve` (cli/serve.py OPTIONS; red stub).
+# 11e-1: how many worker processes `antifaz serve` runs (cli/serve.py OPTIONS["workers"], kept
+# equal by a test). «En directo» shows it: with more than one, each process counts only its own.
+# Whoever runs uvicorn by hand with --workers passes it to create_app (`processes`).
 SERVE_WORKERS = 1
 TRY_NER_SECONDS = 5.0
 TRY_NER_MAX_CHUNKS = 2
@@ -115,6 +119,7 @@ def _panel(
     ner: NerDetector | None,
     limiters: _Limiters,
     try_ner: NerDetector | None,
+    processes: int,
 ) -> Callable[[ASGIApp], ASGIApp] | None:
     """The panel's door and routes (ADR-0018), or None without ANTIFAZ_ADMIN_TOKEN.
 
@@ -147,6 +152,7 @@ def _panel(
     from antifaz.web.assets import load_assets
     from antifaz.web.door import PanelDoor, PanelState
     from antifaz.web.forwarded import parse_networks
+    from antifaz.web.live_stream import LiveStreams
     from antifaz.web.login_limit import FailureLimiter
     from antifaz.web.routes import build_router
     from antifaz.web.sessions import MemorySessionStore
@@ -214,17 +220,23 @@ def _panel(
         return {**answer, "names_checked": checked}
 
     token = settings.admin_token.get_secret_value().encode()
+    sessions = MemorySessionStore()
+    feed = MemoryLiveFeed(processes=processes)
+    streams = LiveStreams(feed, sessions)
     state = PanelState(
         token_fingerprint=hashlib.sha256(token).digest(),
         trusted_proxies=parse_networks(settings.trusted_proxies),
-        sessions=MemorySessionStore(),
+        sessions=sessions,
         limiter=FailureLimiter(),
         assets=load_assets(),
         status=status,
         try_runner=try_runner,
         try_limiter=TryLimiter(),
         try_ner_words=None if try_ner is None else TRY_NER_MAX_WORDS,
+        live_streams=streams,
     )
+    app.state.live_feed = feed
+    app.state.live_streams = streams
     app.state.panel_status = status
     app.state.panel_state = state
     app.include_router(build_router(state))
@@ -238,9 +250,11 @@ def create_app(
     detector: Detector | None = None,
     policy: Policy = DEFAULT_POLICY,
     ner: NerDetector | None = None,
+    processes: int = SERVE_WORKERS,
 ) -> FastAPI:
     """Build the app. Tests inject `http_client` (httpx.MockTransport), `detector` and `ner`
-    (a NER detector on the fake backend).
+    (a NER detector on the fake backend). `processes`: how many worker processes the server
+    runs (`antifaz serve`: always SERVE_WORKERS), shown by «En directo».
 
     Raises UnsafeConfigError (without any key in the message) if the gateway would start open,
     or if the NER is on and its model or backend is missing (ADR-0016). The NER workers start
@@ -270,6 +284,9 @@ def create_app(
                 panel_status.mark_started()  # the Status view's uptime counts from here
             yield
         finally:
+            streams = getattr(app.state, "live_streams", None)
+            if streams is not None:
+                streams.close_all()  # every «En directo» stream ends with `end: shutdown`
             if ner is not None:
                 await anyio.to_thread.run_sync(ner.close, limiter=lifecycle)
             if http_client is None:  # an injected client belongs to whoever created it
@@ -300,8 +317,13 @@ def create_app(
     app.include_router(scan.router)
     # A Try gets its own NER detector only when the gateway built the detector over the NER.
     try_ner = ner if detector is None else None
-    panel_door = _panel(app, settings, ner, limiters, try_ner)
+    # «En directo» (11e-1): a feed in memory only with the panel; without it, one keeping nothing.
+    app.state.live_feed = NullLiveFeed(processes=processes)
+    panel_door = _panel(app, settings, ner, limiters, try_ner, processes)
     app.state.route_paths = registered_paths(app)
+    # Innermost: inside the gate, so a refused request never reaches it; it records each request
+    # of the five routes «En directo» shows once, at its end (api/live_record.py).
+    app.add_middleware(LiveRecorder)
     # The last one added runs first: request id -> trusted host -> gate (the panel's door for
     # /panel*; the key, Origin and JSON for the rest).
     app.add_middleware(

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from antifaz.api.live_record import mark_blocked, mark_upstream_error
 from antifaz.errors import AntifazBlocked
 from antifaz.http_errors import AppError, error_body, error_response
 
@@ -185,9 +186,20 @@ def error_responses(*statuses: int) -> dict[int | str, dict[str, object]]:
 PROXY_ERRORS = error_responses(400, 401, 403, 413, 415, 502, 503, 504)
 
 
-async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
+# The provider failed after the request was masked and sent: «En directo» says upstream_error.
+UPSTREAM_ERRORS = (
+    UpstreamTimeoutError,
+    UpstreamUnavailableError,
+    UpstreamRedirectError,
+    BadUpstreamResponseError,
+)
+
+
+async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, AppError):  # pragma: no cover - registered only for AppError
         raise exc
+    if isinstance(exc, UPSTREAM_ERRORS):
+        mark_upstream_error(request.scope)
     return error_response(exc)
 
 
@@ -202,10 +214,11 @@ def _safe_location(loc: tuple[object, ...]) -> str:
     return ".".join(parts)
 
 
-async def _blocked_handler(_: Request, exc: Exception) -> JSONResponse:
+async def _blocked_handler(request: Request, exc: Exception) -> JSONResponse:
     # The message is fixed per class (antifaz.errors): it never carries values.
     if not isinstance(exc, AntifazBlocked):  # pragma: no cover - registered only for it
         raise exc
+    mark_blocked(request.scope, exc)  # «En directo»: blocked, with its reason (the class)
     return JSONResponse(status_code=400, content=error_body("antifaz_blocked", exc.message))
 
 
