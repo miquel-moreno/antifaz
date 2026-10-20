@@ -8,6 +8,7 @@
 """
 
 import json
+import re
 import subprocess
 import sys
 
@@ -116,7 +117,12 @@ def test_the_same_session_keeps_the_same_csrf_token() -> None:
         first = client.get("/panel", headers=cookie).text
         second = client.get("/panel", headers=cookie).text
 
-        assert first == second
+        # 11d-b: the seconds left before the 8 hours may tick between the two pages.
+        def without_the_end(page: str) -> str:
+            return re.sub(r'(name="antifaz-session-max" content=")\d+', r"\1", page)
+
+        assert without_the_end(first) == without_the_end(second)
+        assert 'name="antifaz-session-max"' in first
 
 
 @pytest.mark.parametrize("path", ["/panel", "/panel/login", "/panel/x"])
