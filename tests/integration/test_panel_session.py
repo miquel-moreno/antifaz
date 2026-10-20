@@ -134,7 +134,7 @@ def test_get_and_head_are_405(client: TestClient, method: str) -> None:
     assert client.request(method, SESSION, headers=headers).status_code == 405
 
 
-def test_the_body_is_never_read(client: TestClient) -> None:
+def test_the_body_is_never_read(client: TestClient, clock: Clock) -> None:
     session_id, token = logged_in(client)
     headers = action_headers(client, session_id, token)
 

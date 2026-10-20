@@ -117,12 +117,13 @@ def test_the_same_session_keeps_the_same_csrf_token() -> None:
         first = client.get("/panel", headers=cookie).text
         second = client.get("/panel", headers=cookie).text
 
-        # 11d-b: the seconds left before the 8 hours may tick between the two pages.
-        def without_the_end(page: str) -> str:
-            return re.sub(r'(name="antifaz-session-max" content=")\d+', r"\1", page)
+        # 11d-b: both session metas (whole seconds on the real clock) may tick between the two
+        # pages; the CSRF token and everything else stay the same.
+        def without_the_times(page: str) -> str:
+            return re.sub(r'(name="antifaz-session-(?:idle|max)" content=")\d+', r"\1", page)
 
-        assert without_the_end(first) == without_the_end(second)
-        assert 'name="antifaz-session-max"' in first
+        assert without_the_times(first) == without_the_times(second)
+        assert 'name="antifaz-session-idle"' in first and 'name="antifaz-session-max"' in first
 
 
 @pytest.mark.parametrize("path", ["/panel", "/panel/login", "/panel/x"])
