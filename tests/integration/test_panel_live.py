@@ -190,7 +190,7 @@ async def test_without_a_session_it_is_401_and_nothing_streams(app: FastAPI) -> 
 def test_the_live_stream_is_the_only_request_that_is_never_a_use() -> None:
     from antifaz.web.door import NOT_A_USE
 
-    assert frozenset({(LIVE, "GET")}) == NOT_A_USE
+    assert frozenset({(LIVE, "GET"), (LIVE, "HEAD")}) == NOT_A_USE
 
 
 async def test_connecting_and_reconnecting_never_refreshes_the_last_use(app: FastAPI) -> None:
@@ -448,3 +448,119 @@ async def test_every_json_leaf_of_every_event_is_an_enum_value_or_an_integer(app
     assert leaves
     for leaf in leaves:
         assert type(leaf) is int or (type(leaf) is str and leaf in _ENUM_VALUES), leaf
+
+
+# --- Places are never held by a cut, stalled or broken stream (11e-1 review) ---------------------
+
+
+def _short_writes(app: FastAPI) -> None:
+    app.state.live_streams.write_seconds = 0.2
+    app.state.live_streams.heartbeat_seconds = 0.1
+
+
+async def test_streams_cut_by_logout_that_are_not_read_free_their_places_at_once(
+    app: FastAPI,
+) -> None:
+    app.state.live_streams.write_seconds = 30.0  # the place must not wait for the write timeout
+    async with running(app) as client:
+        sessions = [await log_in(client) for _ in range(3)]
+        owners = [sessions[0], sessions[0], sessions[1], sessions[1], sessions[2]]
+        stalled = [Stream(app, owner, stall_after=1) for owner in owners]
+        for stream in stalled:
+            await stream.__aenter__()
+            assert (await stream.event())[0] == "snapshot"
+        for session_id in sessions:
+            token = await csrf_of(client, session_id)
+            await client.post("/panel/logout", content=b"{}", headers=action(session_id, token))
+        fresh = await log_in(client)
+        async with Stream(app, fresh) as stream:  # the 5 cut streams hold no place
+            assert (await stream.event())[0] == "snapshot"
+        for stream in stalled:
+            await stream.__aexit__()
+
+
+async def test_a_consumer_that_stops_reading_is_dropped_after_the_write_timeout(
+    app: FastAPI,
+) -> None:
+    _short_writes(app)
+    clock = Clock()
+    app.state.panel_state.sessions._clock = clock
+    async with running(app) as client:
+        session_id = await log_in(client)
+        stalled = Stream(app, session_id, stall_after=1)
+        await stalled.__aenter__()
+        await stalled.event()
+        clock.now += IDLE_SECONDS + 1  # expired by the store's clock
+        assert await stalled.closed(timeout=1.5)  # the app gave up on it: connection dropped
+        assert app.state.live_streams.open_streams == 0
+        assert app.state.live_feed._subscribers == []
+
+
+async def test_reloading_after_stalled_streams_is_never_busy(app: FastAPI) -> None:
+    _short_writes(app)
+    async with running(app) as client:
+        session_id = await log_in(client)
+        stalled = [Stream(app, session_id, stall_after=1) for _ in range(2)]
+        for stream in stalled:
+            await stream.__aenter__()
+            await stream.event()
+        for stream in stalled:  # their next heartbeat cannot be written: dropped
+            assert await stream.closed(timeout=1.5)
+        for _ in range(3):  # reload, reload, reload
+            async with Stream(app, session_id) as stream:
+                assert (await stream.event())[0] == "snapshot"
+
+
+async def test_a_stream_cancelled_at_a_yield_frees_its_place_at_once(app: FastAPI) -> None:
+    async with running(app) as client:
+        session_id = await log_in(client)
+        stream = Stream(app, session_id, stall_after=1)
+        await stream.__aenter__()
+        await stream.event()
+        app.state.live_feed.record(_event())  # its send now waits on a client that never reads
+        await asyncio.sleep(0.05)
+        stream.disconnect()
+        assert await stream.closed()
+        assert app.state.live_streams.open_streams == 0  # no waiting for a garbage collection
+        assert app.state.live_feed._subscribers == []
+
+
+@pytest.mark.parametrize("broken", ["subscribe", "watch"])
+async def test_a_raise_while_starting_a_stream_frees_its_place(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    from antifaz.web import live_stream
+
+    def boom(*_: object, **__: object) -> None:
+        raise RuntimeError("broken")
+
+    if broken == "subscribe":
+        monkeypatch.setattr(app.state.live_feed, "subscribe", boom)
+    else:
+        monkeypatch.setattr(live_stream, "watch", boom)
+    async with running(app) as client:
+        session_id = await log_in(client)
+        for _ in range(MAX_STREAMS + 1):
+            failed = Stream(app, session_id)
+            async with failed:
+                assert await failed.closed()
+        assert app.state.live_streams.open_streams == 0
+        monkeypatch.undo()
+        async with Stream(app, session_id) as stream:
+            assert (await stream.event())[0] == "snapshot"
+
+
+async def test_head_is_405_and_never_a_use_of_the_session(app: FastAPI) -> None:
+    from antifaz.web.door import NOT_A_USE
+
+    assert (LIVE, "HEAD") in NOT_A_USE
+    clock = Clock()
+    app.state.panel_state.sessions._clock = clock
+    async with running(app) as client:
+        session_id = await log_in(client)
+        clock.now += 300
+        response = await client.head(
+            LIVE, headers={"Cookie": cookie(session_id), "Accept": "text/event-stream"}
+        )
+        assert response.status_code == 405
+        assert app.state.panel_state.sessions._sessions[fingerprint(session_id)].last_used == 1000.0

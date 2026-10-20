@@ -386,3 +386,54 @@ def test_a_failing_feed_never_reaches_the_proxy(
     assert response.json()["choices"][0]["message"]["content"] == SENTINEL_DNI
     assert "RuntimeError" in caplog.text
     assert SENTINEL_DNI not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "headers"),
+    [
+        (OPENAI, _openai(SENTINEL_DNI), AUTH),
+        (MESSAGES, _anthropic(SENTINEL_DNI), ANTHROPIC_AUTH),
+        (SCAN, {"text": SENTINEL_DNI}, AUTH),
+    ],
+    ids=["openai", "anthropic", "scan"],
+)
+def test_a_counter_that_raises_while_counting_never_reaches_the_proxy(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    body: dict[str, Any],
+    headers: dict[str, str],
+) -> None:
+    from antifaz.api import scan
+    from antifaz.vault import Vault
+
+    def boom(*_: object, **__: object) -> dict[EntityType, int]:
+        raise RuntimeError(f"counting broke on {SENTINEL_DNI}")
+
+    monkeypatch.setattr(Vault, "type_counts", boom)
+    monkeypatch.setattr(scan, "_hidden_counts", boom)
+    with caplog.at_level(logging.DEBUG):
+        response = client.post(path, json=body, headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert "RuntimeError" in caplog.text
+    assert SENTINEL_DNI not in caplog.text
+    assert _events(client) == []  # no decision was noted: nothing recorded
+
+
+@pytest.mark.parametrize(("value", "processes"), [("3", 3), ("1", 1), ("0", 1), ("x", 1), ("", 1)])
+def test_web_concurrency_says_how_many_processes_a_hand_run_uvicorn_has(
+    monkeypatch: pytest.MonkeyPatch, value: str, processes: int
+) -> None:
+    monkeypatch.setenv("WEB_CONCURRENCY", value)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(FakeUpstream(both_echo)))
+    app = create_app(panel_settings(), http_client=http)
+    assert app.state.live_feed.snapshot().processes == processes
+
+
+def test_without_web_concurrency_it_is_one_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(FakeUpstream(both_echo)))
+    app = create_app(panel_settings(), http_client=http)
+    assert app.state.live_feed.snapshot().processes == 1

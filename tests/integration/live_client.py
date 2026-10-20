@@ -100,9 +100,12 @@ class Stream:
         method: str = "GET",
         scheme: str = "https",
         host: str = HOST,
+        stall_after: int | None = None,
     ) -> None:
         """`session_id` goes in the cookie of `scheme` (none if None); `headers` add to or
-        replace the browser's (an empty value drops one)."""
+        replace the browser's (an empty value drops one). `stall_after`: after that many body
+        messages the client stops reading (every later send waits forever, like a full socket
+        of a client that went away without closing), and never disconnects by itself."""
         sent = {"Accept": "text/event-stream", "Sec-Fetch-Site": "same-origin", "Host": host}
         if session_id is not None:
             name = SECURE_COOKIE if scheme == "https" else LOCAL_COOKIE
@@ -138,6 +141,9 @@ class Stream:
         self._read = 0
         self._task: asyncio.Task[None] | None = None
         self._asked = False
+        self._stall_after = stall_after
+        self._bodies = 0
+        self.error: BaseException | None = None
 
     async def _receive(self) -> dict[str, Any]:
         if not self._asked:
@@ -152,6 +158,9 @@ class Stream:
             self.headers = list(message.get("headers", []))
             self._started.set()
         elif message["type"] == "http.response.body":
+            if self._stall_after is not None and self._bodies >= self._stall_after:
+                await asyncio.Event().wait()  # never read: only a cancellation ends this send
+            self._bodies += 1
             self.raw += message.get("body", b"")
             self._more.set()
             if not message.get("more_body", False):
@@ -180,6 +189,8 @@ class Stream:
             await asyncio.wait_for(asyncio.shield(self._task), timeout)
         except TimeoutError:
             return False
+        except Exception as error:  # the app raised (after the answer started): it did return
+            self.error = error
         return True
 
     @property
