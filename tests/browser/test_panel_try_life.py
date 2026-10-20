@@ -4,7 +4,7 @@ Chromium, Firefox and WebKit, on the gateway with the fake NER (invented names).
 
 - The wipe happens BEFORE the page leaves: with a real result on screen, the expiry, a 401 and
   «Salir» empty the field, the three panes, the meta line, the callouts and the live region while
-  the page is still there (the navigation to the login is held by a route to look at it).
+  the page is still there (read at beforeunload, before try.js's own wipe at pagehide).
 - An answer that arrives after the wipe never fills the page again, and one that arrives after
   the text changed is dropped (so «no usado» never describes a text that was not tried).
 - A new try that fails (413 or any error) clears the previous result: it was another text.
@@ -17,6 +17,7 @@ Chromium, Firefox and WebKit, on the gateway with the fake NER (invented names).
 import contextlib
 import json
 import re
+import time
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
@@ -71,12 +72,18 @@ def _release(held: list[Route]) -> None:
             route.abort()
 
 
+FRAMES_JS = "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+
+
 def _wait_held(tab: Tab, held: list[Route]) -> None:
-    for _ in range(300):
-        if held:
-            return
-        tab.page.wait_for_timeout(50)
-    raise AssertionError("the request never came")
+    """Until the held route has its request (each evaluate lets Playwright run the handlers).
+    Never page.wait_for_timeout: under an installed clock the page's timers are fake."""
+    give_up = time.monotonic() + TIMEOUT_MS / 1000
+    while not held:
+        if time.monotonic() > give_up:
+            raise AssertionError("the request never came")
+        tab.page.evaluate("() => 0")
+        time.sleep(0.05)
 
 
 def _result(tab: Tab) -> None:
@@ -85,28 +92,44 @@ def _result(tab: Tab) -> None:
     assert text_of(tab, "try-input") == TEXT
 
 
+# Written to the console by the page when it starts to leave (beforeunload comes before
+# pagehide, where try.js would wipe anyway): what the screen held at that moment.
+AT_LEAVE_JS = (
+    "() => { const read = "
+    + EMPTIED_JS
+    + "; addEventListener('beforeunload', "
+    + "() => console.log('at-leave ' + JSON.stringify(read()))); }"
+)
+
+
+def _at_leave(tab: Tab) -> dict[str, object]:
+    lines = [t for t in tab.console_texts if t.startswith("at-leave ")]
+    assert len(lines) == 1, lines
+    value: dict[str, object] = json.loads(lines[0].removeprefix("at-leave "))
+    return value
+
+
 @pytest.mark.parametrize("way", ["expiry", "unauthorized", "logout"])
 def test_every_way_out_wipes_before_the_page_leaves(
     tab: Tab, server: PanelServer, way: str
 ) -> None:
     log_in(tab, server)
     _result(tab)
-    held = _hold(tab, LOGIN)
+    tab.page.evaluate(AT_LEAVE_JS)
 
     if way == "logout":
         tab.page.click(".app-sidebar-foot [data-logout]")
     elif way == "unauthorized":
         tab.page.evaluate("() => document.dispatchEvent(new CustomEvent('antifaz:unauthorized'))")
     else:
+        # The fake clock only now (Playwright's own waits run on the page's timers, which it
+        # fakes): session.js recomputes on it when the page says it is visible.
         tab.page.clock.install()
-        tab.page.evaluate(
-            "() => document.dispatchEvent(new Event('visibilitychange'))"
-        )  # session.js recomputes on the fake clock
+        tab.page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
         tab.page.clock.run_for(31 * 60 * 1000)
-    _wait_held(tab, held)
+    tab.page.wait_for_url(LOGIN)
 
-    assert tab.page.evaluate(EMPTIED_JS) == EMPTY  # still the panel page, already empty
-    _release(held)
+    assert _at_leave(tab) == EMPTY  # already empty while the panel page was still there
 
 
 def test_an_answer_after_the_wipe_never_fills_the_page(tab: Tab, server: PanelServer) -> None:
@@ -115,16 +138,18 @@ def test_an_answer_after_the_wipe_never_fills_the_page(tab: Tab, server: PanelSe
     tab.page.fill("#try-text", TEXT)
     tab.page.click("#try-submit")
     _wait_held(tab, answers)
-    leaving = _hold(tab, LOGIN)
 
-    tab.page.evaluate("() => document.dispatchEvent(new CustomEvent('antifaz:unauthorized'))")
-    _wait_held(tab, leaving)
+    tab.page.evaluate("() => document.dispatchEvent(new CustomEvent('antifaz:wipe'))")
     with contextlib.suppress(PlaywrightError):  # aborted by the page: even better
         answers[0].fulfill(status=200, headers={"Content-Type": "application/json"}, body=_ok())
-    tab.page.wait_for_timeout(300)  # let any late handler run
+    for _ in range(5):  # let any late handler run
+        tab.page.evaluate(FRAMES_JS)
 
     assert tab.page.evaluate(EMPTIED_JS) == EMPTY
-    _release(leaving)
+    tab.page.fill("#try-text", TEXT)
+    tab.page.click("#try-submit")  # and after the wipe nothing is sent any more
+    tab.page.evaluate(FRAMES_JS)
+    assert len(answers) == 1
 
 
 def _ok(names_checked: bool = True, length: int = len(TEXT)) -> str:

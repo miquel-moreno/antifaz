@@ -15,6 +15,7 @@ the fake clock from its first line); the gateway's own clock is real, so its ses
 """
 
 import re
+import time
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -216,9 +217,10 @@ def test_the_page_expires_a_little_before_the_server(tab: Tab, server: PanelServ
 
     tab.page.clock.run_for((IDLE_SECONDS - 30) * 1000)
     assert tab.page.url.endswith("/panel?lang=es")
-    tab.page.clock.run_for(28 * 1000)  # two seconds before the server's limit
+    tab.page.clock.run_for(26 * 1000)  # four seconds before the server's limit
 
-    tab.page.wait_for_url(f"{server.origin}/panel/login?lang=es")
+    # The installed clock keeps running with real time: 1.5 s more is still before the limit.
+    tab.page.wait_for_url(f"{server.origin}/panel/login?lang=es", timeout=1500)
 
 
 @pytest.mark.parametrize(("status", "counts"), [(500, False), (503, False), (400, True)])
@@ -236,9 +238,11 @@ def test_only_answers_the_door_handled_move_the_limit(
     tab.page.clock.run_for(20 * 60 * 1000)
     tab.page.fill("#try-text", "hola")
     tab.page.click("#try-submit")
-    tab.page.wait_for_function(
-        "() => !document.getElementById('try-error').hidden", timeout=TIMEOUT_MS
-    )
+    # Polled from here: with the clock installed, Playwright's own waits use fake timers.
+    give_up = time.monotonic() + TIMEOUT_MS / 1000
+    while not tab.page.evaluate("() => !document.getElementById('try-error').hidden"):
+        assert time.monotonic() < give_up, "the answer never showed"
+        time.sleep(0.05)
 
     tab.page.clock.run_for(9 * 60 * 1000)  # 29 minutes after the login, 9 after the answer
     shown = tab.page.evaluate(SHOWN_JS)
