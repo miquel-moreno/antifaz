@@ -95,8 +95,8 @@
 <div class="bar">
 <span class="kh" aria-hidden="true"><kbd id="try-mod">{{ t("try.key.ctrl") }}</kbd> <kbd>{{ t("try.key.enter") }}</kbd> {{ t("try.shortcut") }}</span>
 <span class="sp"></span>
-<button class="btn" type="button" id="try-example" aria-label="{{ t('try.example') }}"><span class="full">{{ t("try.example") }}</span><span class="short">{{ t("try.example.short") }}</span></button>
-<button class="btn primary" type="submit" id="try-submit">{{ t("try.submit") }}</button>
+<button class="btn" type="button" id="try-example" disabled aria-label="{{ t('try.example') }}"><span class="full">{{ t("try.example") }}</span><span class="short">{{ t("try.example.short") }}</span></button>
+<button class="btn primary" type="submit" id="try-submit" disabled>{{ t("try.submit") }}</button>
 </div>
 </form>
 <p class="hint" id="try-hint"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>{{ t("try.hint") }}</p>
@@ -265,7 +265,7 @@
 </template>
 <template id="session-messages">
 <span data-msg="idle">{{ t("session.warn.idle") }}</span>
-<span data-msg="max">{{ t("session.warn.max") }}</span>
+<span data-msg="max">{{ t("session.warn.max", hours=session_hours) }}</span>
 <span data-msg="failed">{{ t("session.warn.failed") }}</span>
 </template>
 <template id="session-banner"><div class="callout warn"><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("session.warn.title") }}</strong><p data-text></p><p class="callout-actions" data-actions><button class="btn" type="button" data-continue>{{ t("session.warn.continue") }}</button></p></div></template>

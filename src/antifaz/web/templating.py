@@ -30,6 +30,7 @@ import jinja2
 
 from antifaz.web.assets import Assets
 from antifaz.web.i18n import Catalogs, load_catalogs
+from antifaz.web.sessions import MAX_AGE_SECONDS
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 TEMPLATES = ("base.html", "parts.html", "login.html", "panel.html")
@@ -116,4 +117,5 @@ class Pages:
             max_seconds=max_seconds,
             ner_words=ner_words,
             max_text_bytes=max_text_bytes,
+            session_hours=MAX_AGE_SECONDS // 3600,
         )

@@ -7,6 +7,7 @@
   var messages = document.getElementById("session-messages");
   var main = document.getElementById("main");
   var WARN_MS = 120000;
+  var SAFETY_MS = 5000;
   var LONGEST_MS = 2147483647;
 
   function seconds(meta) {
@@ -18,9 +19,13 @@
     return typeof value === "number" && Number.isInteger(value) && value >= 0;
   }
 
+  function ahead(secondsLeft) {
+    return Math.max(0, secondsLeft * 1000 - SAFETY_MS);
+  }
+
   var started = Date.now();
-  var idleLength = seconds(document.querySelector("meta[name=antifaz-session-idle]")) * 1000;
-  var maxDeadline = started + seconds(document.querySelector("meta[name=antifaz-session-max]")) * 1000;
+  var idleLength = ahead(seconds(document.querySelector("meta[name=antifaz-session-idle]")));
+  var maxDeadline = started + ahead(seconds(document.querySelector("meta[name=antifaz-session-max]")));
   var idleDeadline = Math.min(started + idleLength, maxDeadline);
   var timer = null;
   var shown = "";
@@ -51,7 +56,7 @@
     expired = true;
     clearTimeout(timer);
     timer = null;
-    document.dispatchEvent(new CustomEvent("antifaz:expired"));
+    document.dispatchEvent(new CustomEvent("antifaz:wipe"));
     location.replace("/panel/login" + languageQuery());
   }
 
@@ -88,8 +93,8 @@
       return;
     }
     var now = Date.now();
-    maxDeadline = now + data.max_seconds * 1000;
-    idleDeadline = Math.min(now + data.idle_seconds * 1000, maxDeadline);
+    maxDeadline = now + ahead(data.max_seconds);
+    idleDeadline = Math.min(now + ahead(data.idle_seconds), maxDeadline);
     schedule();
   }
 

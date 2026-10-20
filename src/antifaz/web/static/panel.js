@@ -119,13 +119,18 @@
     return "?lang=" + encodeURIComponent(root.lang);
   }
 
+  function leave() {
+    document.dispatchEvent(new CustomEvent("antifaz:wipe"));
+    location.replace("/panel/login" + languageQuery());
+  }
+
   function message(key) {
     var item = messages.content.querySelector('[data-msg="' + key + '"]');
     return item ? item.textContent : "";
   }
 
   function activity(status) {
-    if (status !== 401 && status !== 403) {
+    if (status >= 200 && status < 500 && status !== 401 && status !== 403) {
       document.dispatchEvent(new CustomEvent("antifaz:activity"));
     }
   }
@@ -155,7 +160,7 @@
     }).then(function (response) {
       activity(response.status);
       if (response.status === 200 || response.status === 401) {
-        location.replace("/panel/login" + languageQuery());
+        leave();
       } else {
         failed("refused", button);
       }
@@ -449,7 +454,7 @@
         return;
       }
       if (response.status === 401) {
-        location.replace("/panel/login" + languageQuery());
+        leave();
         return;
       }
       if (response.status !== 200) {

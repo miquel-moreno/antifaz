@@ -115,7 +115,7 @@
   "try.hint": "Usa solo datos inventados. El texto no se guarda: se borra al salir, al caducar la sesión o al cerrar la página.",
   "try.example.note": "El ejemplo solo trae datos que se encuentran sin el detector de nombres (DNI, email, IBAN y teléfono): los nombres necesitan el NER.",
   "try.example.text": "Hola, os escribo por la factura de octubre. Mi DNI es 87654321X y mi email, ana.prueba@example.com. Haced el pago en ES9121000418450200051332 y, si hay algún problema, llamadme al 612 345 678.",
-  "try.noscript": "Para probar un texto hace falta JavaScript: la página lo manda como datos a Antifaz, nunca en un formulario. Sin él, el botón «Probar» no envía nada.",
+  "try.noscript": "Para probar un texto hace falta JavaScript: la página lo manda como datos a Antifaz, nunca en un formulario. Sin él, el botón «Probar» está desactivado y no se envía nada.",
   "try.count.bytes": "{used} de {max} bytes",
   "try.count.words": "Detector de nombres: ≈ {used} de {max} palabras",
   "try.count.words_not_used": "Detector de nombres: no usado",
@@ -182,7 +182,7 @@
   "try.type.person": "Nombre",
   "session.warn.title": "Tu sesión está a punto de caducar",
   "session.warn.idle": "Caduca a las {time} por inactividad. Entonces se borran el texto y los resultados.",
-  "session.warn.max": "La sesión dura como mucho 8 horas y termina a las {time}. Tendrás que volver a entrar.",
+  "session.warn.max": "La sesión dura como mucho {hours} horas y termina a las {time}. Tendrás que volver a entrar.",
   "session.warn.continue": "Seguir",
   "session.warn.failed": "No se ha podido alargar la sesión. Vuelve a probar."
 }

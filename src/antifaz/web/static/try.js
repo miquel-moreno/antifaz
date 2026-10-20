@@ -47,6 +47,26 @@
   var maxWords = whole(form.getAttribute("data-max-words"));
   var busy = false;
   var nerUnused = false;
+  var sequence = 0;
+  var ended = false;
+  var controller = null;
+  var DROPPED = [
+    0xad, 0xad, 0x300, 0x36f, 0x591, 0x5bd, 0x5bf, 0x5bf, 0x5c1, 0x5c2, 0x5c4, 0x5c5,
+    0x5c7, 0x5c7, 0x600, 0x605, 0x610, 0x61a, 0x61c, 0x61c, 0x64b, 0x65f, 0x670, 0x670,
+    0x6d6, 0x6dd, 0x6df, 0x6e4, 0x6e7, 0x6e8, 0x6ea, 0x6ed, 0x900, 0x902, 0x93a, 0x93a,
+    0x93c, 0x93c, 0x941, 0x948, 0x94d, 0x94d, 0x951, 0x957, 0x962, 0x963, 0xe31, 0xe31,
+    0xe34, 0xe3a, 0xe47, 0xe4e, 0x200b, 0x200f, 0x202a, 0x202e, 0x2060, 0x2064,
+    0x2066, 0x206f, 0xfe00, 0xfe0f, 0xfeff, 0xfeff
+  ];
+  var SIGNS = [
+    0x5be, 0x5be, 0x5c0, 0x5c0, 0x5c3, 0x5c3, 0x5c6, 0x5c6, 0x5f3, 0x5f4, 0x606, 0x60f,
+    0x61b, 0x61b, 0x61d, 0x61f, 0x66a, 0x66d, 0x6d4, 0x6d4, 0x6de, 0x6de, 0x6e9, 0x6e9,
+    0x6fd, 0x6fe, 0x903, 0x903, 0x93b, 0x93b, 0x93e, 0x940, 0x949, 0x94c, 0x94e, 0x94f,
+    0x964, 0x965, 0x970, 0x970, 0xe3f, 0xe3f, 0xe4f, 0xe4f, 0xe5a, 0xe5b, 0x2000, 0x2bff,
+    0x2e00, 0x2e7f, 0x3000, 0x3004, 0x3008, 0x303f, 0xe000, 0xf8ff, 0xfe10, 0xfe6f,
+    0xff00, 0xff0f, 0xff1a, 0xff20, 0xff3b, 0xff40, 0xff5b, 0xff65, 0xfff0, 0xffff,
+    0x1f000, 0x1ffff, 0xf0000, 0x10ffff
+  ];
 
   function text(key) {
     var item = messages.content.querySelector('[data-msg="' + key + '"]');
@@ -82,27 +102,44 @@
   }
 
   function activity(status) {
-    if (status !== 401 && status !== 403) {
+    if (status >= 200 && status < 500 && status !== 401 && status !== 403) {
       document.dispatchEvent(new CustomEvent("antifaz:activity"));
     }
+  }
+
+  function inRanges(code, ranges) {
+    for (var index = 0; index < ranges.length; index += 2) {
+      if (code >= ranges[index] && code <= ranges[index + 1]) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function isWord(character) {
     if (character === "_" || (character >= "0" && character <= "9")) {
       return true;
     }
+    var code = character.codePointAt(0);
+    if (code < 0x80) {
+      return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+    }
+    if (inRanges(code, SIGNS)) {
+      return false;
+    }
     if (character.toLowerCase() !== character.toUpperCase()) {
       return true;
     }
-    var code = character.codePointAt(0);
-    return code >= 0x3040 && !(code >= 0xfe00 && code <= 0xfe6f) &&
-      !(code >= 0xff00 && code <= 0xff20) && code < 0x1f000;
+    return code >= 0x2b0;
   }
 
   function estimate(value) {
     var count = 0;
     var run = 0;
     for (var character of value) {
+      if (inRanges(character.codePointAt(0), DROPPED)) {
+        continue;
+      }
       if (isWord(character)) {
         if (run === 0 || run === MAX_TOKEN) {
           count += 1;
@@ -153,18 +190,11 @@
     element.replaceChildren();
   }
 
-  function wipe() {
-    field.value = "";
-    nerUnused = false;
-    hideError();
-    if (tooLong) {
-      tooLong.hidden = true;
-    }
+  function clearResult() {
     names.hidden = true;
     namesText.textContent = "";
     result.hidden = true;
     empty.hidden = false;
-    exampleNote.hidden = true;
     [inputPane, sentPane, replyPane, meta].forEach(emptyOut);
     found.querySelectorAll("dd").forEach(function (item) {
       item.remove();
@@ -172,7 +202,28 @@
     blockedText.textContent = "";
     blockedCode.textContent = "";
     live.textContent = "";
+  }
+
+  function wipe() {
+    sequence += 1;
+    if (controller) {
+      controller.abort();
+      controller = null;
+    }
+    field.value = "";
+    nerUnused = false;
+    hideError();
+    if (tooLong) {
+      tooLong.hidden = true;
+    }
+    exampleNote.hidden = true;
+    clearResult();
     counter();
+  }
+
+  function leave() {
+    ended = true;
+    wipe();
   }
 
   function marked(value, entities) {
@@ -274,6 +325,7 @@
     parts.push(local);
     if (!checked) {
       var unchecked = document.createElement("span");
+      unchecked.classList.add("warn");
       unchecked.textContent = text("names.title");
       parts.push(unchecked);
     }
@@ -288,7 +340,7 @@
     var checked = data.names_checked === true;
     var isBlocked = data.outcome === "blocked";
     var matches = data.length_utf16 === snapshot.length;
-    nerUnused = !askedNer;
+    nerUnused = !askedNer && field.value === snapshot;
     counter();
     if (!matches) {
       showError(text("mismatch"));
@@ -323,8 +375,14 @@
     return error && typeof error === "object" && typeof error.code === "string" ? error.code : "";
   }
 
+  function failed(message) {
+    clearResult();
+    showError(message);
+  }
+
   function refused(response, code) {
     var status = response.status;
+    clearResult();
     if (status === 400) {
       showError(text("error.bad_body"));
     } else if (status === 408) {
@@ -354,23 +412,29 @@
   }
 
   function send(useNer) {
-    if (busy) {
+    if (busy || ended) {
       return;
     }
     var value = field.value;
     hideError();
     if (tooLong) {
+      if (tooLong.contains(document.activeElement)) {
+        field.focus();
+      }
       tooLong.hidden = true;
     }
     if (typeof value.isWellFormed === "function" && !value.isWellFormed()) {
-      showError(text("error.bad_body"));
+      failed(text("error.bad_body"));
       return;
     }
     if (encoder.encode(value).length > maxBytes) {
-      showError(fill(text("error.too_large"), {max: number(maxBytes)}));
+      failed(fill(text("error.too_large"), {max: number(maxBytes)}));
       return;
     }
     busy = true;
+    sequence += 1;
+    var mine = sequence;
+    controller = new AbortController();
     submit.setAttribute("aria-disabled", "true");
     form.setAttribute("aria-busy", "true");
     var body = {text: value, lang: root.lang};
@@ -378,6 +442,15 @@
       body.ner = false;
     }
     var csrf = document.querySelector("meta[name=antifaz-csrf]");
+
+    function current() {
+      if (mine === sequence && !ended) {
+        return true;
+      }
+      done();
+      return false;
+    }
+
     fetch("/panel/api/try", {
       method: "POST",
       credentials: "same-origin",
@@ -385,15 +458,22 @@
       redirect: "error",
       referrerPolicy: "no-referrer",
       headers: {"Content-Type": "application/json", "X-Antifaz-CSRF": csrf ? csrf.content : ""},
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     }).then(function (response) {
       activity(response.status);
+      if (!current()) {
+        return;
+      }
       if (response.status === 401) {
         done();
         document.dispatchEvent(new CustomEvent("antifaz:unauthorized"));
         return;
       }
       return response.json().then(function (data) {
+        if (!current()) {
+          return;
+        }
         done();
         if (response.status === 200) {
           shown(data, value, useNer);
@@ -401,12 +481,18 @@
           refused(response, errorCode(data));
         }
       }, function () {
+        if (!current()) {
+          return;
+        }
         done();
         refused(response, "");
       });
     }, function () {
+      if (!current()) {
+        return;
+      }
       done();
-      showError(text("error.network"));
+      failed(text("error.network"));
     });
   }
 
@@ -423,6 +509,7 @@
   });
 
   field.addEventListener("input", function () {
+    sequence += 1;
     nerUnused = false;
     exampleNote.hidden = field.value !== text("example");
     if (tooLong) {
@@ -462,8 +549,10 @@
     document.getElementById("try-mod").textContent = text("cmd");
   }
 
-  document.addEventListener("antifaz:expired", wipe);
-  window.addEventListener("pagehide", wipe);
+  document.addEventListener("antifaz:wipe", leave);
+  window.addEventListener("pagehide", leave);
 
+  submit.disabled = false;
+  example.disabled = false;
   counter();
 }());

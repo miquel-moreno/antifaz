@@ -23,7 +23,7 @@ import pytest
 from playwright.sync_api import Route
 
 from antifaz.web.i18n import load_catalogs
-from antifaz.web.sessions import IDLE_SECONDS
+from antifaz.web.sessions import IDLE_SECONDS, MAX_AGE_SECONDS
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer, ServerOptions
 from tests.browser.test_panel_try import ACTIVE_ID_JS, axe_clean, clean, log_in, text_of
@@ -32,7 +32,9 @@ pytestmark = pytest.mark.browser
 
 CATALOGS = load_catalogs()
 SESSION_PATH = "/panel/api/session"
-WARN_SECONDS = 120
+# The warning comes 2 minutes before the end the page keeps, which is 5 s (session.js's
+# safety margin, review 1) before the server's.
+WARN_SECONDS = 120 + 5
 SHOWN_JS = "() => document.getElementById('session-warning').childElementCount > 0"
 GONE_JS = "() => document.getElementById('session-warning').childElementCount === 0"
 CONTINUE = "#session-warning [data-continue]"
@@ -64,7 +66,7 @@ def _t(key: str, lang: str = "es") -> str:
 
 
 def _prefix(key: str) -> str:
-    return _t(key).split("{time}", 1)[0]
+    return _t(key).replace("{hours}", str(MAX_AGE_SECONDS // 3600)).split("{time}", 1)[0]
 
 
 def _session_requests(tab: Tab) -> int:
