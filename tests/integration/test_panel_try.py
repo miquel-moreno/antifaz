@@ -627,29 +627,37 @@ def test_ner_false_masks_without_the_ner_and_never_asks_it() -> None:
     assert CARMEN in sent  # not checked: the name would go to the AI as it is
 
 
-def test_ner_false_never_uses_the_gateway_detector() -> None:
-    """Neither the proxy's detector (app.state.detector) nor its NER span cache."""
-    from antifaz.detect.scan import scan
-    from antifaz.detect.types import Span
+def test_ner_false_never_uses_the_gateway_detector(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the NER on through the real Try path (no injected detector, so the Try has its own
+    NER detector): `"ner": false` reaches neither the proxy's detector (app.state.detector, a
+    Scanner over the NER), nor any Scanner (the Try's own one is one too), nor the NER (its
+    predictor and its pool), nor its span cache. A Try with the NER, in the same gateway, does
+    reach them: the spies really watch."""
+    from antifaz.detect.scan import Scanner
 
-    asked: list[str] = []
+    scanned: list[int] = []
+    real_scan_many = Scanner.scan_many
 
-    def spy(text: str) -> list[Span]:
-        asked.append(text)
-        return scan(text)
+    def counting(self: Scanner, texts: Any) -> Any:
+        scanned.append(len(texts))
+        return real_scan_many(self, texts)
 
+    monkeypatch.setattr(Scanner, "scan_many", counting)
     ner, predictor = fake_detector(NAMES)
     cache = ner._cache  # type: ignore[attr-defined]
-    with panel_client(HTTPS_URL, detector=spy, ner=ner) as client:
+    with panel_client(HTTPS_URL, ner=ner) as client:
+        assert isinstance(client.app.state.detector, Scanner)  # type: ignore[attr-defined]
         session_id, token = logged_in(client)
 
-        response = post_try(client, session_id, token, body(f"DNI {SENTINEL_DNI}", ner=False))
+        without = post_try(client, session_id, token, body(f"Soy {CARMEN}", ner=False))
+        assert (scanned, predictor.calls, len(cache)) == ([], 0, 0)
+        with_ner = post_try(client, session_id, token, body(f"Soy {CARMEN}"))
 
-    assert response.status_code == 200
-    assert response.json()["outcome"] == "masked"
-    assert asked == []
-    assert predictor.calls == 0
-    assert len(cache) == 0
+    assert without.status_code == with_ner.status_code == 200
+    assert without.json()["names_checked"] is False
+    assert with_ner.json()["names_checked"] is True
+    assert scanned and predictor.calls == 1  # the control: the spies see a Try with the NER
+    assert len(cache) == 0  # and even that one never touches the proxy's cache
 
 
 def test_ner_false_has_no_word_limit_only_the_byte_one() -> None:
