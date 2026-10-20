@@ -109,7 +109,8 @@ def test_an_event_holds_only_enums_integers_and_its_minute() -> None:
     for name in ("origin", "client", "outcome", "reason", "provider"):
         assert isinstance(getattr(event, name), Origin | Client | Outcome | Reason | Provider)
     assert type(event.at) is int and event.at % 60 == 0
-    with pytest.raises(AttributeError):
+    # Frozen with slots: no new attribute (Python raises TypeError or AttributeError for it).
+    with pytest.raises((AttributeError, TypeError)):
         event.extra = "free text"  # type: ignore[attr-defined]
 
 
