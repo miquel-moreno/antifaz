@@ -71,7 +71,7 @@ async def scan_text(request: Request) -> ScanResponse:
         partial(find_spans, [text], state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
-    mark_masked(request.scope, _hidden_counts(text, spans, state.policy))
+    mark_masked(request.scope, lambda: _hidden_counts(text, spans, state.policy))
     return ScanResponse(
         entities=[Entity(type=span.type, start=span.start, end=span.end) for span in spans]
     )

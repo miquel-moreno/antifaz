@@ -107,7 +107,7 @@ from typing import Any
 
 import anyio
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.requests import ClientDisconnect
 from starlette.types import Scope
 
@@ -387,11 +387,7 @@ def build_router(state: PanelState) -> APIRouter:
             raise PanelUnauthorizedError()
         if not accepts_event_stream(request.headers.getlist("accept")):
             raise NotAcceptableError()
-        return StreamingResponse(
-            streams.stream(context.session.fingerprint),
-            media_type="text/event-stream",
-            headers={"X-Accel-Buffering": "no"},
-        )
+        return streams.response(context.session.fingerprint)
 
     @router.post("/panel/api/session")
     async def session_times(request: Request) -> Response:

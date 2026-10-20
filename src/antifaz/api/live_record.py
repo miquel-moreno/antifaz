@@ -5,7 +5,8 @@ reaches it). For the five routes «En directo» shows, by exact (path, method), 
 LiveNote in scope["state"] before the route runs; the route and the error handlers note what
 they decided there (antifaz.live.LiveNote: masked, blocked with a reason, upstream_error):
 
-- the proxy routes, right after masking (mark_masked, with the vault's type counts) and when the
+- the proxy routes, right after masking (mark_masked, with the vault's type counts, counted inside
+  the guard) and when the
   provider answered an error (mark_upstream_error, also from the handler of the Upstream*
   errors); a block is noted by the AntifazBlocked handler (api/errors.py);
 - /antifaz/scan after finding the spans, and «Prueba un texto» in its route (web/routes.py).
@@ -57,11 +58,12 @@ def _safely(action: Callable[[], None]) -> None:
         logger.error("live feed failed: %s", type(error).__name__)
 
 
-def mark_masked(scope: Scope, types: Mapping[EntityType, int]) -> None:
-    """After masking: distinct hidden values per type (Vault.type_counts)."""
+def mark_masked(scope: Scope, counts: Callable[[], Mapping[EntityType, int]]) -> None:
+    """After masking: distinct hidden values per type, from `counts` (Vault.type_counts), called
+    here inside the guard so that counting itself can never raise into the proxy."""
     note = note_of(scope)
     if note is not None:
-        _safely(lambda: note.masked(types))
+        _safely(lambda: note.masked(counts()))
 
 
 def mark_blocked(scope: Scope, error: BaseException) -> None:

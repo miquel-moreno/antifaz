@@ -73,7 +73,7 @@ async def chat_completions(request: Request) -> Response:
         partial(mask_request, body, policy=state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
-    mark_masked(request.scope, vault.type_counts())  # «En directo»: types and counts only
+    mark_masked(request.scope, vault.type_counts)  # «En directo»: types and counts only
     url = settings.openai_base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"}
     keys = configured_keys(settings)

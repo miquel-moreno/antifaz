@@ -15,8 +15,11 @@ door found it live; only the server computes fingerprints). In this order:
    is checked again: extended by «Seguir» (POST /panel/api/session), the stream goes on with
    the new deadline; over, `end: expired`. At 30 minutes, `end: max_age`.
 5. A heartbeat comment every HEARTBEAT_SECONDS (25 s), only while the stream is open.
-6. Every way out (an end, the client leaving, cancellation) unsubscribes from the feed and the
-   session and frees the place.
+6. Every way out (an end, the client leaving, cancellation, a raise while subscribing)
+   unsubscribes from the feed and the session and frees the place; a stream already told to end
+   holds no place even while its last frame waits. LiveResponse closes the frames with
+   contextlib.aclosing (also when cancelled at a `yield`) and gives every send WRITE_SECONDS
+   (30 s): a client that stops reading is dropped.
 
 Watching is never a use of the session (door.NOT_A_USE): «En directo» left open does not keep a
 session alive, and it ends when the session would.
@@ -32,10 +35,14 @@ Counting the stream as a use of the session. A timer or task while no stream is 
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncGenerator, Callable, Iterable
+from contextlib import aclosing
 from dataclasses import dataclass, field
 
-from antifaz.live import LiveFeed
+from starlette.responses import StreamingResponse
+from starlette.types import Message, Send
+
+from antifaz.live import LiveFeed, Subscription
 from antifaz.web.live_response import HEARTBEAT, EndReason, end_frame, request_frame, snapshot_frame
 from antifaz.web.sessions import CloseReason, SessionStore, watch
 
@@ -43,6 +50,8 @@ MAX_STREAMS = 5
 MAX_PER_SESSION = 2
 MAX_STREAM_SECONDS = 30 * 60
 HEARTBEAT_SECONDS = 25.0
+# A send that takes longer means the client stopped reading: it is dropped (LiveResponse).
+WRITE_SECONDS = 30.0
 EVENT_STREAM = "text/event-stream"
 
 # Why a session closed -> why its streams end. An eviction (the store was full and a newer login
@@ -93,6 +102,7 @@ class LiveStreams:
         per_session: int = MAX_PER_SESSION,
         max_seconds: float = MAX_STREAM_SECONDS,
         heartbeat_seconds: float | None = HEARTBEAT_SECONDS,
+        write_seconds: float = WRITE_SECONDS,
     ) -> None:
         self._feed = feed
         self._sessions = sessions
@@ -100,6 +110,7 @@ class LiveStreams:
         self.per_session = per_session
         self.max_seconds = max_seconds
         self.heartbeat_seconds = heartbeat_seconds
+        self.write_seconds = write_seconds
         self._open: list[_Stream] = []
         self._closed = False
 
@@ -117,8 +128,11 @@ class LiveStreams:
         """A place for a new stream of `key`, or why there is none. No await: check and claim."""
         if self._closed:
             return EndReason.SHUTDOWN
-        mine = sum(1 for stream in self._open if stream.key == key)
-        if len(self._open) >= self.max_streams or mine >= self.per_session:
+        # A stream already told to end (logout, expiry...) holds no place, even while its last
+        # frame waits on a client that stopped reading.
+        live = [stream for stream in self._open if stream.end is None]
+        mine = sum(1 for stream in live if stream.key == key)
+        if len(live) >= self.max_streams or mine >= self.per_session:
             return EndReason.BUSY
         stream = _Stream(key)
         self._open.append(stream)
@@ -129,16 +143,22 @@ class LiveStreams:
         left = self._sessions.seconds_left(key)
         return None if left is None else now + max(0.0, min(left))
 
-    async def stream(self, key: str) -> AsyncIterator[bytes]:
+    def response(self, key: str) -> "LiveResponse":
+        """The SSE answer for the live session `key`."""
+        return LiveResponse(self.stream(key), self.write_seconds)
+
+    async def stream(self, key: str) -> AsyncGenerator[bytes, None]:
         """The frames of one stream for the live session `key` (a server fingerprint)."""
         claimed = self._claim(key)
         if isinstance(claimed, EndReason):
             yield end_frame(claimed)
             return
         stream = claimed
-        subscription = self._feed.subscribe(stream.wake.set)
-        unwatch = watch(self._sessions, key, lambda reason: stream.cut(_ENDS[reason]))
-        try:
+        subscription: Subscription | None = None
+        unwatch: Callable[[], None] | None = None
+        try:  # from the claim on: whatever raises, the finally frees the place
+            subscription = self._feed.subscribe(stream.wake.set)
+            unwatch = watch(self._sessions, key, lambda reason: stream.cut(_ENDS[reason]))
             loop = asyncio.get_running_loop()
             started = loop.time()
             session_end = self._session_deadline(key, started)
@@ -182,9 +202,50 @@ class LiveStreams:
                     beat = now
                     yield HEARTBEAT
         finally:
-            unwatch()
-            subscription.close()
             self._open.remove(stream)
+            if unwatch is not None:
+                unwatch()
+            if subscription is not None:
+                subscription.close()
+
+
+class LiveResponse(StreamingResponse):
+    """The SSE answer of one stream. Unlike a plain StreamingResponse:
+
+    - the frames are closed deterministically (contextlib.aclosing) however the answer ends, a
+      cancellation at a `yield` included, so the stream's place is freed at once, never at a
+      garbage collection;
+    - every send has a deadline (`write_seconds`): a client that stops reading (a full socket)
+      is dropped, without its last message; the server then closes the connection.
+    """
+
+    def __init__(self, frames: AsyncGenerator[bytes, None], write_seconds: float) -> None:
+        super().__init__(frames, media_type=EVENT_STREAM, headers={"X-Accel-Buffering": "no"})
+        self._frames = frames
+        self._write_seconds = write_seconds
+
+    async def stream_response(self, send: Send) -> None:
+        async with aclosing(self._frames) as frames:
+            try:
+                start = {"type": "http.response.start", "status": self.status_code}
+                await self._send(send, {**start, "headers": self.raw_headers})
+                async for chunk in frames:
+                    body = {"type": "http.response.body", "body": chunk, "more_body": True}
+                    await self._send(send, body)
+                await self._send(send, {"type": "http.response.body", "body": b""})
+            except _WriteTimeout:
+                return  # the client stopped reading: drop it
+
+    async def _send(self, send: Send, message: Message) -> None:
+        try:
+            async with asyncio.timeout(self._write_seconds):
+                await send(message)
+        except TimeoutError:
+            raise _WriteTimeout() from None
+
+
+class _WriteTimeout(Exception):  # noqa: N818 - reads as what happened
+    """A send passed its deadline (distinct from any TimeoutError of the frames)."""
 
 
 __all__ = [
@@ -193,6 +254,8 @@ __all__ = [
     "MAX_PER_SESSION",
     "MAX_STREAMS",
     "MAX_STREAM_SECONDS",
+    "WRITE_SECONDS",
+    "LiveResponse",
     "LiveStreams",
     "accepts_event_stream",
 ]

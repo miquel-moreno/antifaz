@@ -104,9 +104,9 @@ LOGIN_PATH = "/panel/login"
 API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
 # 11e-1: requests that pass the door and still never count as a use of the session (step 6):
-# watching «En directo» never keeps a session alive (owner decision). Exact pairs; a test keeps it
-# to this one route.
-NOT_A_USE = frozenset({("/panel/api/live", "GET")})
+# watching «En directo» never keeps a session alive (owner decision), and its HEAD (a 405) does not
+# either. Exact pairs; a test keeps it to this one route.
+NOT_A_USE = frozenset({("/panel/api/live", "GET"), ("/panel/api/live", "HEAD")})
 
 # «Prueba un texto» (11d-a): text, language and whether to use the name detector (11d-b) in, the
 # answer (web/try_response.py, without `ner`) out. The gateway builds it (api/app.py _panel):

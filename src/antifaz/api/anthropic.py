@@ -98,7 +98,7 @@ async def _prepare(request: Request, path: str, *, can_stream: bool) -> _Call:
         partial(mask_request, body, policy=state.policy, detector=state.detector),
         limiter=state.mask_limiter,
     )
-    mark_masked(request.scope, vault.type_counts())  # «En directo»: types and counts only
+    mark_masked(request.scope, vault.type_counts)  # «En directo»: types and counts only
     url = settings.anthropic_base_url.rstrip("/") + path
     return _Call(url, headers, masked, vault, configured_keys(settings), stream)
 
