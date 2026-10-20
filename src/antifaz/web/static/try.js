@@ -431,6 +431,7 @@
       failed(fill(text("error.too_large"), {max: number(maxBytes)}));
       return;
     }
+    clearResult();
     busy = true;
     sequence += 1;
     var mine = sequence;
@@ -462,12 +463,12 @@
       signal: controller.signal
     }).then(function (response) {
       activity(response.status);
-      if (!current()) {
-        return;
-      }
-      if (response.status === 401) {
+      if (response.status === 401 && !ended) {
         done();
         document.dispatchEvent(new CustomEvent("antifaz:unauthorized"));
+        return;
+      }
+      if (!current()) {
         return;
       }
       return response.json().then(function (data) {
