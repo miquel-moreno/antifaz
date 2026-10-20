@@ -79,7 +79,7 @@ RUN set -eu; \
 # tzdata), with a dpkg record for each package in /var/lib/dpkg/status.d so Syft and Grype list
 # them. No RUN here: there is no shell. Debian security fixes arrive with a new digest of this
 # base (Dependabot), not with apt-get.
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2 AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:b7e81cb1af38d9345680e68bcf564d388f96304e25222030fc8c051faf8565b3 AS runtime
 
 LABEL org.opencontainers.image.title="antifaz" \
       org.opencontainers.image.description="Privacy gateway for LLMs: pseudonymises Spanish and EU personal data before it reaches the provider." \
