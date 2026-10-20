@@ -266,6 +266,8 @@ def test_the_offer_comes_after_the_413_and_a_try_without_the_ner_says_so(
     wait_result(tab)
 
     assert json.loads(sent.value.post_data or "{}")["ner"] is False
+    # Review 1: the offer's callout goes away; the focus goes to the field, never to the body.
+    assert tab.page.evaluate(ACTIVE_ID_JS) == "try-text"
     title = _t("es", "try.names.title")
     assert not hidden(tab, "try-names")
     assert text_of(tab, "try-names-text") == _t("es", "try.names.body")

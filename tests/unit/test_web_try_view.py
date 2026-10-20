@@ -238,6 +238,31 @@ def test_every_entity_type_has_a_label(lang: str) -> None:
 
 
 @pytest.mark.parametrize("lang", LANGS)
+def test_without_a_script_the_buttons_are_off(lang: str) -> None:
+    """Privacy review of 11d-b: try.js turns them on; without it nothing can be sent at all."""
+    tree = _tree(_page(lang))
+
+    assert "disabled" in _attrs(tree, "try-submit")
+    assert "disabled" in _attrs(tree, "try-example")
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_8_hours_come_from_the_session_store(lang: str) -> None:
+    from antifaz.web.sessions import MAX_AGE_SECONDS
+
+    tree = _tree(_page(lang))
+    messages = {
+        str(e["attrs"]["data-msg"]): str(e["text"])  # type: ignore[index]
+        for e in tree.elements
+        if "session-messages" in e["ids"] and e["attrs"].get("data-msg")  # type: ignore[operator, union-attr]
+    }
+    hours = MAX_AGE_SECONDS // 3600
+
+    assert f" {hours} " in messages["max"] and "{time}" in messages["max"]
+    assert "{hours}" in CATALOGS[lang].texts["session.warn.max"]
+
+
+@pytest.mark.parametrize("lang", LANGS)
 def test_the_callouts_and_the_blocked_note_start_hidden(lang: str) -> None:
     tree = _tree(_page(lang))
     for element_id in ("try-error", "try-names", "try-result", "try-blocked", "try-example-note"):

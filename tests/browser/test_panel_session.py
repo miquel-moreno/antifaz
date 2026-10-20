@@ -209,6 +209,43 @@ def test_a_panel_answer_moves_the_inactivity_limit(tab: Tab, server: PanelServer
     tab.page.wait_for_function(SHOWN_JS, timeout=TIMEOUT_MS)
 
 
+def test_the_page_expires_a_little_before_the_server(tab: Tab, server: PanelServer) -> None:
+    """Review 1: a safety margin of a few seconds, so the page never shows a session the server
+    has already closed."""
+    _start(tab, server)
+
+    tab.page.clock.run_for((IDLE_SECONDS - 30) * 1000)
+    assert tab.page.url.endswith("/panel?lang=es")
+    tab.page.clock.run_for(28 * 1000)  # two seconds before the server's limit
+
+    tab.page.wait_for_url(f"{server.origin}/panel/login?lang=es")
+
+
+@pytest.mark.parametrize(("status", "counts"), [(500, False), (503, False), (400, True)])
+def test_only_answers_the_door_handled_move_the_limit(
+    tab: Tab, server: PanelServer, status: int, counts: bool
+) -> None:
+    """Review 1: a 2xx or a 4xx (not 401 or 403) moved the server's limit; a 5xx is not counted."""
+    _start(tab, server)
+    tab.page.route(
+        f"{tab.origin}/panel/api/try",
+        lambda route: route.fulfill(
+            status=status, headers={"Content-Type": "application/json"}, body="{}"
+        ),
+    )
+    tab.page.clock.run_for(20 * 60 * 1000)
+    tab.page.fill("#try-text", "hola")
+    tab.page.click("#try-submit")
+    tab.page.wait_for_function(
+        "() => !document.getElementById('try-error').hidden", timeout=TIMEOUT_MS
+    )
+
+    tab.page.clock.run_for(9 * 60 * 1000)  # 29 minutes after the login, 9 after the answer
+    shown = tab.page.evaluate(SHOWN_JS)
+
+    assert shown is not counts  # counted: the warning is still far; not counted: it is due
+
+
 def test_a_failed_continue_says_so_and_can_be_pressed_again(tab: Tab, server: PanelServer) -> None:
     _start(tab, server)
     tab.page.clock.run_for((IDLE_SECONDS - WARN_SECONDS + 5) * 1000)

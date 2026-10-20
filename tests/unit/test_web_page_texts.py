@@ -19,6 +19,7 @@ import pytest
 from antifaz import __version__
 from antifaz.web.assets import load_assets
 from antifaz.web.i18n import LANGUAGE_NAME, Catalog, Catalogs, load_catalogs, placeholders
+from antifaz.web.sessions import MAX_AGE_SECONDS
 from antifaz.web.templating import TEMPLATES, TEMPLATES_DIR, Pages
 
 CATALOGS = load_catalogs()
@@ -118,7 +119,7 @@ PAGES = [
 @pytest.mark.parametrize(("name", "page"), PAGES, ids=[name for name, _ in PAGES])
 def test_every_visible_text_comes_from_a_catalog(name: str, page: str) -> None:
     assert TOKEN.search(page)  # the token catalogs were really used
-    assert _not_from_a_catalog(page, (str(NER_WORDS),)) == []
+    assert _not_from_a_catalog(page, (str(NER_WORDS), str(MAX_AGE_SECONDS // 3600))) == []
 
 
 def test_the_check_sees_a_text_that_is_not_from_a_catalog() -> None:

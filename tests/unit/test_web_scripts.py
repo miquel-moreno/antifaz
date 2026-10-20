@@ -227,12 +227,40 @@ def test_the_scripts_talk_through_the_activity_event() -> None:
     assert f'addEventListener("{ACTIVITY_EVENT}"' in _source("session.js")
 
 
-def test_panel_js_reports_every_answer_but_401_and_403() -> None:
-    code, _ = _split(_source("panel.js"))
+USE = "status >= 200 && status < 500 && status !== 401 && status !== 403"
+
+
+@pytest.mark.parametrize("name", ["panel.js", "try.js"])
+def test_only_answers_the_door_handled_count_as_a_use(name: str) -> None:
+    """Review 1 of 11d-b: 2xx and 4xx but 401 and 403 move the inactivity limit; never a 5xx."""
+    code, _ = _split(_source(name))
 
     assert "function activity(status)" in code
-    assert "status !== 401 && status !== 403" in code
-    assert code.count("activity(response.status)") >= 2  # the status view and the logout
+    assert USE in code
+    assert code.count("activity(response.status)") >= (2 if name == "panel.js" else 1)
+
+
+def test_every_way_out_wipes_the_try_first() -> None:
+    """Review 1 of 11d-b: before the page leaves (logout, a 401, the expiry) the scripts say
+    "antifaz:wipe" and try.js empties the field and the result while the page is still there."""
+    assert 'addEventListener("antifaz:wipe"' in _source("try.js")
+    for name in ("panel.js", "session.js"):
+        assert 'new CustomEvent("antifaz:wipe")' in _source(name), name
+
+
+def test_try_js_drops_answers_that_are_out_of_date() -> None:
+    code, _ = _split(_source("try.js"))
+
+    assert "new AbortController()" in code
+    assert ".abort()" in code
+    assert "sequence" in code and "ended" in code
+
+
+def test_session_js_expires_a_little_before_the_server() -> None:
+    code, _ = _split(_source("session.js"))
+
+    match = re.search(r"var SAFETY_MS = (\d+);", code)
+    assert match and 1000 <= int(match.group(1)) <= 30000
 
 
 @pytest.mark.parametrize("name", SCRIPTS)

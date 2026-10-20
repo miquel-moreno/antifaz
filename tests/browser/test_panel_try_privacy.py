@@ -9,7 +9,7 @@ one POST /panel/api/try and come back only into that view:
 - never after a reload, nor after «Salir» and the back button;
 - the live region holds counts only;
 - markup typed into the field is shown as text (no element is made of it, no script runs);
-- without JavaScript the form posts nothing: no text and no query, to the fixed /panel;
+- without JavaScript «Probar» is disabled: nothing at all is sent;
 - another site, or another localhost port, can neither try a text nor extend the session.
 
 No token, cookie value or page HTML inside an assert (tests/unit/test_browser_harness_rules.py).
@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import pytest
 from playwright.sync_api import Request
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from antifaz.web.i18n import load_catalogs
 from tests.browser.harness import NewTab, Tab
@@ -142,27 +143,28 @@ def test_markup_in_the_field_is_shown_as_text(
     clean(tab, browser_name)
 
 
-def test_without_javascript_the_form_sends_no_text_and_no_query(
-    new_tab: NewTab, server: PanelServer
-) -> None:
+def test_without_javascript_nothing_is_sent_at_all(new_tab: NewTab, server: PanelServer) -> None:
+    """Privacy review of 11d-b: «Probar» is disabled in the HTML (try.js turns it on), so without
+    a script pressing it sends nothing, not even an empty form."""
     scripted = new_tab()
     log_in(scripted, server)
     tab = new_tab(javascript=False)
     scripted.share_session_with(tab)
     tab.goto("/panel?lang=es")
     assert tab.page.locator("noscript").count() == 1  # its text: tests/unit/test_web_try_view.py
+    assert tab.page.locator("#try-submit").is_disabled()
+    before = list(tab.requests)
 
     tab.page.fill("#try-text", SENTINEL_TEXT)
-    with tab.page.expect_response(lambda response: response.request.method == "POST") as answer:
-        tab.page.click("#try-submit")
+    with (
+        pytest.raises(PlaywrightTimeoutError),
+        tab.page.expect_request(lambda request: request.method == "POST", timeout=2000),
+    ):
+        tab.page.click("#try-submit", force=True)
+        tab.page.press("#try-text", "Control+Enter")
 
-    sent = answer.value.request
-    url = urlsplit(sent.url)
-    assert (url.path, url.query) == ("/panel", "")
-    body = sent.post_data or ""
-    assert body == ""
-    assert answer.value.status == 403  # not JSON: the door refuses it
-    assert all(_shows_nothing_of_it(request) for request in tab.requests)
+    assert tab.requests == before
+    assert server.door_statuses("/panel") == []
 
 
 def _attack_api(tab: Tab, server: PanelServer, path: str, body: str, form_name: str) -> None:
