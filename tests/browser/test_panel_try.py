@@ -179,6 +179,8 @@ def test_the_example_shows_the_whole_text_its_marks_markers_and_values(
     assert tab.page.evaluate(ACTIVE_ID_JS) in ("try-submit", "panel-playground")
     clean(tab, browser_name)
     axe_clean(tab)
+    tab.page.fill("#try-text", "Otro texto")  # the note is about the example only
+    assert hidden(tab, "try-example-note")
 
 
 def test_ctrl_enter_tries_the_text(tab: Tab, server: PanelServer, browser_name: str) -> None:
