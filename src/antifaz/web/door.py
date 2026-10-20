@@ -99,6 +99,8 @@ LOGIN_PATH = "/panel/login"
 # The panel's JSON routes (11c-3b): only the panel's own fetch may read them (step 2b).
 API_PREFIX = "/panel/api/"
 CONTEXT_KEY = "antifaz.panel"
+# 11e-1 (red stub): requests that never count as a use of the session.
+NOT_A_USE: frozenset[tuple[str, str]] = frozenset()
 
 # «Prueba un texto» (11d-a): text, language and whether to use the name detector (11d-b) in, the
 # answer (web/try_response.py, without `ner`) out. The gateway builds it (api/app.py _panel):

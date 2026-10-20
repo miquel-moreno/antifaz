@@ -55,6 +55,8 @@ MASK_THREADS = 8
 # is a conservative bound, so 2 windows take about 3 s, under a 5 s deadline. Measure on the
 # target machine before raising them.
 TRY_THREADS = 1
+# 11e-1: worker processes of `antifaz serve` (cli/serve.py OPTIONS; red stub).
+SERVE_WORKERS = 1
 TRY_NER_SECONDS = 5.0
 TRY_NER_MAX_CHUNKS = 2
 TRY_NER_BATCH_CHUNKS = 1
