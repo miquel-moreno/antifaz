@@ -520,6 +520,7 @@
 
   if (withoutNer) {
     withoutNer.addEventListener("click", function () {
+      field.focus();
       send(false);
     });
   }
