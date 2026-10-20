@@ -20,7 +20,7 @@
 #   (the same as on 2026-10-09) with `docker buildx imagetools inspect python:3.12-slim-trixie`.
 #   gcr.io/distroless/cc-debian13:nonroot (Debian 13.7), index digest resolved on 2026-10-16.
 #   ghcr.io/astral-sh/uv:0.13.0 (the uv version CI uses), index digest resolved on 2026-10-16.
-FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77ad87865e381d9917da55a168 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.3@sha256:bee0a2a458fd956c5df7b8b4c5fed2257b0af34866e3da7b51db0be3acb375d1 AS uv
 
 # ---- Build stage: the virtualenv with the locked runtime dependencies (no dev, no extras) ----
 FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
