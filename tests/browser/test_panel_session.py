@@ -197,6 +197,11 @@ def test_a_panel_answer_moves_the_inactivity_limit(tab: Tab, server: PanelServer
     tab.page.clock.run_for(20 * 60 * 1000)
     with tab.page.expect_response(lambda r: urlsplit(r.url).path == "/panel/api/status"):
         tab.page.click("#tab-status")
+    # The page has handled the answer (panel.js reports the use before it fills the view).
+    tab.page.wait_for_function(
+        "() => document.getElementById('status-refresh').getAttribute('aria-disabled') !== 'true'",
+        timeout=TIMEOUT_MS,
+    )
 
     tab.page.clock.run_for(9 * 60 * 1000)  # 29 minutes after the login, 9 after the last use
     assert tab.page.evaluate(GONE_JS)
