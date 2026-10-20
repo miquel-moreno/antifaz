@@ -174,6 +174,16 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Tres scripts independientes** (`panel.js`, `session.js`, `try.js`) que hablan con eventos del DOM; cada uno pide solo su URL literal.
 - Fuera del prototipo, por depender de trabajo futuro: el selector de política, los tiempos, el modelo, el 504, la cadena rota, la animación y la píldora de estado de la cabecera. El móvil usa la barra inferior real del panel.
 
+**Nota (2026-10-20, PR 11e-1).** El motor de «En directo», sin pantalla todavía (11e-2), sin cambiar la puerta salvo por la ruta nueva y una excepción (decisiones de Miquel):
+
+- **El contador** (`antifaz/live.py`, biblioteca estándar, nunca importa `antifaz.web`): `LiveFeed` (`record`, `snapshot`, `subscribe`), `MemoryLiveFeed` con el panel y `NullLiveFeed` sin él. Eventos solo de enums, enteros y la hora **redondeada al minuto**; el cliente de una lista cerrada de prefijos de `User-Agent` (nunca el valor); los tipos son valores distintos ocultados (`Vault.type_counts()`), nunca los permitidos. Los últimos 20, totales por tipo y resultado solo del proxy («Prueba un texto» y `/antifaz/scan` aparte), el tiempo en marcha y cuántos procesos hay.
+- **Solo en memoria**: ningún evento va a un log ni al disco (tests estático y de red team).
+- **Se registra en un solo sitio** (`api/live_record.py`), una vez por petición al acabar; el contador nunca rompe ni frena el proxy.
+- **`GET /panel/api/live`** (SSE, sesión por la puerta, `Accept: text/event-stream` o 406, solo `GET`): `snapshot`, `request` y `end` (`logout`, `expired`, `replaced`, `busy`, `max_age`, `shutdown`), nunca `retry:`. Esquema cerrado (`web/live_response.py`, el tercer módulo del panel con pydantic): cada hoja es un enum o un entero.
+- **Excepción de la puerta, `NOT_A_USE`**: `GET /panel/api/live` pasa la puerta como cualquier ruta con sesión, pero **nunca cuenta como un uso**: mirar «En directo» no alarga la sesión. Es la única ruta de la lista (test).
+- **Límites de conexión**: 5 por proceso (como arriba) y además **2 por sesión**; pasado eso, 200 con `end: busy`. El plazo de cada una es el menor de 30 minutos y lo que le queda a la sesión, comprobado otra vez al llegar («Seguir» la alarga). Cola de 32 por conexión; llena, un `snapshot` nuevo. Latido cada 25 s solo con conexiones abiertas; sin conexiones, ni tareas ni temporizadores. `end: shutdown` al apagar (uvicorn espera hasta 20 s a las conexiones abiertas antes de avisar al `lifespan`).
+- **Lo que la hora puede delatar**: en directo, quien mira puede atar un evento a quien sabe que mandó algo en ese momento; el minuto reduce la precisión de lo que queda en el resumen, no lo que se ve al momento. Documentado en TECNICO.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
