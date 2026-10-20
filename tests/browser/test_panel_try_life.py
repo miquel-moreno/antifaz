@@ -169,6 +169,41 @@ def _ok(names_checked: bool = True, length: int = len(TEXT)) -> str:
     )
 
 
+def test_a_dropped_answer_never_leaves_an_older_result_beside_new_text(
+    tab: Tab, server: PanelServer
+) -> None:
+    """Re-review: result A on screen, try B, type while B is in flight: B's answer is dropped,
+    and A's panes went when B started (they belonged to another text)."""
+    log_in(tab, server)
+    _result(tab)
+    answers = _hold(tab, f"{tab.origin}{TRY_PATH}")
+    tab.page.fill("#try-text", "Otro texto con ana.prueba@example.com")
+    tab.page.click("#try-submit")
+    _wait_held(tab, answers)
+
+    tab.page.type("#try-text", "x")
+    answers[0].fulfill(status=200, headers={"Content-Type": "application/json"}, body=_ok())
+    tab.page.wait_for_function(IDLE_JS, timeout=TIMEOUT_MS)
+
+    assert hidden(tab, "try-result")
+    assert text_of(tab, "try-input") == "" and text_of(tab, "try-meta") == ""
+    assert not hidden(tab, "try-empty")
+
+
+def test_a_401_still_leaves_when_the_text_changed_meanwhile(tab: Tab, server: PanelServer) -> None:
+    """Re-review: a 401 on a try made stale by typing still takes the expiry path."""
+    log_in(tab, server)
+    answers = _hold(tab, f"{tab.origin}{TRY_PATH}")
+    tab.page.fill("#try-text", TEXT)
+    tab.page.click("#try-submit")
+    _wait_held(tab, answers)
+
+    tab.page.type("#try-text", "x")
+    answers[0].fulfill(status=401, headers={"Content-Type": "application/json"}, body="{}")
+
+    tab.page.wait_for_url(LOGIN)
+
+
 def test_an_answer_for_a_text_that_changed_is_dropped(tab: Tab, server: PanelServer) -> None:
     log_in(tab, server)
     try_text(tab, "palabra " * 600)
