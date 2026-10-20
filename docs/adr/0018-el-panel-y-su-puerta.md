@@ -165,6 +165,15 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Memoria**: Python no puede borrar una cadena; el texto vive en memoria del proceso mientras dura la petición y hasta que se reutiliza (puede acabar en un volcado o en el swap). Con el NER, también viaja como JSON por una tubería al proceso del NER y vive en su memoria. Se documenta tal cual en TECNICO.
 - Aún sin contador (11e) ni textos de ejemplo (11d-b).
 
+**Nota (2026-10-20, PR 11d-b).** La pantalla de «Prueba un texto» y el aviso de caducidad de la sesión (decisiones de Miquel):
+
+- **Sin el detector de nombres, solo si el usuario lo pide**: el cuerpo admite además `"ner"`, un booleano JSON de verdad (0, `"false"`, `null`, repetido o con otra clave: el 400 de siempre). `"ner": false` enmascara con el escáner sin NER, sin el detector del proxy y sin su caché. La respuesta dice `names_checked` (verdadero solo si el NER de la prueba leyó el texto). Con el NER encendido y sin `"ner": false`, un fallo del NER (proceso muerto, plazo, cortacircuitos abierto, ocupado) es un error (bloqueado `detector_failed` o 503 `ner_busy`), nunca un resultado sin nombres. La oferta «Probar sin el detector de nombres» aparece solo tras el 413 `text_too_long_for_ner`.
+- **Un solo número para «unas N palabras»**: `TRY_NER_MAX_WORDS` en `api/app.py`, derivado de las ventanas del NER (`WINDOW_TOKENS + (TRY_NER_MAX_CHUNKS - 1) × (WINDOW_TOKENS - OVERLAP_TOKENS)`), pasado al panel en `PanelState` y pintado en la página; un test prohíbe el número en plantillas, scripts y catálogos. El contador de la página es una estimación (≈); manda el servidor.
+- **Sin recortar**: cada columna enseña el texto entero y se desplaza por dentro (región con nombre y `tabindex=0`).
+- **Sesión**: `POST /panel/api/session` (sesión + CSRF) solo alarga la inactividad, porque es un uso como cualquier otro, y nunca pasa de las 8 horas desde el login. La página recibe los segundos que quedan en dos `meta`. `static/session.js` tiene **el único temporizador** del panel: avisa unos 2 minutos antes con un aviso en el flujo de la página (`role=status`, sin mover el foco ni tapar nada), pregunta al servidor solo al pulsar «Seguir» y, al caducar, borra el texto y vuelve al login. Cerca de las 8 horas no hay «Seguir».
+- **Tres scripts independientes** (`panel.js`, `session.js`, `try.js`) que hablan con eventos del DOM; cada uno pide solo su URL literal.
+- Fuera del prototipo, por depender de trabajo futuro: el selector de política, los tiempos, el modelo, el 504, la cadena rota, la animación y la píldora de estado de la cabecera. El móvil usa la barra inferior real del panel.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
