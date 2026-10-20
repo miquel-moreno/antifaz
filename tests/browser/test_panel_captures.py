@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 58 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 98 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
@@ -16,6 +16,12 @@ stopped, an address with a user part, a provider without a key; a fixed answer).
 forced colours, Spanish light at 1280x800, the login with the token field focused
 (`es-light-1280x800-10-forced-login-focus.png`) and «Estado» (`*-11-forced-status.png`). With
 reduced motion, animations disabled, the caret hidden and after every font is ready.
+11d-b: «Prueba un texto» for both languages and themes, at 1280x800 (the whole page) and on the
+phone at 390x844 (the window, with the real bottom tab bar): empty (`*-12-try-empty.png`), the
+example's result (`*-13-try-result.png`), the offer after a text too long for the name detector
+(`*-14-try-too-long.png`), the result without it (`*-15-try-no-detector.png`) and the session
+warning (`*-16-session-warning.png`, the page's clock moved on). Invented data only: the
+catalog's example and a made-up text.
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
 throwaway. Right before every capture the token field is checked to be empty (an error shows
@@ -53,8 +59,9 @@ STATUS_IDLE_JS = """() =>
 
 @pytest.fixture
 def server_options() -> ServerOptions:
-    """Both providers with a throwaway key (never called) and a NER that says "ok"."""
-    return ServerOptions(provider_keys=True, ner_state="ok")
+    """Both providers with a throwaway key (never called) and a NER that says "ok" (11d-b: the
+    fake dictionary NER, so «Prueba un texto» really detects; invented names only)."""
+    return ServerOptions(provider_keys=True, ner_names=True)
 
 
 @pytest.fixture(autouse=True)
@@ -195,6 +202,59 @@ def test_capture_the_status_warnings(new_tab: NewTab, server: PanelServer, width
     path = _capture(tab, f"es-light-{SIZES[width]}-9-status-warnings", full_page=width >= 768)
 
     assert path.stat().st_size > 0
+
+
+TRY_IDLE_JS = "() => document.getElementById('try-submit').getAttribute('aria-disabled') !== 'true'"
+# A made-up text that needs more windows than a Try may give the name detector.
+TOO_LONG = "Hola, os escribo por la factura. " + "Texto de relleno inventado. " * 120
+
+
+def _try_and_wait(tab: Tab, shown: str) -> None:
+    with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/try")):
+        tab.page.click("#try-submit")
+    tab.page.wait_for_function(TRY_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator(shown).wait_for(state="visible")
+    tab.page.locator("#try-submit").blur()
+    tab.page.mouse.move(0, 0)
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_capture_the_try_screen(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str, width: int
+) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    stem = f"{lang}-{theme}-{SIZES[width]}"
+    full = width >= 768  # the phone's tab bar is fixed: the window only there
+    tab = new_tab(color_scheme=theme, width=width, scale=2)
+    tab.page.clock.install()
+    _log_in(tab, server, lang)
+    written = [_capture(tab, f"{stem}-12-try-empty", full_page=full)]
+
+    tab.page.click("#try-example")
+    _try_and_wait(tab, "#try-result")
+    written.append(_capture(tab, f"{stem}-13-try-result", full_page=full))
+
+    tab.page.fill("#try-text", TOO_LONG)
+    _try_and_wait(tab, "#try-too-long")
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    written.append(_capture(tab, f"{stem}-14-try-too-long", full_page=full))
+
+    with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/try")):
+        tab.page.click("#try-without-ner")
+    tab.page.wait_for_function(TRY_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#try-names").wait_for(state="visible")
+    tab.page.locator("#try-without-ner").blur()
+    tab.page.evaluate("() => document.getElementById('try-names').scrollIntoView()")
+    written.append(_capture(tab, f"{stem}-15-try-no-detector", full_page=full))
+
+    tab.page.clock.run_for((30 * 60 - 115) * 1000)  # two minutes before the inactivity limit
+    tab.page.locator("#session-warning .callout").wait_for(state="visible")
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    written.append(_capture(tab, f"{stem}-16-session-warning", full_page=full))
+
+    assert all(path.stat().st_size > 0 for path in written)
 
 
 def test_capture_under_forced_colours(new_tab: NewTab, server: PanelServer) -> None:
