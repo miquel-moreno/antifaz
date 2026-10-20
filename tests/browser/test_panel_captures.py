@@ -19,7 +19,9 @@ reduced motion, animations disabled, the caret hidden and after every font is re
 11d-b: «Prueba un texto» for both languages and themes, at 1280x800 (the whole page) and on the
 phone at 390x844 (the window, with the real bottom tab bar): empty (`*-12-try-empty.png`), the
 example's result (`*-13-try-result.png`), the offer after a text too long for the name detector
-(`*-14-try-too-long.png`), the result without it (`*-15-try-no-detector.png`) and the session
+(`*-14-try-too-long.png`), the result without it (`*-15-try-no-detector.png`: a long invented text
+per language with data hidden and an invented name far down passing in clear, the column scrolled
+to it) and the session
 warning (`*-16-session-warning.png`, the page's clock moved on). Invented data only: the
 catalog's example and a made-up text.
 
@@ -205,8 +207,29 @@ def test_capture_the_status_warnings(new_tab: NewTab, server: PanelServer, width
 
 
 TRY_IDLE_JS = "() => document.getElementById('try-submit').getAttribute('aria-disabled') !== 'true'"
-# A made-up text that needs more windows than a Try may give the name detector.
-TOO_LONG = "Hola, os escribo por la factura. " + "Texto de relleno inventado. " * 120
+# Review 1: a made-up text per language, longer than the name detector reads, with invented data
+# near the start and an invented name FAR DOWN: the try without the detector hides the data and
+# lets the name through, which the capture shows.
+TOO_LONG = {
+    "es": (
+        "Hola, os escribo por la factura de octubre. Mi DNI es 11111111H, mi correo "
+        "lola.inventada@example.org y mi teléfono 699 111 222. Haced la transferencia a "
+        "ES9121000418450200051332. "
+        + "Os cuento con calma todo lo que pasó con el pedido y con la entrega. " * 40
+        + "Un saludo, Carmen Prueba López."
+    ),
+    "en": (
+        "Hello, I am writing about the October invoice. My DNI is 11111111H, my email is "
+        "lola.inventada@example.org and my phone is +34 699 111 222. Please pay into "
+        "ES9121000418450200051332. "
+        + "Let me tell you calmly everything that happened with the order and the delivery. " * 40
+        + "Best regards, Carmen Prueba López."
+    ),
+}
+# The column «what the AI gets» scrolled to its end, where the name is.
+SENT_TO_END_JS = (
+    "() => { const e = document.getElementById('try-sent'); e.scrollTop = e.scrollHeight; }"
+)
 
 
 def _try_and_wait(tab: Tab, shown: str) -> None:
@@ -234,9 +257,15 @@ def test_capture_the_try_screen(
 
     tab.page.click("#try-example")
     _try_and_wait(tab, "#try-result")
+    scroll = (
+        "window.scrollTo(0, 0)"
+        if full
+        else "document.getElementById('try-result').scrollIntoView()"
+    )
+    tab.page.evaluate(f"() => {scroll}")
     written.append(_capture(tab, f"{stem}-13-try-result", full_page=full))
 
-    tab.page.fill("#try-text", TOO_LONG)
+    tab.page.fill("#try-text", TOO_LONG[lang])
     _try_and_wait(tab, "#try-too-long")
     tab.page.evaluate("() => window.scrollTo(0, 0)")
     written.append(_capture(tab, f"{stem}-14-try-too-long", full_page=full))
@@ -245,8 +274,12 @@ def test_capture_the_try_screen(
         tab.page.click("#try-without-ner")
     tab.page.wait_for_function(TRY_IDLE_JS, timeout=TIMEOUT_MS)
     tab.page.locator("#try-names").wait_for(state="visible")
-    tab.page.locator("#try-without-ner").blur()
-    tab.page.evaluate("() => document.getElementById('try-names').scrollIntoView()")
+    tab.page.locator("#try-text").blur()
+    tab.page.evaluate(SENT_TO_END_JS)
+    if full:  # the whole page, from the top: the window's bars stay where they belong
+        tab.page.evaluate("() => window.scrollTo(0, 0)")
+    else:  # the phone's window: the callout and, below it, the column at the name
+        tab.page.evaluate("() => document.getElementById('try-names').scrollIntoView()")
     written.append(_capture(tab, f"{stem}-15-try-no-detector", full_page=full))
 
     tab.page.clock.run_for((30 * 60 - 115) * 1000)  # two minutes before the inactivity limit
