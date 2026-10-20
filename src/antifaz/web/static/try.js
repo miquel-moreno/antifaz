@@ -424,6 +424,7 @@
 
   field.addEventListener("input", function () {
     nerUnused = false;
+    exampleNote.hidden = field.value !== text("example");
     if (tooLong) {
       tooLong.hidden = true;
     }
