@@ -119,7 +119,15 @@
     return "?lang=" + encodeURIComponent(root.lang);
   }
 
+  var leaving = false;
+  document.addEventListener("antifaz:wipe", function () {
+    leaving = true;
+  });
+
   function leave() {
+    if (leaving) {
+      return;
+    }
     document.dispatchEvent(new CustomEvent("antifaz:wipe"));
     location.replace("/panel/login" + languageQuery());
   }
@@ -149,6 +157,7 @@
     logoutButtons.forEach(function (other) {
       other.disabled = true;
     });
+    document.dispatchEvent(new CustomEvent("antifaz:logout"));
     fetch("/panel/logout", {
       method: "POST",
       credentials: "same-origin",

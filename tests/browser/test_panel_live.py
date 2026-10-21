@@ -188,6 +188,14 @@ def _no_live_request_within(tab: Tab, window_ms: int) -> bool:
     return False
 
 
+def _at_the_login(tab: Tab, server: PanelServer) -> None:
+    """The page went to the login, once, and it loaded. The stream's `end: logout` can reach
+    live.js (and so session.js) before panel.js gets the logout's answer: the page must still
+    leave only once (a second navigation would abort the first)."""
+    tab.page.wait_for_url(f"{server.origin}/panel/login*", wait_until="load")
+    tab.page.locator("#login-token").wait_for()
+
+
 def _clean(tab: Tab, browser_name: str) -> None:
     """No CSP violation, page error or foreign request, and a clean console. A closed stream
     shows up as a failed (aborted) request in some browsers: only those of the live URL."""
@@ -371,7 +379,7 @@ def test_the_page_clock_moved_on_makes_no_other_stream(
     assert _streams(tab) == [1]
 
     tab.page.clock.run_for(2 * 60 * 1000)  # past it: session.js leaves for the login
-    tab.page.wait_for_url(f"{server.origin}/panel/login*")
+    _at_the_login(tab, server)
     assert _live_requests(tab) == 1
     _eventually(lambda: server.live_streams_open() == 0, "the page left: the place is free")
 
@@ -383,7 +391,7 @@ def test_logout_ends_the_view(new_tab: NewTab, server: PanelServer, browser_name
     _open_live(tab)
 
     tab.page.click(".app-sidebar-foot [data-logout]")
-    tab.page.wait_for_url(f"{server.origin}/panel/login*")
+    _at_the_login(tab, server)
     assert _live_requests(tab) == 1
     _eventually(lambda: server.live_streams_open() == 0, "the stream ended with the session")
     _clean(tab, browser_name)
@@ -401,8 +409,8 @@ def test_a_logout_in_another_tab_sends_this_one_to_the_login(
     other.goto("/panel?lang=en")
 
     other.page.click(".app-sidebar-foot [data-logout]")
-    other.page.wait_for_url(f"{server.origin}/panel/login*")
-    tab.page.wait_for_url(f"{server.origin}/panel/login*")  # `end: logout`, then session.js
+    _at_the_login(other, server)
+    _at_the_login(tab, server)  # `end: logout`, then session.js
     assert _live_requests(tab) == 1
     _eventually(lambda: server.live_streams_open() == 0, "no stream is left")
     _clean(tab, browser_name)
@@ -540,7 +548,7 @@ def test_the_numbers_add_up_live_and_after_a_fresh_snapshot(
         "masked",
         "try",
     ]
-    assert all(re.fullmatch(r"\d{1,2}[:.]\d{2}", row["time"].strip()) for row in rows)
+    assert all(re.search(r"\d{1,2}[:.]\d{2}", row["time"]) for row in rows)  # en: 3:42 PM
     assert _text(lang, "live.client.claude_code") in rows[-2]["who"]
     assert _text(lang, "status.provider.openai") in rows[-2]["who"]
     assert _text(lang, "live.what.not_added") in rows[0]["what"]
