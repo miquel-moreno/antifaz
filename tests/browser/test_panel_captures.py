@@ -24,6 +24,13 @@ per language with data hidden and an invented name far down passing in clear, th
 to it) and the session
 warning (`*-16-session-warning.png`, the page's clock moved on). Invented data only: the
 catalog's example and a made-up text.
+11e-2: «En directo» for both languages and themes, at 1280x800 (the whole page) and 390x844 (the
+window), driven through the real engine with the invented provider of tests/browser/server.py
+(never a real one) and invented data: connected with data, a /antifaz/scan row among them
+(`*-17-live.png`; on the phone also the feed, `*-17-live-feed.png`), connecting
+(`*-18-live-connecting.png`), empty (`*-19-live-empty.png`), disconnected (`*-20-live-lost.png`),
+too many views (`*-21-live-busy.png`), several processes (`*-22-live-processes.png`) and closed
+after its time (`*-23-live-aged.png`, the 30 minutes shortened to one second).
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
 throwaway. Right before every capture the token field is checked to be empty (an error shows
@@ -37,6 +44,7 @@ import pytest
 
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import PanelServer, ServerOptions
+from tests.browser.test_panel_live import STATES, STREAMS_RECORDER, reach_state
 from tests.browser.test_panel_status import fulfill_warnings
 
 pytestmark = pytest.mark.browser
@@ -308,3 +316,48 @@ def test_capture_under_forced_colours(new_tab: NewTab, server: PanelServer) -> N
     written.append(_capture(tab, "es-light-1280x800-11-forced-status", full_page=True))
 
     assert all(path.stat().st_size > 0 for path in written)
+
+
+# 11e-2: «En directo». (capture name, state of test_panel_live.STATES, with the invented data)
+LIVE_CAPTURES = {
+    "17-live": ("data", True),
+    "18-live-connecting": ("connecting", False),
+    "19-live-empty": ("empty", False),
+    "20-live-lost": ("lost", True),
+    "21-live-busy": ("busy", False),
+    "22-live-processes": ("processes", True),
+    "23-live-aged": ("aged", True),
+}
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    ("name", "server_options"),
+    [(name, STATES[state]) for name, (state, _) in LIVE_CAPTURES.items()],
+    ids=list(LIVE_CAPTURES),
+)
+def test_capture_the_live_view(
+    new_tab: NewTab, server: PanelServer, name: str, lang: str, theme: str, width: int
+) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    state, with_data = LIVE_CAPTURES[name]
+    stem = f"{lang}-{theme}-{SIZES[width]}"
+    full = width >= 768  # the phone's tab bar is fixed: the window only there
+    tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
+    tab.context.add_init_script(STREAMS_RECORDER)
+    reach_state(tab, server, state, lang, with_data=with_data)
+    tab.page.locator("#tab-live").blur()  # no focus ring in the reference
+    tab.page.mouse.move(0, 0)
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    written = [_capture(tab, f"{stem}-{name}", full_page=full)]
+    if name == "17-live" and not full:
+        tab.page.evaluate("() => document.getElementById('live-feed-t').scrollIntoView()")
+        written.append(_capture(tab, f"{stem}-{name}-feed"))
+
+    assert all(path.stat().st_size > 0 for path in written)
+
+
+def _live_locale(lang: str) -> str:
+    return "es-ES" if lang == "es" else "en-US"

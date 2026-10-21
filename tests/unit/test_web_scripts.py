@@ -1,5 +1,5 @@
-"""The panel's scripts, read as text (issue 53, PRs 11c-2b and 11d-b): static/login.js, panel.js,
-try.js («Prueba un texto») and session.js (the expiry warning).
+"""The panel's scripts, read as text (issue 53, PRs 11c-2b, 11d-b and 11e-2): static/login.js,
+panel.js, try.js («Prueba un texto»), session.js (the expiry warning) and live.js («En directo»).
 
 11d-b: each script is a standalone IIFE that talks to the others only through DOM events (it
 never sets a global). Across every static script there is exactly ONE `setTimeout(`, in
@@ -7,6 +7,13 @@ session.js (the only timer: the next moment the warning or the expiry is due), a
 setInterval or requestAnimationFrame. Each script fetches only its own literal URL: try.js
 "/panel/api/try", session.js "/panel/api/session". panel.js and try.js tell session.js about
 every panel answer that counted as a use (not 401 or 403) with an "antifaz:activity" event.
+
+11e-2: live.js fetches nothing. It is the only script with an EventSource, opened only on the
+literal "/panel/api/live", and adds no timer. Watching never extends the session: live.js never
+says "antifaz:activity". It closes the stream on every way out (another view, the page hidden,
+pagehide, "antifaz:wipe") and on ANY `error` (close(), so the browser never retries by itself),
+and leaves through session.js ("antifaz:unauthorized") when the stream ends by a logout or an
+expiry.
 
 - In the manifest, served byte for byte as text/javascript (web/assets.py).
 - No visible text: every string literal is a selector, a key, an attribute or event name, a
@@ -31,7 +38,7 @@ import pytest
 
 from antifaz.web.assets import SERVED, STATIC_DIR
 
-SCRIPTS = ("login.js", "panel.js", "try.js", "session.js")
+SCRIPTS = ("login.js", "panel.js", "try.js", "session.js", "live.js")
 # The only script with a timer (11d-b).
 TIMER_SCRIPT = "session.js"
 # The one URL each script may fetch (11d-b for the last two).
@@ -40,7 +47,11 @@ FETCHES = {
     "panel.js": {"/panel/logout", "/panel/api/status"},
     "try.js": {"/panel/api/try"},
     "session.js": {"/panel/api/session"},
+    "live.js": set(),  # 11e-2: no fetch; its one EventSource is checked below
 }
+# 11e-2: the only script with a stream, and its one URL.
+STREAM_SCRIPT = "live.js"
+STREAM_URL = "/panel/api/live"
 ACTIVITY_EVENT = "antifaz:activity"
 # A string literal that is all lowercase ASCII without spaces is a key, a selector, an attribute,
 # an event or a relative path: never prose a person reads.
@@ -85,6 +96,11 @@ FORBIDDEN = {
     "import()": re.compile(r"\bimport\s*\("),
     "postMessage": re.compile(r"\bpostMessage\b"),
     "window.open": re.compile(r"\bopen\s*\("),
+    "WebSocket": re.compile(r"\bWebSocket\b"),
+    "sendBeacon": re.compile(r"\bsendBeacon\b"),
+    "XMLHttpRequest": re.compile(r"\bXMLHttpRequest\b"),
+    # 11e-2: only new EventSource("<one literal>"): never a built URL, never options.
+    "EventSource with a variable URL": re.compile(r'\bEventSource\b(?!\(""\))'),
     # Only fetch("<one literal>", ...) or fetch("<one literal>"): never a built URL.
     "fetch with a variable URL": re.compile(r'\bfetch\((?!\s*""\s*[,)])'),
 }
@@ -216,6 +232,62 @@ def test_each_script_is_a_standalone_iife(name: str) -> None:
 
     assert source.startswith("(function () {\n")
     assert source.rstrip().endswith("}());")
+
+
+def test_only_live_js_opens_a_stream_and_only_on_its_literal_url() -> None:
+    """11e-2: one `new EventSource("/panel/api/live")` in live.js and no EventSource anywhere
+    else."""
+    for name in SCRIPTS:
+        code, strings = _scan(_source(name))
+        opened = [literal for literal, before in strings if before.endswith("new EventSource(")]
+        if name == STREAM_SCRIPT:
+            assert opened == [STREAM_URL]
+            assert code.count("EventSource") == 1
+        else:
+            assert "EventSource" not in code, name
+
+
+def test_live_js_never_counts_as_a_use_and_leaves_through_session_js() -> None:
+    """Watching never extends the session (owner decision): no antifaz:activity, no fetch. An
+    end by logout or expiry leaves like an expired session (session.js wipes and goes)."""
+    code, strings = _scan(_source(STREAM_SCRIPT))
+
+    assert ACTIVITY_EVENT not in [literal for literal, _ in strings]
+    assert "fetch(" not in code
+    assert 'new CustomEvent("antifaz:unauthorized")' in _source(STREAM_SCRIPT)
+    assert 'addEventListener("antifaz:unauthorized"' in _source("session.js")
+
+
+@pytest.mark.parametrize(
+    "needle",
+    [
+        'addEventListener("visibilitychange"',
+        'document.visibilityState === "visible"',
+        'addEventListener("pagehide"',
+        'addEventListener("antifaz:wipe"',
+        'addEventListener("snapshot"',
+        'addEventListener("request"',
+        'addEventListener("end"',
+        'addEventListener("error"',
+        "new MutationObserver(",
+        "toLocaleString(root.lang)",
+        "Intl.DateTimeFormat(root.lang",
+    ],
+)
+def test_live_js_opens_and_closes_the_stream_by_the_rules(needle: str) -> None:
+    assert needle in _source(STREAM_SCRIPT)
+
+
+def test_live_js_closes_the_stream_first_on_any_error() -> None:
+    """Without close() the browser would reconnect by itself (the server never sends retry:):
+    the error handler closes the stream before anything else, whatever happened."""
+    source = _source(STREAM_SCRIPT)
+    handler = source[source.index('addEventListener("error", function () {') :]
+    first = handler.split("\n")[1].strip()
+
+    assert first == "disconnect();"
+    body = source[source.index("function disconnect() {") :]
+    assert ".close();" in body[: body.index("\n  }")]
 
 
 def test_the_scripts_talk_through_the_activity_event() -> None:
@@ -394,6 +466,13 @@ def test_the_check_sees_what_it_forbids() -> None:
         ('var r = new RegExp("[a-z]");', "RegExp"),
         ("window.antifaz = {};", "a global set"),
         ("globalThis.x = 1;", "a global set"),
+        # 11e-2: a stream only on one literal URL; no other way to talk to the server.
+        ("var es = new EventSource(url);", "EventSource with a variable URL"),
+        ('new EventSource("/panel/" + name);', "EventSource with a variable URL"),
+        ('new EventSource("/x", {withCredentials: true});', "EventSource with a variable URL"),
+        ('new WebSocket("/x");', "WebSocket"),
+        ('navigator.sendBeacon("/x");', "sendBeacon"),
+        ("new XMLHttpRequest();", "XMLHttpRequest"),
     ):
         found = _problems('"use strict";\n' + sneaky + "\n")
         assert any(expected in problem for problem in found), sneaky
@@ -403,6 +482,7 @@ def test_the_check_sees_what_it_forbids() -> None:
         'el.setAttribute("aria-selected", "true");',
         'el.setAttribute("aria-label", other.getAttribute("data-text-dark"));',
         'window.addEventListener("pageshow", f);',
+        'var es = new EventSource("/panel/api/live");',
         "if (window.x === 1) {}",
     ):
         assert _problems('"use strict";\n' + fine + "\n") == [], fine

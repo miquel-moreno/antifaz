@@ -132,18 +132,22 @@ def test_each_language_shows_its_own_texts(client: TestClient, code: str) -> Non
 
 
 def test_each_page_loads_exactly_its_scripts(client: TestClient) -> None:
-    """The login one; the panel three (11d-b): panel.js, session.js and try.js, in that order."""
+    """The login one; the panel four: panel.js, session.js and try.js (11d-b) and live.js
+    (11e-2), in that order."""
     login = client.get("/panel/login").text
     panel: str = _panel(client).text  # type: ignore[attr-defined]
 
-    for page, names in ((login, ["login.js"]), (panel, ["panel.js", "session.js", "try.js"])):
+    for page, names in (
+        (login, ["login.js"]),
+        (panel, ["panel.js", "session.js", "try.js", "live.js"]),
+    ):
         scripts = _all(page, "script")
         assert [script["src"] for script in scripts] == [ASSETS.urls[name] for name in names]
         assert all("defer" in script for script in scripts)
         assert page.count("<script") == len(names)
 
 
-@pytest.mark.parametrize("name", ["login.js", "panel.js", "session.js", "try.js"])
+@pytest.mark.parametrize("name", ["login.js", "panel.js", "session.js", "try.js", "live.js"])
 def test_both_scripts_are_served_byte_for_byte_as_javascript(client: TestClient, name: str) -> None:
     from antifaz.web.assets import STATIC_DIR, STATIC_PREFIX
 
