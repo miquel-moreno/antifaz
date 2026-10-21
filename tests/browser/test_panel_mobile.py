@@ -515,6 +515,15 @@ STATUS_IDLE_JS = """() =>
   document.getElementById('status-refresh').getAttribute('aria-disabled') !== 'true' &&
   document.getElementById('status-time').textContent !== ''"""
 HAS_CLASS_JS = "(name) => document.querySelector('[role=tablist]').classList.contains(name)"
+# The fade classes agree with where the bar is now. panel.js sets them on the `scroll` event,
+# which the browser fires at its next frame, not at once: right after a key the bar can already
+# be at the end while the classes still show the place it last stopped at (issue 108).
+FADE_SETTLED_JS = """() => {
+  const list = document.querySelector('[role=tablist]');
+  const max = list.scrollWidth - list.clientWidth, left = list.scrollLeft;
+  return list.classList.contains('is-more-start') === (max > 1 && left > 1) &&
+         list.classList.contains('is-more-end') === (max > 1 && left < max - 1);
+}"""
 # A hang guard only (about ten seconds of frames), never a measure of speed.
 CLASS_SET_JS = """(name) => new Promise((done) => {
   const list = document.querySelector('[role=tablist]');
@@ -618,8 +627,12 @@ def test_the_bar_fades_on_the_side_that_has_more(
         assert tab.page.evaluate(SELECTED_JS) == [expected], key
         assert tab.page.evaluate(ACTIVE_ID_JS) == expected
         assert tab.page.evaluate(SELECTED_INSIDE_JS, expected), expected  # scrolled into view
-    tab.page.wait_for_function(HAS_CLASS_JS, arg="is-more-start")
-    assert not tab.page.evaluate(FADE_JS)["end"]
+    # Not is-more-start alone: a stop half-way already set it (with is-more-end) before the
+    # last key, so it proves nothing about the end. Wait until the classes match the position.
+    tab.page.wait_for_function(FADE_SETTLED_JS, timeout=TIMEOUT_MS)
+    fade = tab.page.evaluate(FADE_JS)
+    assert fade["left"] >= fade["max"] - 1, fade  # the last tab took the bar to its end
+    assert fade["start"] and not fade["end"], fade
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
