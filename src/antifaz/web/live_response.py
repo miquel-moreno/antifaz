@@ -3,13 +3,14 @@
 Three events, each one SSE frame `event: <name>` + one `data:` line of JSON + a blank line:
 
 - `snapshot`: the feed now (antifaz.live.LiveSnapshot): the recent events newest first, the
-  proxy's hidden values per type and outcomes, `checks` (Try and scan), the uptime in seconds
-  and how many worker processes the server runs (more than one: «datos de este proceso»).
+  proxy's hidden values per type, outcomes and (11e-2) blocks per reason, `tries` and `scans`
+  (apart from the totals), the uptime in seconds and how many worker processes the server runs
+  (more than one: «datos de este proceso»).
 - `request`: one LiveEvent.
 - `end`: why the stream ends (EndReason); the stream closes right after.
 
-Every JSON leaf is an enum value or an integer: types and outcomes go as lists of
-{"type"/"outcome", "count"}, never as free-text keys. Every model refuses extra fields, is
+Every JSON leaf is an enum value or an integer: types, outcomes and blocks go as lists of
+{"type"/"outcome"/"reason", "count"}, never as free-text keys. Every model refuses extra fields, is
 strict and frozen, and hides its input in validation errors. There is never a `retry:` field
 (the browser does not reconnect by itself) nor an `id:`.
 
@@ -48,6 +49,11 @@ class OutcomeCount(_Closed):
     count: StrictInt = Field(ge=0)
 
 
+class ReasonCount(_Closed):
+    reason: Reason
+    count: StrictInt = Field(ge=1)
+
+
 class RequestEvent(_Closed):
     origin: Origin
     client: Client
@@ -62,7 +68,9 @@ class SnapshotEvent(_Closed):
     recent: list[RequestEvent] = Field(max_length=RECENT)
     hidden: list[TypeCount]
     outcomes: list[OutcomeCount]
-    checks: StrictInt = Field(ge=0)
+    blocks: list[ReasonCount]
+    tries: StrictInt = Field(ge=0)
+    scans: StrictInt = Field(ge=0)
     uptime_seconds: StrictInt = Field(ge=0)
     processes: StrictInt = Field(ge=1)
 
@@ -94,7 +102,9 @@ def snapshot_frame(snapshot: LiveSnapshot) -> bytes:
         recent=[_request(event) for event in snapshot.recent],
         hidden=[TypeCount(type=entity, count=count) for entity, count in snapshot.hidden.items()],
         outcomes=[OutcomeCount(outcome=o, count=count) for o, count in snapshot.outcomes.items()],
-        checks=snapshot.checks,
+        blocks=[ReasonCount(reason=r, count=count) for r, count in snapshot.blocks.items()],
+        tries=snapshot.tries,
+        scans=snapshot.scans,
         uptime_seconds=snapshot.uptime_seconds,
         processes=snapshot.processes,
     )

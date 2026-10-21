@@ -6,11 +6,12 @@ itself), the outcome, why it was blocked, the provider and, per entity type, how
 values were hidden (allowed types, such as ES_CIF, are never counted). There is no field where
 a text could go, and the constructor refuses anything that is not exactly its type.
 
-- MemoryLiveFeed keeps the last RECENT (20) events, the totals of hidden values per type and of
-  outcomes for the proxy routes, and apart (`checks`) how many «Prueba un texto» and
-  /antifaz/scan requests it saw: those are in the feed but never in the «hidden data» totals
-  (nothing was sent anywhere). Also the uptime and how many worker processes the server runs,
-  so the panel can say «datos de este proceso»: each process counts only its own requests.
+- MemoryLiveFeed keeps the last RECENT (20) events, the totals of hidden values per type, of
+  outcomes and (11e-2) of blocks by reason for the proxy routes, and apart (`tries`, `scans`)
+  how many «Prueba un texto» and /antifaz/scan requests it saw: those are in the feed but never
+  in the «hidden data» totals (nothing was sent anywhere). Also the uptime and how many worker
+  processes the server runs, so the panel can say «datos de este proceso»: each process counts
+  only its own requests.
 - Subscribers (the panel's SSE streams, web/live_stream.py) get a queue of SUBSCRIBER_QUEUE
   (32) events. When it is full, it is emptied and marked: the stream sends a fresh snapshot
   instead of an ever-growing buffer.
@@ -192,13 +193,17 @@ class LiveEvent:
 
 @dataclass(frozen=True, slots=True)
 class LiveSnapshot:
-    """The feed now: the recent events (newest first), the proxy's totals, the Try and scan
-    count, whole seconds since the feed started and how many processes the server runs."""
+    """The feed now: the recent events (newest first), the proxy's totals (hidden values per
+    type, every outcome, blocks per reason), the Try and the scan counts, whole seconds since the
+    feed started and how many processes the server runs. The blocks add up to the blocked
+    outcome; `hidden` and `blocks` hold only counts of 1 or more, in their enum's order."""
 
     recent: tuple[LiveEvent, ...]
     hidden: Mapping[EntityType, int]
     outcomes: Mapping[Outcome, int]
-    checks: int
+    blocks: Mapping[Reason, int]
+    tries: int
+    scans: int
     uptime_seconds: int
     processes: int
 
@@ -279,7 +284,9 @@ class MemoryLiveFeed:
         self._recent: deque[LiveEvent] = deque(maxlen=RECENT)
         self._hidden: dict[EntityType, int] = {}
         self._outcomes: dict[Outcome, int] = dict.fromkeys(Outcome, 0)
-        self._checks = 0
+        self._blocks: dict[Reason, int] = dict.fromkeys(Reason, 0)
+        self._tries = 0
+        self._scans = 0
         self._subscribers: list[Subscription] = []
 
     def record(self, event: LiveEvent) -> None:
@@ -288,10 +295,14 @@ class MemoryLiveFeed:
         self._recent.append(event)
         if event.origin in PROXY_ORIGINS:
             self._outcomes[event.outcome] += 1
+            if event.outcome is Outcome.BLOCKED:
+                self._blocks[event.reason] += 1
             for entity, count in event.types.items():
                 self._hidden[entity] = self._hidden.get(entity, 0) + count
+        elif event.origin is Origin.TRY:
+            self._tries += 1
         else:
-            self._checks += 1
+            self._scans += 1
         for subscription in list(self._subscribers):
             try:
                 subscription._push(event)
@@ -303,7 +314,9 @@ class MemoryLiveFeed:
             recent=tuple(reversed(self._recent)),
             hidden=_counts(self._hidden),
             outcomes=MappingProxyType(dict(self._outcomes)),
-            checks=self._checks,
+            blocks=MappingProxyType({r: n for r, n in self._blocks.items() if n}),
+            tries=self._tries,
+            scans=self._scans,
             uptime_seconds=max(0, int(self._clock() - self._started)),
             processes=self._processes,
         )
@@ -330,7 +343,9 @@ class NullLiveFeed:
             recent=(),
             hidden=MappingProxyType({}),
             outcomes=MappingProxyType(dict.fromkeys(Outcome, 0)),
-            checks=0,
+            blocks=MappingProxyType({}),
+            tries=0,
+            scans=0,
             uptime_seconds=0,
             processes=self._processes,
         )
