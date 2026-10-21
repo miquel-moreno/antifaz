@@ -278,6 +278,19 @@ def test_live_js_opens_and_closes_the_stream_by_the_rules(needle: str) -> None:
     assert needle in _source(STREAM_SCRIPT)
 
 
+def test_logout_closes_the_stream_before_it_asks_the_server() -> None:
+    """11e-2: «Salir» says "antifaz:logout" before its fetch, and live.js closes the stream on
+    it: the server's `end: logout` never races the logout's own answer (Firefox aborted the
+    pending POST when the stream's end navigated first)."""
+    panel = _split(_source("panel.js"))[0]
+    said = _source("panel.js").index('new CustomEvent("antifaz:logout")')
+    assert said < _source("panel.js").index('fetch("/panel/logout"')
+    assert "function logout(button)" in panel
+    live = _source(STREAM_SCRIPT)
+    handler = live[live.index('addEventListener("antifaz:logout", function () {') :]
+    assert handler.split("\n")[1].strip() == "disconnect();"
+
+
 def test_live_js_closes_the_stream_first_on_any_error() -> None:
     """Without close() the browser would reconnect by itself (the server never sends retry:):
     the error handler closes the stream before anything else, whatever happened."""
