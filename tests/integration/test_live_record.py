@@ -7,7 +7,8 @@ the gateway keeps a MemoryLiveFeed in app.state.live_feed; with it off, a NullLi
 - Proxy routes: masked (distinct hidden values per type; allowed types such as ES_CIF never
   counted), no_data, blocked with its reason, upstream_error (the provider's 4xx/5xx, a
   timeout, a lost connection, a non-JSON answer).
-- «Prueba un texto» and /antifaz/scan appear in the feed but only add to `checks`.
+- «Prueba un texto» and /antifaz/scan appear in the feed but only add to `tries` and `scans`
+  (11e-2). A proxy block adds to `blocks`, by reason.
 - A request that never reached a decision (no key, bad JSON, too large) records nothing.
 - The counter never breaks the proxy: a feed that raises leaves the answer as it was, and the
   log line names only the error's type.
@@ -113,7 +114,7 @@ def test_an_openai_request_records_its_distinct_hidden_values_per_type(client: T
     snapshot = _feed(client).snapshot()
     assert dict(snapshot.hidden) == {EntityType.ES_DNI: 2, EntityType.EMAIL: 1}
     assert snapshot.outcomes[Outcome.MASKED] == 1
-    assert snapshot.checks == 0
+    assert (snapshot.tries, snapshot.scans, dict(snapshot.blocks)) == (0, 0, {})
 
 
 def test_a_request_with_only_allowed_data_is_no_data(client: TestClient) -> None:
@@ -165,7 +166,9 @@ def test_an_attachment_is_blocked_with_its_reason(client: TestClient) -> None:
         Reason.ATTACHMENT,
         {},
     )
-    assert _feed(client).snapshot().outcomes[Outcome.BLOCKED] == 1
+    snapshot = _feed(client).snapshot()
+    assert snapshot.outcomes[Outcome.BLOCKED] == 1
+    assert dict(snapshot.blocks) == {Reason.ATTACHMENT: 1}  # 11e-2: blocks by reason
 
 
 def test_a_value_left_in_clear_is_stopped_by_the_guard_and_recorded(client: TestClient) -> None:
@@ -211,6 +214,10 @@ def test_an_unmaskable_field_and_a_too_deep_body_are_recorded(client: TestClient
     unmaskable, too_deep = _events(client)
     assert (unmaskable.outcome, unmaskable.reason) == (Outcome.BLOCKED, Reason.UNMASKABLE_FIELD)
     assert (too_deep.outcome, too_deep.reason) == (Outcome.BLOCKED, Reason.TOO_DEEP)
+    assert dict(_feed(client).snapshot().blocks) == {
+        Reason.UNMASKABLE_FIELD: 1,
+        Reason.TOO_DEEP: 1,
+    }
 
 
 @pytest.mark.parametrize(
@@ -282,7 +289,7 @@ def test_scan_is_in_the_feed_but_not_in_the_hidden_totals(client: TestClient) ->
     snapshot = _feed(client).snapshot()
     assert dict(snapshot.hidden) == {}
     assert dict(snapshot.outcomes) == dict.fromkeys(Outcome, 0)
-    assert snapshot.checks == 1
+    assert (snapshot.scans, snapshot.tries) == (1, 0)
 
 
 def test_a_failing_detector_on_scan_is_blocked_and_still_not_a_total() -> None:
@@ -299,7 +306,7 @@ def test_a_failing_detector_on_scan_is_blocked_and_still_not_a_total() -> None:
         Reason.DETECTOR_FAILED,
     )
     assert snapshot.outcomes[Outcome.BLOCKED] == 0
-    assert snapshot.checks == 1
+    assert (snapshot.scans, snapshot.tries, dict(snapshot.blocks)) == (1, 0, {})
 
 
 def _try(client: TestClient, text: str) -> httpx.Response:
@@ -321,7 +328,7 @@ def test_a_try_is_in_the_feed_but_not_in_the_hidden_totals(client: TestClient) -
     assert dict(event.types) == {EntityType.ES_DNI: 2}
     snapshot = _feed(client).snapshot()
     assert dict(snapshot.hidden) == {}
-    assert snapshot.checks == 1
+    assert (snapshot.tries, snapshot.scans) == (1, 0)
 
 
 def test_a_blocked_try_is_recorded_with_its_reason() -> None:
