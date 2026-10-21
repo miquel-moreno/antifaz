@@ -92,6 +92,7 @@ class ServerOptions:
     fake_provider: bool = False
     processes: int = 1  # what the live snapshot says (more than one: «datos de este proceso»)
     live_max_streams: int | None = None  # None: the gateway's own limit
+    live_per_session: int | None = None  # None: the gateway's own limit
     live_max_seconds: float | None = None  # None: the gateway's 30 minutes
 
 
@@ -277,6 +278,8 @@ class PanelServer:
         streams = app.state.live_streams
         if options.live_max_streams is not None:
             streams.max_streams = options.live_max_streams
+        if options.live_per_session is not None:
+            streams.per_session = options.live_per_session
         if options.live_max_seconds is not None:
             streams.max_seconds = options.live_max_seconds
         self._cutter = _LiveCutter(app)

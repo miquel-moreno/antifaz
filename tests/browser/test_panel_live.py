@@ -219,7 +219,7 @@ def drive_feed(server: PanelServer) -> None:
     for _ in range(150):
         deep = [deep]
     assert (
-        server.proxy_openai(f"DNI {SENTINEL_DNI}, ana@example.com", user_agent="claude-cli/2.0")
+        server.proxy_anthropic(f"DNI {SENTINEL_DNI}, ana@example.com", user_agent="claude-cli/2.0")
         == 200
     )
     assert (
@@ -456,12 +456,26 @@ def test_empty_shows_zeros_and_the_empty_feed(
     _clean(tab, browser_name)
 
 
-@pytest.mark.parametrize("server_options", [ServerOptions(fake_provider=True, live_max_streams=0)])
+def _watch_in_other_tabs(new_tab: NewTab, tab: Tab, count: int) -> list[Tab]:
+    """`count` more tabs of the same session, each with «En directo» connected."""
+    others = []
+    for _ in range(count):
+        other = _tab(new_tab, "es")
+        tab.share_session_with(other)
+        other.goto("/panel?lang=es")
+        _open_live(other)
+        others.append(other)
+    return others
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
 def test_busy_says_why_and_shows_no_figures(
     new_tab: NewTab, server: PanelServer, browser_name: str
 ) -> None:
+    """Busy for real: two other tabs of the session already watch (the gateway's own limits)."""
     tab = _tab(new_tab, "es")
     log_in(tab, server, "es")
+    _watch_in_other_tabs(new_tab, tab, MAX_PER_SESSION)
     _open_live(tab, "off")
 
     assert _shown(tab, "live-busy")
@@ -472,6 +486,20 @@ def test_busy_says_why_and_shows_no_figures(
     assert _streams(tab) == [2]
     assert _no_live_request_within(tab, NO_RETRY_WINDOW_MS)
     _clean(tab, browser_name)
+
+
+@pytest.mark.parametrize(
+    "server_options", [ServerOptions(fake_provider=True, live_per_session=1, live_max_streams=3)]
+)
+def test_busy_names_the_limits_really_applied(new_tab: NewTab, server: PanelServer) -> None:
+    """Review 2: the text says the limits the gateway applies, not the module's defaults."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    _watch_in_other_tabs(new_tab, tab, 1)  # the one place of the session is taken
+    _open_live(tab, "off")
+
+    busy = CATALOGS["en"].text("live.busy.body", per_session=1, total=3)
+    assert busy in _content(tab, "live-busy")
 
 
 @pytest.mark.parametrize(
@@ -552,7 +580,9 @@ def test_the_numbers_add_up_live_and_after_a_fresh_snapshot(
     clock = re.compile(r"\d{1,2}[:.]\d{2}(\s?[AP]M)?")  # en-US: 3:42 PM
     assert all(clock.fullmatch(row["time"].strip()) for row in rows)
     assert _text(lang, "live.client.claude_code") in rows[-2]["who"]
-    assert _text(lang, "status.provider.openai") in rows[-2]["who"]
+    assert _text(lang, "status.provider.anthropic") in rows[-2]["who"]  # review 2
+    assert _text(lang, "live.client.codex") in rows[-5]["who"]
+    assert _text(lang, "status.provider.openai") in rows[-5]["who"]
     assert _text(lang, "live.what.not_added") in rows[0]["what"]
     assert _text(lang, "live.tag.scan") in rows[0]["tag"]
     assert _text(lang, "live.tag.try") in rows[-1]["tag"]
@@ -646,10 +676,17 @@ def test_the_sentinel_never_reaches_the_view_the_title_or_the_console(
 
 
 def reach_state(
-    tab: Tab, server: PanelServer, state: str, lang: str, *, with_data: bool = False
+    tab: Tab,
+    server: PanelServer,
+    state: str,
+    lang: str,
+    *,
+    with_data: bool = False,
+    new_tab: NewTab | None = None,
 ) -> None:
     """Log in and bring «En directo» to `state` (a key of STATES); `with_data`: the scenario
-    of the numbers first (the data state always has it)."""
+    of the numbers first (the data state always has it). Busy needs `new_tab`: two other
+    tabs of the session take its places first."""
     log_in(tab, server, lang)
     if state == "connecting":
         tab.page.route(f"{tab.origin}{LIVE_PATH}", lambda route: None)
@@ -660,6 +697,8 @@ def reach_state(
     if state == "data" or with_data:
         drive_feed(server)
     if state == "busy":
+        assert new_tab is not None, "busy needs new_tab"
+        _watch_in_other_tabs(new_tab, tab, MAX_PER_SESSION)
         _open_live(tab, "off")
         return
     if state == "aged":
@@ -679,7 +718,7 @@ STATES = {
     "empty": FAKE,
     "connecting": FAKE,
     "lost": FAKE,
-    "busy": ServerOptions(fake_provider=True, live_max_streams=0),
+    "busy": FAKE,  # filled for real by other tabs (reach_state)
     "aged": ServerOptions(fake_provider=True, live_max_seconds=1.0),
     "processes": ServerOptions(fake_provider=True, processes=3),
 }
@@ -692,7 +731,7 @@ def test_axe_finds_nothing_in_every_state(
     new_tab: NewTab, server: PanelServer, state: str, lang: str, theme: str
 ) -> None:
     tab = _tab(new_tab, lang, color_scheme=theme)
-    reach_state(tab, server, state, lang)
+    reach_state(tab, server, state, lang, new_tab=new_tab)
     tab.page.evaluate(SETTLE_JS)
 
     report = tab.axe()

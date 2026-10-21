@@ -227,6 +227,32 @@ def test_the_busy_text_says_both_limits_from_the_server(lang: str) -> None:
 
 
 @pytest.mark.parametrize("lang", LANGS)
+def test_a_render_without_the_limits_shows_the_servers_own(lang: str) -> None:
+    """Review 2: the limits never default to 0; without them the page says the gateway's."""
+    tree = _Tree()
+    tree.feed(PAGES.panel(lang, "csrf-x"))
+    (busy,) = [e for e in tree.elements if e["attrs"].get("id") == "live-busy"]  # type: ignore[union-attr]
+    expected = CATALOGS[lang].text("live.busy.body", per_session=MAX_PER_SESSION, total=MAX_STREAMS)
+    assert expected in _text(busy)
+    assert "0" not in _text(busy)
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_uptime_note_is_inside_the_hidden_data_card(lang: str) -> None:
+    """Review 2: as in the approved mockup, «En este proceso, en marcha hace…» belongs to the
+    card of the hidden data."""
+    tree = _tree(lang)
+    note = _by_id(tree, "live-uptime")
+    assert _attrs(note)["class"] == "stat-sub"
+    (card,) = [
+        e
+        for e in tree
+        if e["tag"] == "article" and _attrs(e).get("aria-labelledby") == "live-hidden-t"
+    ]
+    assert tree.index(card) < tree.index(note) < tree.index(_by_id(tree, "live-blocks-t"))
+
+
+@pytest.mark.parametrize("lang", LANGS)
 def test_the_lost_callout_has_a_text_for_when_no_figure_ever_came(lang: str) -> None:
     """Review 1: lost before the first snapshot, there are no figures «from before»: live.js
     shows the other text."""

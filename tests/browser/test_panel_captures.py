@@ -347,7 +347,7 @@ def test_capture_the_live_view(
     full = width >= 768  # the phone's tab bar is fixed: the window only there
     tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
     tab.context.add_init_script(STREAMS_RECORDER)
-    reach_state(tab, server, state, lang, with_data=with_data)
+    reach_state(tab, server, state, lang, with_data=with_data, new_tab=new_tab)
     tab.page.locator("#tab-live").blur()  # no focus ring in the reference
     tab.page.mouse.move(0, 0)
     tab.page.evaluate("() => window.scrollTo(0, 0)")
