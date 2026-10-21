@@ -330,7 +330,9 @@ def test_the_expiry_and_a_late_401_leave_for_the_login_only_once(
 
         tab.page.clock.run_for((IDLE_SECONDS + 1) * 1000)  # session.js leaves: login held
         _until(lambda: len(held_login) == 1, tab, "the expiry asked for the login")
-        with tab.page.expect_response(lambda r: urlsplit(r.url).path == "/panel/api/status"):
+        # Firefox cancels the page's pending fetch when the navigation starts (so the late 401
+        # never reaches panel.js there); Chromium and WebKit deliver it.
+        with contextlib.suppress(PlaywrightError):
             held_status.pop().fulfill(
                 status=401,
                 headers={"Content-Type": "application/json"},
