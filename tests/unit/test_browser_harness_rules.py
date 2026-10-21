@@ -343,6 +343,20 @@ def test_any_other_failure_is_still_reported(line: str) -> None:
     assert unexpected_failures([line], ORIGIN) == [line]
 
 
+@pytest.mark.parametrize(
+    "failure", ["net::ERR_INCOMPLETE_CHUNKED_ENCODING", "NS_ERROR_NET_PARTIAL_TRANSFER"]
+)
+def test_a_stream_cut_on_purpose_may_fail_only_as_often_as_the_test_cut_it(failure: str) -> None:
+    """Chromium and Firefox report the stream the test gateway broke mid-way (WebKit reports
+    nothing): allowed only with `cut`, at most that many times, only for the live GET."""
+    line = f"GET {LIVE_URL}: {failure}"
+    assert unexpected_failures([line], ORIGIN, cut=1) == []
+    assert unexpected_failures([line], ORIGIN) == [line]
+    assert unexpected_failures([line, line], ORIGIN, cut=1) == [line]
+    status = f"GET {ORIGIN}/panel/api/status: {failure}"
+    assert unexpected_failures([status], ORIGIN, cut=1) == [status]
+
+
 CUT_LINE = "[error] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING"
 
 

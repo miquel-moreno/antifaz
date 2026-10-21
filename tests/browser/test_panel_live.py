@@ -209,7 +209,7 @@ def _clean(tab: Tab, browser_name: str, *, cut: int = 0) -> None:
     assert tab.errors == []
     assert tab.blocked == []
     assert tab.foreign_requests() == []
-    assert tab.unexpected_failures() == []
+    assert tab.unexpected_failures(cut=cut) == []
 
 
 def drive_feed(server: PanelServer) -> None:
@@ -800,12 +800,13 @@ def test_a_small_count_still_shows_a_bar(new_tab: NewTab, server: PanelServer) -
 def test_the_uptime_numbers_follow_the_language(
     new_tab: NewTab, server: PanelServer, lang: str
 ) -> None:
-    """Review 1 (L6): 1234 days read «1.234» in Spanish and «1,234» in English."""
+    """Review 1 (L6): 12345 days read «12.345» in Spanish and «12,345» in English (Spanish
+    groups only from five digits)."""
     tab = _tab(new_tab, lang)
     log_in(tab, server, lang)
-    _show_made_up(tab, _snapshot(uptime_seconds=1234 * 86400 + 3600))
+    _show_made_up(tab, _snapshot(uptime_seconds=12345 * 86400 + 3600))
 
-    assert ("1.234" if lang == "es" else "1,234") in _content(tab, "live-uptime")
+    assert ("12.345" if lang == "es" else "12,345") in _content(tab, "live-uptime")
 
 
 @pytest.mark.parametrize("server_options", [FAKE])
