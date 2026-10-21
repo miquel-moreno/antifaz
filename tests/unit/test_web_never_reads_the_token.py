@@ -41,6 +41,7 @@ PURE = (
     "i18n.py",
     "status.py",
     "try_limit.py",
+    "live_limits.py",  # 11e-2
 )
 # The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
 # FastAPI, no other project module).

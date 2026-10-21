@@ -30,6 +30,7 @@ import jinja2
 
 from antifaz.web.assets import Assets
 from antifaz.web.i18n import Catalogs, load_catalogs
+from antifaz.web.live_limits import MAX_PER_SESSION, MAX_STREAMS
 from antifaz.web.sessions import MAX_AGE_SECONDS
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -112,8 +113,8 @@ class Pages:
         max_seconds: int = 0,
         ner_words: int | None = None,
         max_text_bytes: int = 0,
-        live_per_session: int = 0,
-        live_total: int = 0,
+        live_per_session: int = MAX_PER_SESSION,
+        live_total: int = MAX_STREAMS,
     ) -> str:
         """The panel in `lang` for a live session: its CSRF token in the meta, and nowhere else;
         the seconds it has left (11d-b, session.js), the words a Try may give the name detector

@@ -43,11 +43,10 @@ from starlette.responses import StreamingResponse
 from starlette.types import Message, Send
 
 from antifaz.live import LiveFeed, Subscription
+from antifaz.web.live_limits import MAX_PER_SESSION, MAX_STREAMS
 from antifaz.web.live_response import HEARTBEAT, EndReason, end_frame, request_frame, snapshot_frame
 from antifaz.web.sessions import CloseReason, SessionStore, watch
 
-MAX_STREAMS = 5
-MAX_PER_SESSION = 2
 MAX_STREAM_SECONDS = 30 * 60
 HEARTBEAT_SECONDS = 25.0
 # A send that takes longer means the client stopped reading: it is dropped (LiveResponse).

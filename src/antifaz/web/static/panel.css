@@ -381,7 +381,7 @@ mark.pii[data-text-type]::after{content:attr(data-text-type);display:inline-bloc
 .live-pill.is-connecting .dot{color:var(--color-warn)}
 .live-pill.is-off .dot{color:var(--color-danger)}
 .live-data{display:flex;flex-direction:column;gap:22px;min-width:0}
-.live-note{font-size:var(--text-sm);color:var(--color-text-muted);padding:0 4px;margin-top:-12px}
+.stat.s-prot>#live-uptime{margin-top:12px}
 .bars li>span:first-child{min-width:0;overflow-wrap:anywhere}
 /* A bar's fill: live.js sets data-v to 0..20, twentieths of the largest count (no inline style) */
 .meter>i[data-v="1"]{--v:.05}.meter>i[data-v="2"]{--v:.1}.meter>i[data-v="3"]{--v:.15}.meter>i[data-v="4"]{--v:.2}.meter>i[data-v="5"]{--v:.25}
