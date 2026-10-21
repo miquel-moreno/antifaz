@@ -7,6 +7,8 @@
   var pillText = document.getElementById("live-pill-text");
   var reconnect = document.getElementById("live-reconnect");
   var lost = document.getElementById("live-lost");
+  var lostFigures = document.getElementById("live-lost-figures");
+  var lostNone = document.getElementById("live-lost-none");
   var busy = document.getElementById("live-busy");
   var aged = document.getElementById("live-aged");
   var processesBox = document.getElementById("live-processes");
@@ -27,6 +29,7 @@
   var messages = document.getElementById("live-messages");
   var RECENT = 20;
   var STEPS = 20;
+  var LATEST = 8640000000000;
   var ORIGINS = ["openai_chat", "anthropic_messages", "count_tokens", "scan", "try"];
   var PROXY = ["openai_chat", "anthropic_messages", "count_tokens"];
   var OUTCOMES = ["masked", "no_data", "blocked", "upstream_error"];
@@ -127,7 +130,7 @@
       outcome: known(raw.outcome, OUTCOMES) ? raw.outcome : "",
       reason: known(raw.reason, REASONS) ? raw.reason : "none",
       provider: provider,
-      at: whole(raw.at, 0),
+      at: whole(raw.at, 0) !== null && raw.at <= LATEST ? raw.at : null,
       types: addTypes(Object.create(null), raw.types)
     };
   }
@@ -203,13 +206,13 @@
     var hours = Math.floor(minutes / 60);
     var days = Math.floor(hours / 24);
     if (days > 0) {
-      return fill(text("uptime.days"), {days: String(days), hours: String(hours % 24)});
+      return fill(text("uptime.days"), {days: number(days), hours: number(hours % 24)});
     }
     if (hours > 0) {
-      return fill(text("uptime.hours"), {hours: String(hours), minutes: String(minutes % 60)});
+      return fill(text("uptime.hours"), {hours: number(hours), minutes: number(minutes % 60)});
     }
     if (minutes > 0) {
-      return fill(text("uptime.minutes"), {minutes: String(minutes)});
+      return fill(text("uptime.minutes"), {minutes: number(minutes)});
     }
     return text("uptime.less");
   }
@@ -291,7 +294,7 @@
     var meter = el("span", "meter");
     meter.setAttribute("aria-hidden", "true");
     var fillBar = el("i");
-    fillBar.setAttribute("data-v", String(Math.round(count / largest * STEPS)));
+    fillBar.setAttribute("data-v", String(Math.max(1, Math.round(count / largest * STEPS))));
     meter.append(fillBar);
     var amount = el("span", "n");
     amount.textContent = number(count);
@@ -375,6 +378,8 @@
   function stopped(which) {
     setPill("off");
     callout(which);
+    lostFigures.hidden = !figures;
+    lostNone.hidden = !!figures;
     reconnect.hidden = false;
     data.classList.add("is-stale");
     if (which === "busy") {
@@ -473,6 +478,9 @@
       }
     });
     stream.addEventListener("error", function () {
+      if (source !== stream) {
+        return;
+      }
       disconnect();
       if (!gone) {
         stopped("lost");

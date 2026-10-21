@@ -104,13 +104,22 @@ def _not_from_a_catalog(page: str, server_values: tuple[str, ...] = ()) -> list[
 
 
 NER_WORDS = 4321
+# Distinct made-up limits, so each one is seen to come from the server.
+LIVE_LIMITS = {"live_per_session": 7, "live_total": 9}
 PAGES = [
     *((f"login-{code}", TOKEN_PAGES.login(code)) for code in CATALOGS.codes),
-    *((f"panel-{code}", TOKEN_PAGES.panel(code, "csrf-token-x")) for code in CATALOGS.codes),
+    # 11e-2: the limits of «En directo» in its busy text are server values too.
+    *(
+        (f"panel-{code}", TOKEN_PAGES.panel(code, "csrf-token-x", **LIVE_LIMITS))
+        for code in CATALOGS.codes
+    ),
     # 11d-b: with the NER on, the word counter and the too-long callout are in the page too; the
     # word limit in that callout is a server value (TRY_NER_MAX_WORDS), like the version.
     *(
-        (f"panel-ner-{code}", TOKEN_PAGES.panel(code, "csrf-token-x", ner_words=NER_WORDS))
+        (
+            f"panel-ner-{code}",
+            TOKEN_PAGES.panel(code, "csrf-token-x", ner_words=NER_WORDS, **LIVE_LIMITS),
+        )
         for code in CATALOGS.codes
     ),
 ]
@@ -119,7 +128,8 @@ PAGES = [
 @pytest.mark.parametrize(("name", "page"), PAGES, ids=[name for name, _ in PAGES])
 def test_every_visible_text_comes_from_a_catalog(name: str, page: str) -> None:
     assert TOKEN.search(page)  # the token catalogs were really used
-    assert _not_from_a_catalog(page, (str(NER_WORDS), str(MAX_AGE_SECONDS // 3600))) == []
+    values = (str(NER_WORDS), str(MAX_AGE_SECONDS // 3600), *map(str, LIVE_LIMITS.values()))
+    assert _not_from_a_catalog(page, values) == []
 
 
 def test_the_check_sees_a_text_that_is_not_from_a_catalog() -> None:

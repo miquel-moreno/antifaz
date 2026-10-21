@@ -134,8 +134,8 @@
 <span class="vh-side"><span class="live-pill is-connecting" id="live-pill" role="status" data-state="connecting"><span class="dot" aria-hidden="true"></span><span id="live-pill-text">{{ t("live.pill.connecting") }}</span></span><button class="btn" type="button" id="live-reconnect" hidden><svg class="ic" aria-hidden="true"><use href="#i-replay"/></svg>{{ t("live.reconnect") }}</button></span>
 {%- endmacro %}
 {% macro live_view() -%}
-<div class="callout warn" id="live-lost" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("live.lost.title") }}</strong><p>{{ t("live.lost.body") }}</p></div>
-<div class="callout warn" id="live-busy" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("live.busy.title") }}</strong><p>{{ t("live.busy.body") }}</p></div>
+<div class="callout warn" id="live-lost" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("live.lost.title") }}</strong><p id="live-lost-figures">{{ t("live.lost.body") }}</p><p id="live-lost-none" hidden>{{ t("live.lost.none") }}</p></div>
+<div class="callout warn" id="live-busy" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("live.busy.title") }}</strong><p>{{ t("live.busy.body", per_session=live_per_session, total=live_total) }}</p></div>
 <div class="callout warn" id="live-aged" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("live.aged.title") }}</strong><p>{{ t("live.aged.body") }}</p></div>
 <div class="callout info" id="live-processes" hidden><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg><strong>{{ t("live.processes.title") }}</strong><p id="live-processes-text"></p></div>
 <div class="live-data" id="live-data" hidden>

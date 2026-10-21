@@ -52,6 +52,7 @@ from playwright.sync_api import (
 )
 
 from antifaz.web.headers import CONTENT_SECURITY_POLICY
+from tests.browser.console_rules import unexpected_failures
 from tests.browser.redact import redact
 
 # Playwright's default is the system's locale: fixed here, so every test says its language.
@@ -190,12 +191,12 @@ class Tab:
         violations: list[str] = self.page.evaluate(CSP_VIOLATIONS_JS)
         return violations
 
-    def unexpected_failures(self) -> list[str]:
-        """Every failed request but the «En directo» stream closed by the page itself (11e-2):
-        live.js closes its EventSource on another view, a hidden page or an error, and browsers
-        report that GET as aborted."""
-        live = f"GET {self.origin}/panel/api/live: "
-        return [line for line in self.failed if not line.startswith(live)]
+    def unexpected_failures(self, *, cut: int = 0) -> list[str]:
+        """Every failed request but the «En directo» GET the page aborted itself, reported with
+        the engine's own abort text, and `cut` streams the test broke on purpose (11e-2,
+        console_rules.unexpected_failures). Where Live is never opened, a test checks
+        `failed == []` instead."""
+        return unexpected_failures(self.failed, self.origin, cut=cut)
 
     def foreign_requests(self) -> list[str]:
         return [url for url in self.requests if not self._same_origin(url)]

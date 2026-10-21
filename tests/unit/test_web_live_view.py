@@ -131,7 +131,7 @@ class _Tree(HTMLParser):
 
 
 def _page(lang: str) -> str:
-    return PAGES.panel(lang, "csrf-x")
+    return PAGES.panel(lang, "csrf-x", live_per_session=MAX_PER_SESSION, live_total=MAX_STREAMS)
 
 
 def _tree(lang: str) -> list[dict[str, object]]:
@@ -192,7 +192,7 @@ def test_the_pill_never_says_a_date_or_since_start_up(lang: str) -> None:
     ("id_", "kind", "title", "body"),
     [
         ("live-lost", "warn", "live.lost.title", "live.lost.body"),
-        ("live-busy", "warn", "live.busy.title", "live.busy.body"),
+        ("live-busy", "warn", "live.busy.title", None),  # its body: the test below
         ("live-aged", "warn", "live.aged.title", "live.aged.body"),
         ("live-processes", "info", "live.processes.title", None),
     ],

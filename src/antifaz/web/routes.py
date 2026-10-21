@@ -132,7 +132,12 @@ from antifaz.live import NullLiveFeed, Reason, note_of
 from antifaz.web.cookies import expired_cookie, session_cookie, session_scheme
 from antifaz.web.door import PanelState, panel_context
 from antifaz.web.forwarded import client_ip
-from antifaz.web.live_stream import LiveStreams, accepts_event_stream
+from antifaz.web.live_stream import (
+    MAX_PER_SESSION,
+    MAX_STREAMS,
+    LiveStreams,
+    accepts_event_stream,
+)
 from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
 from antifaz.web.status_response import SessionResponse, StatusResponse
@@ -335,6 +340,8 @@ def build_router(state: PanelState) -> APIRouter:
             max_seconds=end,
             ner_words=state.try_ner_words,
             max_text_bytes=MAX_TEXT_BYTES,
+            live_per_session=MAX_PER_SESSION,
+            live_total=MAX_STREAMS,
         )
         return _page(page, lang)
 

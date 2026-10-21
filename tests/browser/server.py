@@ -348,6 +348,10 @@ class PanelServer:
         """From now on, the next frame of every live stream drops its connection."""
         self._cutter.cut.set()
 
+    def restore_live_streams(self) -> None:
+        """Undo cut_live_streams(): the next streams are normal ones."""
+        self._cutter.cut.clear()
+
     def door_headers(self, path: str) -> dict[str, str]:
         """What the last POST to `path` brought: origin, sec-fetch-site, x-antifaz-csrf."""
         sent = [headers for posted, headers in self._recorder.posts if posted == path]
