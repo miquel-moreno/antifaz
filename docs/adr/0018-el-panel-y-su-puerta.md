@@ -184,6 +184,14 @@ Salen **dos casos, no tres**: (b) no ayuda nunca, porque Chromium y Firefox ya a
 - **Límites de conexión**: 5 por proceso (como arriba) y además **2 por sesión**; pasado eso, 200 con `end: busy`. El plazo de cada una es el menor de 30 minutos y lo que le queda a la sesión, comprobado otra vez al llegar («Seguir» la alarga). Cola de 32 por conexión; llena, un `snapshot` nuevo. Latido cada 25 s solo con conexiones abiertas; sin conexiones, ni tareas ni temporizadores. Un sitio nunca queda ocupado por una conexión cortada, atascada o rota, y cada envío tiene un plazo de 30 s. Al apagar, uvicorn espera hasta 20 s y después corta las conexiones abiertas, antes de avisar al `lifespan`: `end: shutdown` solo llega si el `lifespan` termina primero. Los 5 sitios los puede ocupar cualquiera con el token (límite de disponibilidad, documentado).
 - **Lo que la hora puede delatar**: en directo, quien mira puede atar un evento a quien sabe que mandó algo en ese momento; el minuto reduce la precisión de lo que queda en el resumen, no lo que se ve al momento. Documentado en TECNICO.
 
+**Nota (2026-10-21, PR 11e-2).** La pantalla de «En directo», sin cambiar la puerta (decisiones de Miquel):
+
+- **Un script más, `static/live.js`**, independiente: el único con un `EventSource`, sobre la cadena literal `/panel/api/live`; sin `fetch`, sin temporizadores (sigue habiendo uno solo, el de `session.js`), sin almacenamiento ni `innerHTML`. Se conecta solo con la pestaña elegida y la página visible; se desconecta al salir de la pestaña, al ocultarse, en `pagehide`, al salir o caducar y ante cualquier error (con `close()`, para que el navegador no reconecte solo). Nunca dispara `antifaz:activity`: mirar no alarga la sesión.
+- **La píldora dice solo la conexión**; «desde el arranque» va con las cifras.
+- **Las cuentas cuadran** (condición de Miquel): «Peticiones a la IA» son solo las del proxy y suman con datos + sin datos + bloqueadas + error del proveedor; los bloqueos suman sus motivos; los datos ocultados, sus barras; las pruebas y los escaneos van aparte y no suman. Para ello el `snapshot` lleva `blocks` por motivo y `tries` y `scans` por separado (antes `checks`); cada hoja sigue siendo un enum o un entero.
+- **Varios procesos** (condición de Miquel): con más de uno, un aviso dice que son los datos de este proceso.
+- **Salir una sola vez**: «Salir» dice `antifaz:logout` antes de su `fetch` y `live.js` cierra el stream ahí (el `end: logout` del directo llegaba antes que la respuesta del cierre de sesión); y `panel.js` no navega si otro script ya ha dicho `antifaz:wipe`.
+
 ## Alternativas descartadas
 
 - **Reutilizar la clave de la API para el panel**: mezcla dos permisos. Quien usa la IA no tiene por qué poder ver el panel.
