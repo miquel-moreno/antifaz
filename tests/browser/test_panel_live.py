@@ -209,7 +209,7 @@ def _clean(tab: Tab, browser_name: str) -> None:
     assert tab.errors == []
     assert tab.blocked == []
     assert tab.foreign_requests() == []
-    assert [line for line in tab.failed if LIVE_PATH not in line] == []
+    assert tab.unexpected_failures() == []
 
 
 def drive_feed(server: PanelServer) -> None:

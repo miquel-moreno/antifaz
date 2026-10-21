@@ -115,7 +115,7 @@ def _clean(tab: Tab, browser_name: str) -> None:
     assert tab.csp_violations() == []
     assert unexpected_console(tab.console, browser_name, sys.platform) == []
     assert tab.errors == []
-    assert tab.failed == []
+    assert tab.unexpected_failures() == []
     assert tab.blocked == []
     assert tab.foreign_requests() == []
 
