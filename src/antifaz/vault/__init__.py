@@ -8,6 +8,8 @@ Forbidden: Never written to logs, traces, errors or metrics. Never persisted in 
 That is why it cannot be printed, iterated, compared, pickled or copied.
 """
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import NoReturn
 
 from antifaz.detect.types import EntityType
@@ -50,6 +52,14 @@ class Vault:
     def _hidden_values(self) -> tuple[tuple[EntityType, str], ...]:
         """(type, value) pairs that were hidden, for the egress guard (issue 4b)."""
         return tuple(self._by_value)
+
+    def type_counts(self) -> Mapping[EntityType, int]:
+        """How many distinct values of each type were hidden, read-only: counts, never a value
+        or a token (for «En directo», antifaz.live). Reserved numbers are not counted."""
+        counts: dict[EntityType, int] = {}
+        for entity, _ in self._by_value:
+            counts[entity] = counts.get(entity, 0) + 1
+        return MappingProxyType(counts)
 
     def __len__(self) -> int:
         return len(self._by_token)

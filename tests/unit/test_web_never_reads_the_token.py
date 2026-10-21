@@ -69,8 +69,18 @@ SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictBo
 TRY_SCHEMA = "try_response.py"
 TRY_SCHEMA_MODULE = "antifaz.web.try_response"
 TRY_SCHEMA_PYDANTIC_NAMES = SCHEMA_PYDANTIC_NAMES | {"model_validator"}
-SCHEMAS = {SCHEMA: SCHEMA_PYDANTIC_NAMES, TRY_SCHEMA: TRY_SCHEMA_PYDANTIC_NAMES}
-SCHEMA_MODULES = frozenset({SCHEMA_MODULE, TRY_SCHEMA_MODULE})
+# 11e-1: the live stream's events (SSE), with the plain pieces only (every leaf an enum or an int).
+LIVE_SCHEMA = "live_response.py"
+LIVE_SCHEMA_MODULE = "antifaz.web.live_response"
+LIVE_SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictInt"})
+SCHEMAS = {
+    SCHEMA: SCHEMA_PYDANTIC_NAMES,
+    TRY_SCHEMA: TRY_SCHEMA_PYDANTIC_NAMES,
+    LIVE_SCHEMA: LIVE_SCHEMA_PYDANTIC_NAMES,
+}
+SCHEMA_MODULES = frozenset({SCHEMA_MODULE, TRY_SCHEMA_MODULE, LIVE_SCHEMA_MODULE})
+# 11e-1: the live streams send the events of the live schema, so they load pydantic through it.
+LIVE_STREAM_MODULE = "antifaz.web.live_stream"
 
 
 def _tree(path: Path) -> ast.Module:
@@ -99,7 +109,8 @@ def _calls_to(tree: ast.Module, name: str) -> list[ast.Call]:
 
 def test_there_is_code_to_check() -> None:
     names = {path.name for path in SOURCES}
-    assert {"__init__.py", "door.py", "routes.py", TEMPLATING, *PURE} <= names
+    assert {"__init__.py", "door.py", "routes.py", TEMPLATING, *PURE, *SCHEMAS} <= names
+    assert "live_stream.py" in names
 
 
 def test_the_web_package_never_touches_a_secret_by_name() -> None:
@@ -224,7 +235,7 @@ LOADED_SETTINGS = ("antifaz.config", "pydantic_settings", "pydantic")
 # FastAPI (APIRouter) needs pydantic, and so does the status schema (11c-3b): the only web
 # modules allowed to load it. Check 2 makes sure no other project module in their closure
 # imports it.
-NEEDS_FASTAPI = {"antifaz.web.routes", *SCHEMA_MODULES}
+NEEDS_FASTAPI = {"antifaz.web.routes", LIVE_STREAM_MODULE, *SCHEMA_MODULES}
 _PROBE = (
     "import importlib, sys\n"
     "importlib.import_module(sys.argv[1])\n"
@@ -336,7 +347,16 @@ def test_no_project_import_of_a_web_module_reaches_the_settings(module: str) -> 
 
 
 @pytest.mark.parametrize(
-    "module", ["antifaz.web.status", SCHEMA_MODULE, TRY_SCHEMA_MODULE, "antifaz.web.try_text"]
+    "module",
+    [
+        "antifaz.web.status",
+        SCHEMA_MODULE,
+        TRY_SCHEMA_MODULE,
+        "antifaz.web.try_text",
+        LIVE_SCHEMA_MODULE,
+        LIVE_STREAM_MODULE,
+        "antifaz.live",
+    ],
 )
 def test_the_status_pieces_never_reach_the_settings_or_the_providers(module: str) -> None:
     modules, _ = _project_closure(SRC, "antifaz", module)

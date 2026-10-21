@@ -69,3 +69,20 @@ def test_vault_is_not_iterable_and_has_no_value_equality() -> None:
     with pytest.raises(TypeError):
         iter(vault)  # type: ignore[call-overload]
     assert vault != _vault_with_sentinel()
+
+
+def test_vault_type_counts_are_distinct_values_per_type_without_any_value() -> None:
+    """«En directo» (11e-1): how many distinct values of each type were hidden, nothing more."""
+    vault = Vault(reserved=frozenset({"ES_DNI_1"}))  # a reserved number does not count
+    vault._add(EntityType.ES_DNI, SENTINEL_DNI)
+    vault._add(EntityType.ES_DNI, SENTINEL_DNI)  # the same value: one
+    vault._add(EntityType.ES_DNI, "87654321X")
+    vault._add(EntityType.EMAIL, "ana@example.com")
+
+    counts = vault.type_counts()
+    assert dict(counts) == {EntityType.ES_DNI: 2, EntityType.EMAIL: 1}
+    assert all(type(count) is int for count in counts.values())
+    assert SENTINEL_DNI not in repr(counts)
+    with pytest.raises(TypeError):
+        counts[EntityType.IBAN] = 1  # type: ignore[index]
+    assert dict(Vault().type_counts()) == {}

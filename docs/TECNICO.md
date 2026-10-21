@@ -1065,6 +1065,61 @@ En pocas palabras: la pestaña «Prueba un texto» ya funciona. Escribes o pegas
 - Navegadores (Chromium, Firefox y WebKit): `tests/browser/test_panel_try.py`, `test_panel_session.py` (con el reloj de Playwright) y el red team `test_panel_try_privacy.py` (el centinela solo en el cuerpo de la prueba; ni URL, historial, almacenamiento, otras vistas, título, consola ni logs; nada tras recargar o volver atrás; sin JavaScript no se envía nada; el marcado se ve como texto; otra web no prueba ni alarga). axe 0 en cada estado, colores forzados, solo teclado, 320/390 px, texto al 200 % y modo oscuro.
 - Capturas: `make panel-captures` añade los estados vacío, resultado, oferta, sin detector y aviso de sesión (es/en, claro/oscuro, 1280 y 390 px).
 
+## Panel: En directo (motor, 11e-1)
+
+En pocas palabras: la pasarela ya lleva la cuenta de lo que hace, **solo con tipos y cantidades**: cada petición del proxy, de «Prueba un texto» y de `/antifaz/scan` deja un evento como «OpenAI · Claude Code · ocultados 2 DNI y 1 email · 15:42», y el panel lo puede recibir al momento por `GET /panel/api/live` (SSE). Nada de eso sale de la memoria del proceso: ni a los logs ni al disco. Este PR es solo el motor; la pantalla llega en 11e-2. Ver la nota del 2026-10-20 (11e-1) en [ADR-0018](adr/0018-el-panel-y-su-puerta.md).
+
+### El evento (`antifaz/live.py`)
+
+- **Solo enums, enteros y la hora**: `origin` (`openai_chat`, `anthropic_messages`, `count_tokens`, `scan`, `try`), `client`, `outcome` (`masked`, `no_data`, `blocked`, `upstream_error`), `reason` (`attachment`, `detector_failed`, `egress_guard`, `unmaskable_field`, `too_deep`, `none`), `provider` (`openai`, `anthropic`, `none`), `at` y `types` (tipo → cuántos valores **distintos** se ocultaron). El constructor rechaza cualquier otra cosa (una cadena en vez del enum, un booleano, un 0). No hay ningún campo donde quepa un texto.
+- **El cliente sale de una lista cerrada** por el principio exacto del `User-Agent` (solo se leen los primeros 32 caracteres): `claude-cli/` → Claude Code, `codex_cli_rs/` → Codex, `open-webui/` → Open WebUI, `OpenAI/Python` y `Anthropic/Python` → los SDK, `curl/` → curl; cualquier otro, o la cabecera repetida, es «otro». **El `User-Agent` nunca se guarda.** Con honestidad: los prefijos no se han comprobado contra cada cliente real (Open WebUI sobre todo); uno cuyo `User-Agent` no empiece así sale como «otro». La lista solo nombra lo que reconoce.
+- **Los tipos permitidos no cuentan**: `types` sale de `Vault.type_counts()` (nuevo: valores distintos por tipo, sin valores ni marcadores), y la tabla solo guarda lo que la política oculta; un CIF de empresa no aparece. En `/antifaz/scan`, lo mismo con los spans que la política ocultaría; en «Prueba un texto», con los marcadores distintos que se enviarían.
+- **La hora va redondeada al minuto** (decisión de Miquel): `at` es la hora Unix bajada al minuto.
+- **Un bloqueo no lleva tipos** (no se envió nada); un fallo del proveedor (`upstream_error`: su 4xx/5xx, plazo, conexión perdida, respuesta que no es JSON, redirección) sí los lleva, porque ya se ocultaron y enviaron.
+
+### El contador (`MemoryLiveFeed`)
+
+- **Los últimos 20 eventos**, los totales de valores ocultados por tipo y de resultados, y el tiempo desde que arrancó. **«Prueba un texto» y `/antifaz/scan` salen en el directo pero no suman a los totales** («datos ocultados» son los que iban a un proveedor); van aparte, en `checks`.
+- **Por proceso**: el resumen dice cuántos procesos sirven la pasarela (`processes`). `antifaz serve` arranca siempre uno (`SERVE_WORKERS`, igual a `cli/serve.py` con test). Si `WEB_CONCURRENCY` es un entero de 1 o más, se toma ese número (uvicorn lo usa como número de procesos cuando no se le da `--workers`), y con más de uno la pantalla dirá «datos de este proceso». Con honestidad: `antifaz serve` pasa siempre `workers=1` y uvicorn ignora entonces `WEB_CONCURRENCY`, así que si alguien la pone, el panel avisa sin hacer falta (el lado seguro); y un uvicorn arrancado a mano con `--workers N` sin `WEB_CONCURRENCY` no se distingue de un solo proceso.
+- **Sin el panel** (`ANTIFAZ_ADMIN_TOKEN` vacío) el contador es un `NullLiveFeed`: no guarda nada.
+- Está detrás de una interfaz (`LiveFeed`: `record`, `snapshot`, `subscribe`) que el registro de evidencias (ítem 9) podrá sustituir.
+
+### Dónde se registra: en un solo sitio
+
+- `api/live_record.py` (`LiveRecorder`, middleware ASGI **dentro** de la puerta: lo que la puerta rechaza nunca llega) pone una nota en `scope["state"]` para las cinco rutas, por pareja exacta (ruta, método). La ruta la marca después de enmascarar (`mark_masked`) o al pasar un error del proveedor (`mark_upstream_error`); los manejadores de errores marcan el bloqueo con su motivo (por la clase del error) y los errores del proveedor. **Al acabar la petición** la nota se convierte en un evento y se registra **una vez**. Un stream se registra cuando termina.
+- Sin decisión (sin clave, JSON roto, cuerpo enorme, 413/429 de la prueba) no se registra nada; tras un error inesperado (500), tampoco.
+- **El contador nunca rompe el proxy**: crear la nota, contar los tipos (`Vault.type_counts` y los del escaneo se calculan dentro de esa protección), marcarla y registrarla van envueltos; un fallo deja una línea de log con el tipo del error y la respuesta sale igual (test con un contador que lanza). Registrar es código plano: sin `await`, sin E/S y con memoria acotada.
+
+### Solo en memoria (condición 3 de Miquel)
+
+- **Los últimos 20 eventos, y cualquier evento, nunca van a un log ni al disco.** `live.py` no tiene E/S de archivos ni registra eventos: solo el tipo de un error (test estático sobre el código). Un test de red team pasa el DNI centinela por todo el recorrido con los logs en `DEBUG` y con `open` y la escritura de archivos parcheados para fallar: ni el centinela ni ninguna palabra de un evento (tipos, orígenes, resultados, clientes) aparece en los logs, y no se abre ningún archivo.
+- Como todo lo del proceso, vive en su memoria mientras dura: puede acabar en un volcado o en el swap. Al reiniciar, se pierde.
+
+### `GET /panel/api/live` (SSE)
+
+- **Sesión por la puerta**, como `GET /panel/api/status`: la clave de la API no la abre, la cookie del otro esquema tampoco, y un `Sec-Fetch-Site` que no sea `same-origin` es 403 antes de mirar la sesión. Pide `Accept: text/event-stream` (si no, 406 `not_acceptable`; `*/*` solo no basta: `EventSource` lo pide por su nombre). Solo `GET`: los demás métodos y `HEAD`, 405.
+- **200 `text/event-stream`** con las cabeceras de la puerta, `Cache-Control: no-store` y `X-Accel-Buffering: no` (para que un nginx delante no lo acumule).
+- **Eventos**, uno por trama (`event:` + una línea `data:` de JSON): `snapshot` al conectar, `request` por cada evento y `end` con su motivo (`logout`, `expired`, `replaced`, `busy`, `max_age`, `shutdown`), y la conexión se cierra. **Nunca `retry:`** (el navegador no reconecta solo) ni `id:`. Esquema cerrado (`web/live_response.py`): **cada hoja del JSON es el valor de un enum o un entero** (test); los tipos y resultados van como listas `{"type", "count"}`, nunca como claves libres.
+- **Mirar no es usar la sesión** (decisión de Miquel): `GET /panel/api/live` (y su `HEAD`, que es 405) es la única ruta de `door.NOT_A_USE`, así que conectar y reconectar nunca refrescan el último uso (test con reloj falso). Dejar «En directo» abierto no alarga la sesión.
+- **Cuándo termina**: el plazo de cada conexión es el menor de **30 minutos** y **lo que le queda a la sesión** (`seconds_left()`, sin contar un uso). Al llegar al de la sesión se vuelve a mirar: si «Seguir» la alargó, la conexión sigue con el plazo nuevo; si caducó, `end: expired`. A los 30 minutos, `end: max_age`. **El cierre de sesión la corta en el momento** (`sessions.watch`), igual que un login nuevo con la cookie vieja (`replaced`) o una sesión expulsada porque el almacén estaba lleno (también `replaced`).
+- **Límites**: como mucho **5 conexiones por proceso y 2 por sesión**. Pasado eso, 200 con un solo `end: busy` y se cierra. `HEAD` (405) tampoco cuenta como un uso de la sesión.
+- **Cola de 32 por suscriptor**: si el navegador va lento y se llena, se vacía y llega un `snapshot` nuevo en vez de lo perdido (memoria acotada).
+- **Latido**: un comentario (`:`) cada 25 s, solo mientras hay una conexión abierta, para que un proxy no corte una conexión callada.
+- **Sin conexiones no hay nada**: ni tareas ni temporizadores (test sobre el bucle de eventos). Con una abierta, un solo `asyncio.timeout` alrededor de su espera.
+- **Al apagar, dicho claro**: con `antifaz serve` (uvicorn), uvicorn espera primero a que se cierren las conexiones abiertas, hasta `timeout_graceful_shutdown` (20 s), y **después las corta cancelándolas**; solo entonces avisa al `lifespan`. Así que con un navegador mirando, apagar tarda esos 20 s y el navegador ve la conexión cortada, **no** un `end: shutdown`. El `end: shutdown` (`close_all()` en el `lifespan`) solo llega a los clientes cuando el `lifespan` termina antes que las conexiones, como en los tests en proceso.
+- **Ningún sitio queda ocupado**: una conexión ya cortada (cierre de sesión, caducidad, apagado) no cuenta para los límites aunque su último mensaje siga esperando; abrir el stream y suscribirse van dentro del `try` que libera el sitio; la respuesta (`LiveResponse`) cierra los eventos con `contextlib.aclosing` aunque la cancelen en un `yield`; y **cada envío tiene un plazo de 30 s**: un cliente que deja de leer se cae y su conexión se cierra. Al dejarla caer, uvicorn escribe en su log una línea fija («ASGI callable returned without completing response.»); no lleva ningún dato de la petición ni del evento. Para que ese plazo sirva de verdad, el middleware del id de petición pasa a ser ASGI puro (antes era `BaseHTTPMiddleware`, que copiaba cada respuesta por una cola en memoria y dejaba esa tarea esperando para siempre a un cliente atascado).
+- **Un límite de disponibilidad, con honestidad**: los 5 sitios son para todo el proceso y solo hace falta el token de administrador para ocuparlos; varias sesiones abiertas (2 conexiones cada una) pueden dejar a otra sesión sin «En directo» (`end: busy`) mientras sigan mirando. Es una molestia, no una fuga: quien puede hacerlo ya tiene el token.
+
+### Lo que la hora puede delatar (con honestidad)
+
+El evento no lleva ningún valor, pero **llega al panel en el momento**: quien mira «En directo» y sabe cuándo alguien mandó una petición puede atar ese evento a esa persona (por ejemplo, «a las 15:42 Ana usó Claude Code y se ocultaron 2 DNI»). Redondear `at` al minuto no lo evita en directo; lo que reduce es la precisión de lo que queda en el resumen (los últimos 20) para quien se conecta después. Por eso «En directo» solo lo ve quien tiene el token de administrador, nunca enseña valores ni el `User-Agent`, y todo se pierde al reiniciar.
+
+### Pruebas
+
+- Unitarias: `tests/unit/test_live.py` (el evento, el cliente, la nota, el contador, la cola, el contador nulo, sin E/S ni logs de eventos) y `Vault.type_counts()`.
+- Integración: `tests/integration/test_live_record.py` (cada ruta y cada resultado, prueba y escaneo aparte, nada sin decisión, panel apagado, procesos, un contador que falla) y `tests/integration/test_panel_live.py` (cabeceras, 406/405/401, el `snapshot` y los `request`, nunca un uso con reloj falso, cada `end`, «Seguir», límites, cola llena, latido, sin tareas ni temporizadores, esquema). El SSE se maneja en el propio proceso (`tests/integration/live_client.py`), sin red.
+- Red team: `tests/redteam/test_panel_live_privacy.py` (el centinela por el proxy, la prueba y el escaneo nunca en los bytes del SSE, ni su marcador ni nada con forma `[[…]]`; logs y archivos; cookie del otro esquema, clave sola, otro sitio, avalancha de conexiones) y la ruta en el recorrido del invariante 12.
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |

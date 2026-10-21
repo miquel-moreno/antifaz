@@ -152,6 +152,16 @@ class TryBusyError(AppError):
         super().__init__("busy right now: try again in a second", headers={"Retry-After": "1"})
 
 
+class NotAcceptableError(AppError):
+    """«En directo» (11e-1): GET /panel/api/live without `Accept: text/event-stream`."""
+
+    status_code = 406
+    code = "not_acceptable"
+
+    def __init__(self) -> None:
+        super().__init__("this route only answers Accept: text/event-stream")
+
+
 def error_body(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
