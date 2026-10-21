@@ -293,14 +293,25 @@ def test_logout_closes_the_stream_before_it_asks_the_server() -> None:
 
 def test_live_js_closes_the_stream_first_on_any_error() -> None:
     """Without close() the browser would reconnect by itself (the server never sends retry:):
-    the error handler closes the stream before anything else, whatever happened."""
+    the error handler closes the stream before anything else, whatever happened. Review 1 of
+    11e-2: only when it is still the current stream (an old one is already closed)."""
     source = _source(STREAM_SCRIPT)
     handler = source[source.index('addEventListener("error", function () {') :]
-    first = handler.split("\n")[1].strip()
+    lines = [line.strip() for line in handler.split("\n")[1:5]]
 
-    assert first == "disconnect();"
+    assert lines == ["if (source !== stream) {", "return;", "}", "disconnect();"]
     body = source[source.index("function disconnect() {") :]
     assert ".close();" in body[: body.index("\n  }")]
+
+
+def test_panel_js_leaves_only_once() -> None:
+    """Review 1 of 11e-2: when another script already said "antifaz:wipe" (session.js at the
+    expiry, live.js through it), panel.js's own way out (a 401, the logout's answer) does not
+    navigate a second time: the second navigation would abort the first."""
+    source = _source("panel.js")
+    assert 'document.addEventListener("antifaz:wipe", function () {\n    leaving = true;' in source
+    leave = source[source.index("function leave() {") :]
+    assert [line.strip() for line in leave.split("\n")[1:4]] == ["if (leaving) {", "return;", "}"]
 
 
 def test_the_scripts_talk_through_the_activity_event() -> None:

@@ -38,6 +38,7 @@ import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from antifaz.web.i18n import load_catalogs
+from antifaz.web.live_stream import MAX_PER_SESSION, MAX_STREAMS
 from tests.browser.console_rules import unexpected_console
 from tests.browser.harness import TIMEOUT_MS, NewTab, Tab
 from tests.browser.server import LIVE_PATH, PanelServer, ServerOptions
@@ -196,16 +197,15 @@ def _at_the_login(tab: Tab, server: PanelServer) -> None:
     tab.page.locator("#login-token").wait_for()
 
 
-def _clean(tab: Tab, browser_name: str) -> None:
-    """No CSP violation, page error or foreign request, and a clean console. A closed stream
-    shows up as a failed (aborted) request in some browsers: only those of the live URL."""
+def _clean(tab: Tab, browser_name: str, *, cut: int = 0) -> None:
+    """No CSP violation, page error or foreign request, and a clean console: only the line a
+    browser logs for a stream the test cut on purpose (`cut`, console_rules.py) may be there.
+    A stream the page closed itself is a failed request only as the engine's own abort."""
     assert tab.csp_violations() == []
-    lines = [
-        line
-        for line, where in zip(tab.console, tab.console_locations, strict=True)
-        if not _is_live(where)
-    ]
-    assert unexpected_console(lines, browser_name, sys.platform) == []
+    found = unexpected_console(
+        tab.console, browser_name, sys.platform, tab.console_locations, cut=cut
+    )
+    assert found == []
     assert tab.errors == []
     assert tab.blocked == []
     assert tab.foreign_requests() == []
@@ -329,7 +329,7 @@ def test_a_cut_stream_shows_disconnected_never_retries_and_reconnects_on_the_but
     assert _no_live_request_within(tab, NO_RETRY_WINDOW_MS)
     assert _live_requests(tab) == 1
 
-    server._cutter.cut.clear()  # the next stream is a normal one
+    server.restore_live_streams()  # the next stream is a normal one
     with tab.page.expect_request(lambda request: _is_live(request.url)):
         tab.page.click("#live-reconnect")
     _pill(tab, "connected")
@@ -339,7 +339,7 @@ def test_a_cut_stream_shows_disconnected_never_retries_and_reconnects_on_the_but
     assert tab.page.locator("#live-data").get_attribute("class") == "live-data"
     assert tab.page.evaluate(ACTIVE_ID_JS) == "panel-live"  # the focus is not lost
     _rows(tab, 2)  # the fresh snapshot holds both
-    _clean(tab, browser_name)
+    _clean(tab, browser_name, cut=1)
 
 
 @pytest.mark.parametrize("server_options", [FAKE])
@@ -353,7 +353,7 @@ def test_reconnect_works_from_the_keyboard(new_tab: NewTab, server: PanelServer)
     server.cut_live_streams()
     assert server.scan("hola") == 200
     _pill(tab, "off")
-    server._cutter.cut.clear()
+    server.restore_live_streams()
 
     tab.page.locator("#panel-live").focus()
     tab.page.keyboard.press("Tab")
@@ -465,7 +465,8 @@ def test_busy_says_why_and_shows_no_figures(
     _open_live(tab, "off")
 
     assert _shown(tab, "live-busy")
-    assert _text("es", "live.busy.body") in _content(tab, "live-busy")
+    busy = CATALOGS["es"].text("live.busy.body", per_session=MAX_PER_SESSION, total=MAX_STREAMS)
+    assert busy in _content(tab, "live-busy")  # both limits, the server's numbers
     assert not _shown(tab, "live-data")
     assert _shown(tab, "live-reconnect")
     assert _streams(tab) == [2]
@@ -548,7 +549,8 @@ def test_the_numbers_add_up_live_and_after_a_fresh_snapshot(
         "masked",
         "try",
     ]
-    assert all(re.search(r"\d{1,2}[:.]\d{2}", row["time"]) for row in rows)  # en: 3:42 PM
+    clock = re.compile(r"\d{1,2}[:.]\d{2}(\s?[AP]M)?")  # en-US: 3:42 PM
+    assert all(clock.fullmatch(row["time"].strip()) for row in rows)
     assert _text(lang, "live.client.claude_code") in rows[-2]["who"]
     assert _text(lang, "status.provider.openai") in rows[-2]["who"]
     assert _text(lang, "live.what.not_added") in rows[0]["what"]
@@ -755,3 +757,122 @@ def test_forced_colours_keep_the_bars_and_the_dot(
         assert colours["dot"] == colours["text"]
     report = tab.axe()
     assert report.violations == "", report.violations
+
+
+def _snapshot(**fields: object) -> str:
+    """A made-up `snapshot` frame (the closed schema, empty but for `fields`)."""
+    import json
+
+    data: dict[str, object] = {
+        "recent": [],
+        "hidden": [],
+        "outcomes": [],
+        "blocks": [],
+        "tries": 0,
+        "scans": 0,
+        "uptime_seconds": 0,
+        "processes": 1,
+        **fields,
+    }
+    return "event: snapshot\ndata: " + json.dumps(data) + "\n\n"
+
+
+def _show_made_up(tab: Tab, body: str) -> None:
+    tab.page.route(f"{tab.origin}{LIVE_PATH}", _fake_stream(body))
+    with tab.page.expect_request(lambda request: _is_live(request.url)):
+        tab.page.click("#tab-live")
+    _pill(tab, "off")  # the made-up answer ends: the stream is closed
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_a_small_count_still_shows_a_bar(new_tab: NewTab, server: PanelServer) -> None:
+    """Review 1 (L3): 1 next to 100 rounds to 0 twentieths; a count above zero keeps one."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    hidden = [{"type": "ES_DNI", "count": 100}, {"type": "EMAIL", "count": 1}]
+    _show_made_up(tab, _snapshot(hidden=hidden))
+
+    assert [bar["v"] for bar in tab.page.evaluate(BARS_JS)] == ["20", "1"]
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_the_uptime_numbers_follow_the_language(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    """Review 1 (L6): 1234 days read «1.234» in Spanish and «1,234» in English."""
+    tab = _tab(new_tab, lang)
+    log_in(tab, server, lang)
+    _show_made_up(tab, _snapshot(uptime_seconds=1234 * 86400 + 3600))
+
+    assert ("1.234" if lang == "es" else "1,234") in _content(tab, "live-uptime")
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_a_time_out_of_range_leaves_the_time_empty(
+    new_tab: NewTab, server: PanelServer, browser_name: str
+) -> None:
+    """Privacy review INFO 3: a time no date can hold never breaks the view: an empty <time>."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    event = {
+        "origin": "scan",
+        "client": "curl",
+        "outcome": "no_data",
+        "reason": "none",
+        "provider": "none",
+        "types": [],
+    }
+    recent = [{**event, "at": 10**20}, {**event, "at": 120}]
+    _show_made_up(tab, _snapshot(recent=recent))
+    _rows(tab, 2)
+
+    times = [row["time"] for row in tab.page.evaluate(ROWS_TEXT_JS)]
+    assert times[0] == "" and times[1] != ""
+    assert tab.errors == []
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_lost_before_any_figure_does_not_speak_of_figures(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    """Review 1 (M4): with no snapshot ever, the lost callout has no «cifras de antes»."""
+    tab = _tab(new_tab, lang)
+    log_in(tab, server, lang)
+    tab.page.route(f"{tab.origin}{LIVE_PATH}", lambda route: route.abort())
+    with tab.page.expect_request(lambda request: _is_live(request.url)):
+        tab.page.click("#tab-live")
+    _pill(tab, "off")
+
+    assert _shown(tab, "live-lost")
+    assert _shown(tab, "live-lost-none")
+    assert not _shown(tab, "live-lost-figures")
+    assert not _shown(tab, "live-data")
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_lost_after_a_snapshot_speaks_of_the_figures_from_before(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    tab = _tab(new_tab, "es")
+    log_in(tab, server, "es")
+    _open_live(tab)
+    server.cut_live_streams()
+    assert server.scan("hola") == 200
+    _pill(tab, "off")
+
+    assert _shown(tab, "live-lost-figures")
+    assert not _shown(tab, "live-lost-none")
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_pagehide_closes_the_stream(new_tab: NewTab, server: PanelServer) -> None:
+    """Review 1 (L2). Already green when written: live.js closed on pagehide before."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    _open_live(tab)
+
+    tab.page.evaluate("() => window.dispatchEvent(new Event('pagehide'))")
+    assert _streams(tab) == [2]
+    _eventually(lambda: server.live_streams_open() == 0, "the place is free")

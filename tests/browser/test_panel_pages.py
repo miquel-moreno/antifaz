@@ -113,7 +113,7 @@ def _assert_clean(tab: Tab, browser_name: str) -> None:
     # Nothing in the console, but for the one strict exception of console_rules.py.
     assert unexpected_console(tab.console, browser_name, sys.platform) == []
     assert tab.errors == []
-    assert tab.unexpected_failures() == []
+    assert tab.failed == []  # «En directo» is never opened here
     assert tab.blocked == []
     assert tab.foreign_requests() == []
 

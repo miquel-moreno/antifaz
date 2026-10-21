@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import pytest
 
-from tests.browser.console_rules import unexpected_console
+from tests.browser.console_rules import unexpected_console, unexpected_failures
 from tests.browser.redact import redact
 from tests.browser.server import PanelServer, isolated_variable
 
@@ -304,3 +304,72 @@ def test_without_locations_no_refusal_is_allowed() -> None:
 
 def test_linux_is_any_linux_platform_string() -> None:
     assert unexpected_console([BLUETOOTH], "chromium", "linux2") == []
+
+
+# --- 11e-2: the «En directo» stream the page closes on purpose (review 1) -----------------------
+
+ORIGIN = "http://127.0.0.1:50000"
+LIVE_URL = ORIGIN + "/panel/api/live"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "net::ERR_ABORTED",
+        "NS_BINDING_ABORTED",
+        "NS_ERROR_ABORT",
+        "Load request cancelled",
+        "cancelled",
+    ],
+)
+def test_only_the_engines_abort_of_the_live_stream_is_dropped(failure: str) -> None:
+    assert unexpected_failures([f"GET {LIVE_URL}: {failure}"], ORIGIN) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"GET {LIVE_URL}: net::ERR_CONNECTION_RESET",
+        f"GET {LIVE_URL}: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+        f"GET {LIVE_URL}: NS_ERROR_NET_RESET",
+        f"GET {LIVE_URL}: The network connection was lost.",
+        f"POST {LIVE_URL}: net::ERR_ABORTED",
+        f"GET {ORIGIN}/panel/api/status: net::ERR_ABORTED",
+        f"GET {LIVE_URL}x: net::ERR_ABORTED",
+        "GET http://127.0.0.1:50001/panel/api/live: net::ERR_ABORTED",
+    ],
+)
+def test_any_other_failure_is_still_reported(line: str) -> None:
+    assert unexpected_failures([line], ORIGIN) == [line]
+
+
+CUT_LINE = "[error] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+
+
+def test_a_stream_cut_on_purpose_may_log_its_line_only_as_often_as_the_test_cut_it() -> None:
+    """Chromium logs one line when the test gateway drops a live stream mid-way (Firefox and
+    WebKit log none, so none is required). Only from the live URL, at most `cut` times."""
+    one = [LIVE_URL]
+    assert unexpected_console([CUT_LINE], "chromium", "win32", one, cut=1) == []
+    assert unexpected_console([], "firefox", "win32", [], cut=1) == []
+    assert unexpected_console([CUT_LINE], "chromium", "win32", one) == [CUT_LINE]
+    two = [CUT_LINE, CUT_LINE]
+    assert unexpected_console(two, "chromium", "win32", [LIVE_URL] * 2, cut=1) == [CUT_LINE]
+    status = [ORIGIN + "/panel/api/status"]
+    assert unexpected_console([CUT_LINE], "chromium", "win32", status, cut=1) == [CUT_LINE]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        '[error] EventSource\'s response has a MIME type ("application/json") that is not '
+        '"text/event-stream". Aborting the connection.',
+        "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+        "[error] Failed to load resource: the server responded with a status of 406 "
+        "(Not Acceptable)",
+        "[warning] The connection to " + LIVE_URL + " was interrupted while the page was loading.",
+    ],
+)
+def test_anything_else_from_the_live_url_still_fails(message: str) -> None:
+    """Review 1 of 11e-2: a refused stream (401, 406, the wrong type) must fail the test."""
+    assert unexpected_console([message], "chromium", "win32", [LIVE_URL], cut=1) == [message]

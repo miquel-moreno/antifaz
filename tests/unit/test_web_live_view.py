@@ -29,6 +29,7 @@ from antifaz import __version__
 from antifaz.live import Client, Reason
 from antifaz.web.assets import load_assets
 from antifaz.web.i18n import load_catalogs
+from antifaz.web.live_stream import MAX_PER_SESSION, MAX_STREAMS
 from antifaz.web.templating import Pages
 
 CATALOGS = load_catalogs()
@@ -213,9 +214,29 @@ def test_each_callout_is_hidden_and_says_what_was_approved(
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_the_busy_text_says_the_limit_of_five(lang: str) -> None:
-    assert "5" in CATALOGS[lang].text("live.busy.body")
+def test_the_busy_text_says_both_limits_from_the_server(lang: str) -> None:
+    """Review 1: «busy» comes from either limit (per session or in total), and the numbers are
+    the server's constants, rendered into the page: never written in a catalog or a script."""
+    body = CATALOGS[lang].text("live.busy.body")
+    assert "{per_session}" in body and "{total}" in body
+    assert not any(char.isdigit() for char in body)
+    shown = _text(_by_id(_tree(lang), "live-busy"))
+    expected = CATALOGS[lang].text("live.busy.body", per_session=MAX_PER_SESSION, total=MAX_STREAMS)
+    assert expected in shown
     assert "30" in CATALOGS[lang].text("live.aged.title")
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_lost_callout_has_a_text_for_when_no_figure_ever_came(lang: str) -> None:
+    """Review 1: lost before the first snapshot, there are no figures «from before»: live.js
+    shows the other text."""
+    tree, text = _tree(lang), CATALOGS[lang].text
+    figures = _by_id(tree, "live-lost-figures")
+    none = _by_id(tree, "live-lost-none")
+    assert _text(figures) == text("live.lost.body")
+    assert _text(none) == text("live.lost.none")
+    assert "hidden" in _attrs(none) and "hidden" not in _attrs(figures)
+    assert "live-lost" in none["ids"]  # type: ignore[operator]
 
 
 @pytest.mark.parametrize("lang", LANGS)

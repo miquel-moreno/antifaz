@@ -43,6 +43,7 @@ def unexpected_console(
     locations: Sequence[str] = (),
     *,
     refused: int = 0,
+    cut: int = 0,
 ) -> list[str]:
     """What is wrong with the console of a page: every message not allowed, plus a line for each
     expected message that never came (empty when the console is as it must be). `refused`: how
@@ -61,3 +62,7 @@ def unexpected_console(
         problems.append(message)
     problems += [f"expected but missing: {m}" for m in sorted(expected - set(messages))]
     return problems
+
+
+def unexpected_failures(failed: Iterable[str], origin: str) -> list[str]:
+    raise NotImplementedError
