@@ -111,7 +111,9 @@ def test_a_provider_answer_with_the_admin_token_is_dropped_with_502(
 
 
 def test_a_streamed_admin_token_split_between_deltas_never_reaches_the_client() -> None:
-    pieces = ["ok ", ADMIN_CANARY[:15], ADMIN_CANARY[15:], " end"]
+    # Split after 9 characters: a run of 10 is already a fragment (issue 76), so a longer first
+    # piece would itself end the stream before the token completes.
+    pieces = ["ok ", ADMIN_CANARY[:9], ADMIN_CANARY[9:], " end"]
 
     def stream(request: httpx.Request) -> httpx.Response:
         return sse_response(openai_sse(pieces))[0]
@@ -131,4 +133,4 @@ def test_a_streamed_admin_token_split_between_deltas_never_reaches_the_client() 
     )
     assert ADMIN_CANARY not in text
     assert ADMIN_CANARY not in rebuilt
-    assert ADMIN_CANARY[:15] in rebuilt  # the part sent before the token completed is not a key
+    assert ADMIN_CANARY[:9] in rebuilt  # shorter than a fragment: sent before the rest came
