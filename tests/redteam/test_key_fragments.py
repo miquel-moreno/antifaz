@@ -244,6 +244,17 @@ def test_the_auth_error_message_is_fixed_and_says_whose_key_failed() -> None:
     assert "provider" in first["error"]["message"]
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_the_auth_error_message_does_not_blame_only_the_key(status: int) -> None:
+    """A 403 may be the account's access (a model, a region), not a wrong key."""
+    for client in _client(lambda r: httpx.Response(status, json={"error": {"message": "x"}})):
+        message = _request(client, ROUTES[0]).json()["error"]["message"]
+
+    assert f"HTTP {status}" in message
+    assert "credentials or account access" in message
+    assert "permissions" in message
+
+
 # --- Other answers that hold a fragment: the fixed 502 or the stream's error event --------------
 
 

@@ -7,9 +7,17 @@ its generic, public prefix such as `sk-`, `sk-proj-` or `sk-ant-api03-`).
 """
 
 import json
+import random
+import string
+import time
+from collections.abc import Sequence
 
+import httpx
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+from antifaz.api import proxy
 from antifaz.api.key_fragments import FRAGMENT_LENGTH, SHOWN_SUFFIX, KeyFragments, secret_part
 from antifaz.api.proxy import contains_key
 from antifaz.api.streaming import KeyEchoed, KeyWatch
@@ -167,3 +175,211 @@ def test_contains_key_sees_a_fragment_inside_escaped_json() -> None:
     raw = '{"error": {"message": "bad key ' + escaped + '"}}'
     assert contains_key(raw, [OPENAI])
     assert not contains_key('{"error": {"message": "bad key"}}', [OPENAI])
+
+
+# --- More masked shapes (review of issue 76) ---------------------------------------------------
+
+
+@pytest.mark.parametrize("visible", range(4, FRAGMENT_LENGTH))
+@pytest.mark.parametrize("mask", ["**", "********", "...", "…", "••••"])
+def test_a_mask_followed_by_the_last_four_to_nine_characters_is_found(
+    visible: int, mask: str
+) -> None:
+    shape = "sk-proj-" + mask + secret_part(OPENAI)[-visible:]
+    assert KeyFragments(KEYS).found_in(f"key {shape}. Check it")
+    assert KeyFragments(KEYS).found_in(shape)
+
+
+@pytest.mark.parametrize("visible", range(4, FRAGMENT_LENGTH))
+@pytest.mark.parametrize("mask", ["**", "********", "...", "…"])
+def test_the_first_four_to_nine_characters_followed_by_a_mask_are_found(
+    visible: int, mask: str
+) -> None:
+    secret = secret_part(OPENAI)
+    assert KeyFragments(KEYS).found_in(f"key sk-proj-{secret[:visible]}{mask} is wrong")
+    assert KeyFragments(KEYS).found_in(f"key sk-proj-{secret[:visible]}{mask}{OPENAI[-2:]}")
+    assert KeyFragments(KEYS).found_in(f"({secret[:visible]}{mask})")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**" + OPENAI[-SHOWN_SUFFIX:] + "**",  # markdown bold, not a masked key
+        "**" + secret_part(OPENAI)[:SHOWN_SUFFIX] + "**",
+        "**" + secret_part(OPENAI)[-6:] + "**",
+        secret_part(OPENAI)[:SHOWN_SUFFIX] + "*",  # one star after the first four
+        "x" + secret_part(OPENAI)[:6] + "***",  # the first characters inside another word
+        secret_part(OPENAI)[:3] + "***",  # three are too few
+        "**" + OPENAI[-3:],
+    ],
+)
+def test_more_shapes_that_are_not_fragments(text: str) -> None:
+    assert not KeyFragments(KEYS).found_in(text)
+
+
+# --- The fast path is the slow, obvious rule (review of issue 76) -------------------------------
+
+MASK = "*•·.…"
+
+
+def _masked_before(text: str, position: int) -> bool:
+    if position >= 1 and text[position - 1] == "…":
+        return True
+    return position >= 2 and text[position - 1] in MASK and text[position - 2] in MASK
+
+
+def _masked_after(text: str, end: int) -> bool:
+    if end < len(text) and text[end] == "…":
+        return True
+    return end + 1 < len(text) and text[end] in MASK and text[end + 1] in MASK
+
+
+def _free_after(text: str, end: int) -> bool:
+    return end >= len(text) or not (text[end].isalnum() or text[end] in "*•")
+
+
+def _free_before(text: str, position: int) -> bool:
+    return position == 0 or not (text[position - 1].isalnum() or text[position - 1] in MASK)
+
+
+def _occurrences(text: str, piece: str) -> list[int]:
+    return [i for i in range(len(text) - len(piece) + 1) if text.startswith(piece, i)]
+
+
+def reference(keys: tuple[str, ...], text: str) -> bool:
+    """The rules written the slow, obvious way: every run, every shape, one by one."""
+    for key in keys:
+        if not key:
+            continue
+        secret = secret_part(key)
+        if key in text:
+            return True
+        runs = (secret[i : i + FRAGMENT_LENGTH] for i in range(len(secret) - FRAGMENT_LENGTH + 1))
+        if any(run in text for run in runs):
+            return True
+        if len(secret) < 2 * SHOWN_SUFFIX:
+            continue
+        for visible in range(SHOWN_SUFFIX, min(FRAGMENT_LENGTH, len(secret))):
+            tail, head = secret[-visible:], secret[:visible]
+            if any(
+                _masked_before(text, p) and _free_after(text, p + visible)
+                for p in _occurrences(text, tail)
+            ):
+                return True
+            if any(
+                _free_before(text, p) and _masked_after(text, p + visible)
+                for p in _occurrences(text, head)
+            ):
+                return True
+    return False
+
+
+# Characters of the canaries plus hexadecimal, so random text often touches a key.
+FILLER = "".join(sorted(set("".join(KEYS) + "0123456789abcdef")))
+
+
+@st.composite
+def planted_texts(draw: st.DrawFn) -> tuple[tuple[str, ...], str]:
+    hexkey = draw(st.text("0123456789abcdef", min_size=32, max_size=64))
+    keys = (*KEYS, hexkey)
+    key = draw(st.sampled_from(keys))
+    secret = secret_part(key)
+    filler = st.text(FILLER + MASK + " .\n", max_size=60)
+    start = draw(st.integers(0, max(0, len(secret) - 1)))
+    size = draw(st.integers(1, 14))
+    piece = secret[start : start + size]
+    mask = draw(st.sampled_from(["", "*", "**", "...", "…", "•••"]))
+    planted = draw(st.sampled_from([mask + piece, piece + mask, piece]))
+    return keys, draw(filler) + planted + draw(filler)
+
+
+@settings(max_examples=600, deadline=None)
+@given(planted_texts())
+def test_the_fast_search_agrees_with_the_obvious_rule(case: tuple[tuple[str, ...], str]) -> None:
+    keys, text = case
+    assert KeyFragments(keys).found_in(text) == reference(keys, text)
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.text(FILLER + MASK + " ", max_size=200))
+def test_the_fast_search_agrees_on_random_text(text: str) -> None:
+    assert KeyFragments(KEYS).found_in(text) == reference(KEYS, text)
+
+
+# --- Cost (review of issue 76): relative to the whole-key check, never a wall-clock limit -------
+
+
+def _stream_keys() -> list[str]:
+    rnd = random.Random(76)  # noqa: S311 - fixed seed for invented test keys, not security
+    base62 = string.ascii_letters + string.digits
+    return [
+        "sk-proj-" + "".join(rnd.choice(base62) for _ in range(156)),
+        "sk-ant-api03-" + "".join(rnd.choice(base62 + "-_") for _ in range(95)),
+        "".join(rnd.choice("0123456789abcdef") for _ in range(64)),
+        "".join(rnd.choice("0123456789abcdef") for _ in range(64)),
+    ]
+
+
+def _stream_events() -> list[str]:
+    rnd = random.Random(7)  # noqa: S311 - fixed seed for test data, not security
+    words = [
+        "el",
+        "la",
+        "de",
+        "que",
+        "y",
+        "en",
+        "un",
+        "ser",
+        "se",
+        "no",
+        "haber",
+        "por",
+        "con",
+        "su",
+        "para",
+        "como",
+        "estar",
+        "tener",
+    ]
+    return [_delta(" " + rnd.choice(words)) for _ in range(2000)]
+
+
+def _cpu(watch: KeyWatch, events: list[str]) -> float:
+    parsed = [SSEParser().feed(raw)[0] for raw in events]
+    start = time.process_time()
+    for raw, event in zip(events, parsed, strict=True):
+        watch.check(event)
+        watch.check_output(raw)
+    return time.process_time() - start
+
+
+class _WholeKeyWatch(KeyWatch):
+    """KeyWatch as it was before issue 76: only the whole keys."""
+
+    def _holds(self, text: str) -> bool:
+        return any(key in text for key in self._keys)
+
+
+def test_watching_fragments_costs_at_most_a_few_times_the_whole_key_check() -> None:
+    """A 2,000-event answer with four realistic keys: CPU time relative to the old check.
+
+    Before the fast path it was about 12 times; the bound leaves room for noise."""
+    keys, events = _stream_keys(), _stream_events()
+    fragments = min(_cpu(KeyWatch(keys), events) for _ in range(5))
+    whole = min(_cpu(_WholeKeyWatch(keys), events) for _ in range(5))
+    assert fragments <= 4 * max(whole, 0.016), (fragments, whole)  # 0.016: Windows' clock tick
+
+
+def test_an_answer_body_builds_its_fragments_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    built: list[int] = []
+
+    class Counting(KeyFragments):
+        def __init__(self, keys: Sequence[str]) -> None:
+            built.append(1)
+            super().__init__(keys)
+
+    monkeypatch.setattr(proxy, "KeyFragments", Counting)
+    upstream = httpx.Response(400, json={"error": {"message": "nothing here"}})
+    assert not proxy._echoes_a_key(upstream, [OPENAI, ANTHROPIC])
+    assert len(built) == 1
