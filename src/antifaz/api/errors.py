@@ -148,6 +148,23 @@ class UpstreamEchoedKeyError(BadUpstreamResponseError):
         AppError.__init__(self, "the provider's answer contained a key and was dropped")
 
 
+class UpstreamAuthFailedError(AppError):
+    """The provider answered 401 or 403: it refused the gateway's provider key (issue 76).
+
+    The client gets the provider's status (an SDK raises its authentication or permission
+    error and does not retry) with this fixed body instead of the provider's, which may quote
+    part of the provider key. The code tells it apart from the gateway's own 401/403."""
+
+    code = "upstream_auth_failed"
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(
+            "the provider refused the gateway's provider key (the Antifaz key was accepted): "
+            "check the provider key in the gateway's configuration"
+        )
+        self.status_code = status_code
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str
@@ -161,8 +178,9 @@ class ErrorBody(BaseModel):
 
 _STATUS_TEXT = {
     400: "Invalid request, or blocked to protect personal data (`antifaz_blocked`)",
-    401: "Missing or invalid Antifaz key",
-    403: "Request from a browser origin that is not allowed",
+    401: "Missing or invalid Antifaz key, or the provider refused its key (`upstream_auth_failed`)",
+    403: "Request from a browser origin that is not allowed, or the provider refused its key "
+    "(`upstream_auth_failed`)",
     413: "Body too large",
     415: "Content-Type is not application/json (UTF-8)",
     502: "The provider could not be reached, redirected or answered with a key",
@@ -192,6 +210,7 @@ UPSTREAM_ERRORS = (
     UpstreamUnavailableError,
     UpstreamRedirectError,
     BadUpstreamResponseError,
+    UpstreamAuthFailedError,
 )
 
 

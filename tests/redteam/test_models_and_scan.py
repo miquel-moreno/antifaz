@@ -553,26 +553,55 @@ def _utf16(key: str) -> str:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="limitation: only the whole key, raw or JSON-escaped, is detected in provider "
-    "answers; a base64, UTF-16 or partial echo passes (docs/TECNICO.md, Limitaciones)",
+    reason="limitation: provider answers are checked for the key and its fragments in clear "
+    "or JSON-escaped; a base64 or UTF-16 echo in an error that is not 401/403 passes "
+    "(docs/TECNICO.md, Limitaciones)",
 )
 @pytest.mark.parametrize(
     "echo",
-    [
-        lambda key: base64.b64encode(key.encode()).decode(),
-        _utf16,
-        lambda key: key[:-1],
-    ],
-    ids=["base64", "utf16-hex", "partial"],
+    [lambda key: base64.b64encode(key.encode()).decode(), _utf16],
+    ids=["base64", "utf16-hex"],
 )
-def test_an_encoded_or_partial_key_echo_is_not_detected(
+def test_an_encoded_key_echo_is_not_detected(
     upstream: FakeUpstream, echo: Callable[[str], str]
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"error": {"message": f"bad key {echo(PROVIDER_KEY)}"}})
+        return httpx.Response(400, json={"error": {"message": f"bad key {echo(PROVIDER_KEY)}"}})
 
     upstream.handler = handler
     for client in gateway_client(upstream):
         response = client.get("/v1/models", headers=OPENAI)
 
         assert echo(PROVIDER_KEY) not in response.text
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+@pytest.mark.parametrize(
+    "echo",
+    [
+        lambda key: key[:-1],
+        lambda key: key[3:13],
+        lambda key: base64.b64encode(key.encode()).decode(),
+        _utf16,
+    ],
+    ids=["partial", "ten-characters", "base64", "utf16-hex"],
+)
+def test_a_partial_key_echo_or_any_401_403_body_never_reaches_the_client(
+    upstream: FakeUpstream, echo: Callable[[str], str], status: int
+) -> None:
+    """Issue 76: fragments are detected; a 401/403 never passes its body, encoded or not."""
+    if status == 400 and echo(PROVIDER_KEY) in (
+        base64.b64encode(PROVIDER_KEY.encode()).decode(),
+        _utf16(PROVIDER_KEY),
+    ):
+        pytest.skip("encoded echoes in other errors: the strict xfail above")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"error": {"message": f"bad key {echo(PROVIDER_KEY)}"}})
+
+    upstream.handler = handler
+    for client in gateway_client(upstream):
+        response = client.get("/v1/models", headers=OPENAI)
+
+        assert echo(PROVIDER_KEY) not in response.text
+        assert response.status_code == (502 if status == 400 else status)

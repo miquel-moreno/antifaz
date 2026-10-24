@@ -7,6 +7,7 @@ destination from the client.
 """
 
 import json
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from itertools import permutations
 from typing import Any
@@ -20,14 +21,22 @@ from antifaz.api.errors import (
     InvalidRequestError,
     PayloadTooLargeError,
     StreamingNotSupportedError,
+    UpstreamAuthFailedError,
     UpstreamEchoedKeyError,
     UpstreamRedirectError,
     UpstreamTimeoutError,
     UpstreamUnavailableError,
 )
+from antifaz.api.key_fragments import KeyFragments
 from antifaz.config import Settings
 from antifaz.providers.json_walk import READ_KEYS, fold_key, too_deep
 from antifaz.vault import Vault
+
+logger = logging.getLogger("antifaz.upstream")
+
+# The provider refused the gateway's provider key (or what it may do): only the gateway
+# authenticates to the provider, so the answer is about the operator's key, never the client's.
+AUTH_FAILURES = frozenset({401, 403})
 
 
 def configured_keys(settings: Settings) -> list[str]:
@@ -156,8 +165,10 @@ async def send_masked(
 ) -> httpx.Response:
     """Serialize once, run the guard on those exact bytes and send them. 3xx is never followed.
 
-    An answer that repeats one of `keys` (a careless provider echoing the headers it got) is
-    dropped with a fixed 502: its body would hand the provider key to the client.
+    A 401 or 403 is a fixed upstream_auth_failed with the same status: the provider's body
+    about its own key (which may quote part of it) never reaches the client (issue 76). Any
+    other answer that repeats one of `keys` or a fragment of one (a careless provider echoing
+    the headers it got) is dropped with a fixed 502: its body would hand the key to the client.
 
     With `stream`, a successful answer in server-sent events comes back OPEN (the caller
     relays and closes it; its events are checked for keys one by one). Any other answer
@@ -212,6 +223,11 @@ async def _checked(
         return upstream  # open: its events are checked as they arrive
     if stream:
         await _read_all(upstream)
+    if upstream.status_code in AUTH_FAILURES:
+        await upstream.aclose()
+        # Only the status: the body may quote part of the key (issue 76).
+        logger.warning("the provider refused the gateway's key: HTTP %d", upstream.status_code)
+        raise UpstreamAuthFailedError(upstream.status_code)
     if _echoes_a_key(upstream, keys):
         raise UpstreamEchoedKeyError()
     return upstream
@@ -255,7 +271,7 @@ def _content_type(upstream: httpx.Response) -> bytes:
 
 
 def _holds_a_key(raw: bytes, keys: Sequence[str]) -> bool:
-    return any(key.encode() in raw for key in keys)
+    return KeyFragments(keys).found_in(raw.decode("latin-1"))
 
 
 def _decoded(text: str) -> list[str]:
@@ -294,12 +310,15 @@ def key_texts(raw: bytes | str) -> Iterator[str]:
 
 
 def contains_key(raw: bytes | str, keys: Sequence[str]) -> bool:
-    """True if a key is in `raw` as it is or in any decoded layer of it (invariant 13)."""
-    return any(key in text for text in key_texts(raw) for key in keys)
+    """True if a key, or a recognisable fragment of one (antifaz.api.key_fragments), is in
+    `raw` as it is or in any decoded layer of it (invariant 13)."""
+    fragments = KeyFragments(keys)
+    return any(fragments.found_in(text) for text in key_texts(raw))
 
 
 def _echoes_a_key(upstream: httpx.Response, keys: Sequence[str]) -> bool:
-    """True if the body (raw or any decoded layer) or the content type holds a key."""
+    """True if the body (raw or any decoded layer) or the content type holds a key or a
+    fragment of one."""
     if _holds_a_key(_content_type(upstream), keys):
         return True
     return contains_key(upstream.content, keys)
