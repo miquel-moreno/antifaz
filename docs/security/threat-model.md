@@ -27,7 +27,7 @@ externo. Si algo falla al revisar la petición, se bloquea.
 |---|---|---|---|
 | Tabla de marcadores | Fuga por logs, errores o volcados | Vive solo durante la petición. Logs con lista de campos permitidos y filtro de PII. Errores genéricos. | Errores que no repiten el cuerpo: **hecho** (issue 1). Resto: issues 4–5 |
 | Datos entre usuarios | Una inyección de prompt pide "imprime [[ES_DNI_1]]" | Sin estado compartido (ADR-0004). Solo se restauran marcadores emitidos en la propia petición. | Issues 4–5 |
-| Claves de proveedores | Exposición | Solo en el servidor (secretos de Docker o `.env`). Nunca en respuestas ni logs; una respuesta del proveedor que repite una clave se descarta (502). | Issue 5; test de claves canario (invariante 13): **hecho** (issue 20) |
+| Claves de proveedores | Exposición | Solo en el servidor (secretos de Docker o `.env`). Nunca en respuestas ni logs; una respuesta del proveedor que repite una clave, o un trozo reconocible de una, se descarta (502); un 401/403 del proveedor nunca pasa su cuerpo (`upstream_auth_failed`). | Issue 5; test de claves canario (invariante 13): **hecho** (issue 20); trozos de clave: **hecho** (issue 76) |
 | Claves de Antifaz | Uso indebido | v0.1: una clave desde `.env`. v0.2: claves virtuales guardadas como HMAC con pepper, con alcance y límites. | Issues 5 y 8 |
 | Destino | SSRF | Destinos fijos en la configuración; nunca una URL del cliente. | Issue 5 |
 | Disponibilidad | DoS, ReDoS, historiales enormes | Tamaño máximo de petición, pool de procesos con tiempo máximo para el NER, `re2`, caché de spans, límites por clave. | Issues 2, 5, 6 y 8 |
