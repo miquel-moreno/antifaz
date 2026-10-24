@@ -47,6 +47,7 @@
   var typeLabels = Object.create(null);
   var source = null;
   var gone = false;
+  var checking = false;
   var figures = null;
 
   document.getElementById("try-types").content.querySelectorAll("[data-type]")
@@ -497,8 +498,27 @@
   }
 
   reconnect.addEventListener("click", function () {
+    if (checking || source) {
+      return;
+    }
+    checking = true;
+    reconnect.setAttribute("aria-disabled", "true");
+    document.dispatchEvent(new CustomEvent("antifaz:live-check"));
+  });
+
+  document.addEventListener("antifaz:live-ok", function () {
+    if (!checking) {
+      return;
+    }
+    checking = false;
+    reconnect.removeAttribute("aria-disabled");
     connect();
     view.focus({preventScroll: true});
+  });
+
+  document.addEventListener("antifaz:live-failed", function () {
+    checking = false;
+    reconnect.removeAttribute("aria-disabled");
   });
 
   new MutationObserver(sync).observe(view, {attributes: true, attributeFilter: ["hidden"]});
