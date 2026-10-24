@@ -342,6 +342,99 @@ def test_a_cut_stream_shows_disconnected_never_retries_and_reconnects_on_the_but
     _clean(tab, browser_name, cut=1)
 
 
+SESSION_PATH = "/panel/api/session"
+
+
+def _lose_the_stream(tab: Tab, server: PanelServer) -> None:
+    server.cut_live_streams()
+    assert server.scan("hola") == 200
+    _pill(tab, "off")
+    server.restore_live_streams()
+
+
+def _paths(tab: Tab, *paths: str) -> list[str]:
+    return [urlsplit(url).path for url in tab.requests if urlsplit(url).path in paths]
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_reconnect_checks_the_session_first_then_opens_one_stream(
+    new_tab: NewTab, server: PanelServer, browser_name: str
+) -> None:
+    """Owner change: the button asks for the session (session.js, POST /panel/api/session) and
+    only then opens the stream."""
+    tab = _tab(new_tab, "es")
+    log_in(tab, server, "es")
+    _open_live(tab)
+    _lose_the_stream(tab, server)
+    before = len(_paths(tab, SESSION_PATH, LIVE_PATH))
+
+    with tab.page.expect_request(lambda request: _is_live(request.url)):
+        tab.page.click("#live-reconnect")
+    _pill(tab, "connected")
+
+    assert _paths(tab, SESSION_PATH, LIVE_PATH)[before:] == [SESSION_PATH, LIVE_PATH]
+    assert _streams(tab) == [2, 1]
+    _clean(tab, browser_name, cut=1)
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_reconnect_after_a_logout_elsewhere_goes_to_the_login(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """Owner change: the session was closed in another tab while this one was disconnected (no
+    `end` could reach it). «Volver a conectar» finds the 401 and the page goes to the login,
+    once, without opening a stream."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    _open_live(tab)
+    _lose_the_stream(tab, server)
+    other = new_tab(locale="en-US")
+    tab.share_session_with(other)
+    other.goto("/panel?lang=en")
+    other.page.click(".app-sidebar-foot [data-logout]")
+    _at_the_login(other, server)
+    logins: list[str] = []
+    tab.page.on(
+        "request",
+        lambda request: (
+            logins.append(request.url)
+            if request.resource_type == "document" and urlsplit(request.url).path == "/panel/login"
+            else None
+        ),
+    )
+
+    tab.page.click("#live-reconnect")
+    _at_the_login(tab, server)
+
+    assert len(logins) == 1
+    assert _paths(tab, SESSION_PATH).count(SESSION_PATH) == 1
+    assert _live_requests(tab) == 1  # only the stream from before: none was opened
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_reconnect_with_the_gateway_unreachable_stays_lost(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """A network error on the check: still «Desconectado», the button usable again."""
+    tab = _tab(new_tab, "es")
+    log_in(tab, server, "es")
+    _open_live(tab)
+    _lose_the_stream(tab, server)
+    tab.page.route(f"{tab.origin}{SESSION_PATH}", lambda route: route.abort())
+
+    with tab.page.expect_request(lambda request: urlsplit(request.url).path == SESSION_PATH):
+        tab.page.click("#live-reconnect")
+    tab.page.wait_for_function(
+        "() => !document.getElementById('live-reconnect').hasAttribute('aria-disabled')",
+        timeout=TIMEOUT_MS,
+    )
+
+    assert _shown(tab, "live-lost")
+    assert _shown(tab, "live-reconnect")
+    assert _live_requests(tab) == 1
+    assert tab.page.url.split("?")[0].endswith("/panel")
+
+
 @pytest.mark.parametrize("server_options", [FAKE])
 def test_reconnect_works_from_the_keyboard(new_tab: NewTab, server: PanelServer) -> None:
     tab = _tab(new_tab)

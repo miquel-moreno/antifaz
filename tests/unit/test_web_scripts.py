@@ -304,6 +304,27 @@ def test_live_js_closes_the_stream_first_on_any_error() -> None:
     assert ".close();" in body[: body.index("\n  }")]
 
 
+def test_reconnect_asks_session_js_to_check_the_session_first() -> None:
+    """Owner change after review 2: «Volver a conectar» never opens the stream by itself. live.js
+    says "antifaz:live-check"; session.js checks with its own POST /panel/api/session (a 401 is
+    its usual way out to the login) and answers "antifaz:live-ok" or "antifaz:live-failed";
+    only on "antifaz:live-ok" does live.js open the stream. live.js still fetches nothing."""
+    live = _source(STREAM_SCRIPT)
+    click = live[live.index('reconnect.addEventListener("click", function () {') :]
+    click = click[: click.index("\n  });")]
+    assert 'new CustomEvent("antifaz:live-check")' in click
+    assert "connect()" not in click
+    ok = live[live.index('addEventListener("antifaz:live-ok", function () {') :]
+    assert "connect();" in ok[: ok.index("\n  });")]
+    assert 'addEventListener("antifaz:live-failed"' in live
+    assert "fetch(" not in _split(live)[0]
+    session = _source("session.js")
+    assert 'addEventListener("antifaz:live-check"' in session
+    assert 'new CustomEvent("antifaz:live-ok")' in session
+    assert 'new CustomEvent("antifaz:live-failed")' in session
+    assert _split(session)[0].count("fetch(") == 1  # the same one request as «Seguir»
+
+
 def test_panel_js_leaves_only_once() -> None:
     """Review 1 of 11e-2: when another script already said "antifaz:wipe" (session.js at the
     expiry, live.js through it), panel.js's own way out (a 401, the logout's answer) does not
