@@ -390,6 +390,7 @@
 
   function wipe() {
     gone = true;
+    checking = false;
     disconnect();
     figures = null;
     data.hidden = true;
@@ -526,6 +527,8 @@
   document.addEventListener("antifaz:wipe", wipe);
   document.addEventListener("antifaz:logout", function () {
     disconnect();
+    checking = false;
+    reconnect.removeAttribute("aria-disabled");
     if (!gone && !view.hidden) {
       stopped("");
     }
