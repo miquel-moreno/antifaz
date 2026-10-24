@@ -164,8 +164,9 @@ def test_nothing_the_review_removed(lang: str) -> None:
 
     for gone in ("/healthz", "meter", "Escucha en", "Listens on", "Base de datos", "Database"):
         assert gone not in view, gone
-    for gone in ("Comprobar ahora", "Check now", "live-pill", "app-status"):
+    for gone in ("Comprobar ahora", "Check now", "app-status"):
         assert gone not in page, gone
+    assert "live-pill" not in view  # 11e-2: the pill is «En directo»'s, never here
     start = page.index('id="tab-status"')
     tab = page[start : page.index("</button>", start)]
     assert "dot" not in tab  # no warning dot on the tab

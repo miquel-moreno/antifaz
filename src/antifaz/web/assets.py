@@ -52,6 +52,7 @@ SERVED = (
     "panel.js",
     "session.js",  # 11d-b: the expiry warning
     "try.js",  # 11d-b: «Prueba un texto»
+    "live.js",  # 11e-2: «En directo»
 )
 # Shipped next to the fonts (the OFL asks for it), never served.
 LICENCE_TEXTS = ("Inter-OFL.txt", "GeistMono-OFL.txt")

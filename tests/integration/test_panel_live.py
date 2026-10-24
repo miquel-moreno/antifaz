@@ -93,7 +93,9 @@ async def test_a_live_session_gets_a_snapshot_with_the_doors_headers(app: FastAP
                 "recent": [],
                 "hidden": [],
                 "outcomes": [{"outcome": outcome.value, "count": 0} for outcome in Outcome],
-                "checks": 0,
+                "blocks": [],
+                "tries": 0,
+                "scans": 0,
                 "uptime_seconds": data["uptime_seconds"],
                 "processes": 1,
             }
@@ -136,7 +138,7 @@ async def test_a_reconnect_gets_the_recent_events_and_totals_in_its_snapshot(app
     assert data["recent"][0]["origin"] == "scan"  # newest first
     assert data["hidden"] == [{"type": "ES_DNI", "count": RECENT + 3}]
     assert {"outcome": "masked", "count": RECENT + 3} in data["outcomes"]
-    assert data["checks"] == 1
+    assert (data["scans"], data["tries"], data["blocks"]) == (1, 0, [])
 
 
 @pytest.mark.parametrize("accept", [None, "application/json", "*/*", "text/html", "text/event"])

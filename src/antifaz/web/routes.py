@@ -335,6 +335,8 @@ def build_router(state: PanelState) -> APIRouter:
             max_seconds=end,
             ner_words=state.try_ner_words,
             max_text_bytes=MAX_TEXT_BYTES,
+            live_per_session=streams.per_session,  # the limits really applied
+            live_total=streams.max_streams,
         )
         return _page(page, lang)
 

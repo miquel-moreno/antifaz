@@ -16,12 +16,22 @@
   finds the invented names of tests/nerfakes.py, in this process (`ner_names`).
 - Ready when uvicorn says it started (an Event set right after its startup), with a generous
   hang guard that only produces an error message: never a timing assertion.
+- 11e-2 («En directo»): `fake_provider` puts an invented provider IN THIS PROCESS behind the
+  proxy (canned answers, model "fail" gets a 502; the real transport is never built), so a test
+  can drive the live feed through the real engine with `proxy_openai`, `proxy_anthropic` and
+  `scan` (plain httpx to loopback, with the gateway's throwaway key). Its calls are counted in
+  `fake_provider_calls`, never in `provider_calls`. `processes` is the number the snapshot says;
+  `live_max_streams` and `live_max_seconds` shorten the stream limits (the attributes
+  LiveStreams has for tests). `cut_live_streams()` makes the next frame of every open stream
+  fail, so uvicorn drops those connections mid-stream (the browser sees a broken stream, not an
+  `end`).
 
 Standard library, httpx, uvicorn and Antifaz only: no Playwright here.
 """
 
 import asyncio
 import http.server
+import json
 import logging
 import secrets
 import socket
@@ -78,6 +88,12 @@ class ServerOptions:
     # tests (invented names, tests/nerfakes.py) in this process, with no worker process. It says
     # "ok" for the Status view. Takes the place of ner_state.
     ner_names: bool = False
+    # 11e-2: an invented provider in this process behind the proxy (and throwaway keys for it).
+    fake_provider: bool = False
+    processes: int = 1  # what the live snapshot says (more than one: «datos de este proceso»)
+    live_max_streams: int | None = None  # None: the gateway's own limit
+    live_per_session: int | None = None  # None: the gateway's own limit
+    live_max_seconds: float | None = None  # None: the gateway's 30 minutes
 
 
 class FakeNer:
@@ -127,6 +143,66 @@ class _PostRecorder:
         await self.app(scope, receive, recording_send)
 
 
+LIVE_PATH = "/panel/api/live"
+
+
+class _Cut(Exception):  # noqa: N818 - reads as what happened
+    """A live stream cut on purpose by the test (cut_live_streams)."""
+
+
+class _LiveCutter:
+    """ASGI wrapper (11e-2): once `cut` is set, the next body frame of a live stream raises, so
+    uvicorn closes that connection without ending the response."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.cut = threading.Event()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != LIVE_PATH:
+            await self.app(scope, receive, send)
+            return
+
+        async def cutting_send(message: Message) -> None:
+            if message["type"] == "http.response.body" and self.cut.is_set():
+                raise _Cut()
+            await send(message)
+
+        await self.app(scope, receive, cutting_send)
+
+
+def _fake_provider(request: httpx.Request) -> httpx.Response:
+    """Invented answers of an OpenAI or Anthropic API (11e-2). Model "fail": a 502."""
+    body = json.loads(request.content or b"{}")
+    if body.get("model") == "fail":
+        return httpx.Response(502, json={"error": {"message": "invented failure"}})
+    if request.url.path.endswith("/chat/completions"):
+        message = {"role": "assistant", "content": "ok"}
+        choice = {"index": 0, "message": message, "finish_reason": "stop"}
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "m",
+                "choices": [choice],
+            },
+        )
+    return httpx.Response(
+        200,
+        json={
+            "id": "x",
+            "type": "message",
+            "role": "assistant",
+            "model": "m",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    )
+
+
 SHUTDOWN_LIMIT_MESSAGE = "timeout graceful shutdown exceeded"
 
 
@@ -163,10 +239,10 @@ class PanelServer:
         options = options or ServerOptions()
         self.api_key = secrets.token_hex(32)
         self.admin_token = secrets.token_hex(32)
-        self.provider_keys = (
-            (secrets.token_hex(32), secrets.token_hex(32)) if options.provider_keys else ()
-        )
+        with_keys = options.provider_keys or options.fake_provider
+        self.provider_keys = (secrets.token_hex(32), secrets.token_hex(32)) if with_keys else ()
         self._provider = _NoProvider()
+        self.fake_provider_calls = 0
         keys = (
             {
                 "openai_api_key": SecretStr(self.provider_keys[0]),
@@ -188,9 +264,26 @@ class PanelServer:
             from tests.nerfakes import fake_detector
 
             self.ner = fake_detector()[0]
-        self._http = httpx.AsyncClient(transport=httpx.MockTransport(self._provider))
-        app = create_app(settings, http_client=self._http, ner=self.ner)  # type: ignore[arg-type]
-        self._recorder = _PostRecorder(app)
+        transport = httpx.MockTransport(
+            self._answer_as_the_fake_provider if options.fake_provider else self._provider
+        )
+        self._http = httpx.AsyncClient(transport=transport)
+        app = create_app(
+            settings,
+            http_client=self._http,
+            ner=self.ner,  # type: ignore[arg-type]
+            processes=options.processes,
+        )
+        self.app = app
+        streams = app.state.live_streams
+        if options.live_max_streams is not None:
+            streams.max_streams = options.live_max_streams
+        if options.live_per_session is not None:
+            streams.per_session = options.live_per_session
+        if options.live_max_seconds is not None:
+            streams.max_seconds = options.live_max_seconds
+        self._cutter = _LiveCutter(app)
+        self._recorder = _PostRecorder(self._cutter)
         config = uvicorn.Config(
             self._recorder,
             loop="asyncio",
@@ -211,6 +304,56 @@ class PanelServer:
         self.port: int = self._socket.getsockname()[1]
         self.origin = f"http://{HOST}:{self.port}"
         self._thread = threading.Thread(target=self._run, name="panel-server", daemon=True)
+
+    def _answer_as_the_fake_provider(self, request: httpx.Request) -> httpx.Response:
+        self.fake_provider_calls += 1
+        return _fake_provider(request)
+
+    # --- 11e-2: driving «En directo» through the real engine ------------------------------------
+
+    def _post(self, path: str, body: object, headers: dict[str, str]) -> int:
+        with httpx.Client(base_url=self.origin, timeout=HANG_GUARD_SECONDS) as client:
+            return client.post(path, json=body, headers=headers).status_code
+
+    def proxy_openai(
+        self,
+        text: str,
+        *,
+        user_agent: str = "curl/8.9.1",
+        model: str = "m",
+        extra: dict[str, object] | None = None,
+    ) -> int:
+        """One chat completion through the proxy (the fake provider answers)."""
+        body = {"model": model, "messages": [{"role": "user", "content": text}], **(extra or {})}
+        headers = {"Authorization": f"Bearer {self.api_key}", "User-Agent": user_agent}
+        return self._post("/v1/chat/completions", body, headers)
+
+    def proxy_anthropic(self, content: object, *, user_agent: str = "curl/8.9.1") -> int:
+        """One Messages request through the proxy (the fake provider answers)."""
+        body = {"model": "m", "max_tokens": 8, "messages": [{"role": "user", "content": content}]}
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "User-Agent": user_agent,
+        }
+        return self._post("/v1/messages", body, headers)
+
+    def scan(self, text: str, *, user_agent: str = "curl/8.9.1") -> int:
+        """One /antifaz/scan (no provider)."""
+        headers = {"Authorization": f"Bearer {self.api_key}", "User-Agent": user_agent}
+        return self._post("/antifaz/scan", {"text": text}, headers)
+
+    def live_streams_open(self) -> int:
+        """How many «En directo» streams the gateway holds a place for now."""
+        return int(self.app.state.live_streams.open_streams)
+
+    def cut_live_streams(self) -> None:
+        """From now on, the next frame of every live stream drops its connection."""
+        self._cutter.cut.set()
+
+    def restore_live_streams(self) -> None:
+        """Undo cut_live_streams(): the next streams are normal ones."""
+        self._cutter.cut.clear()
 
     def door_headers(self, path: str) -> dict[str, str]:
         """What the last POST to `path` brought: origin, sec-fetch-site, x-antifaz-csrf."""

@@ -306,11 +306,12 @@ def test_the_session_warning_is_polite_and_never_an_alert(lang: str) -> None:
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_the_page_loads_the_three_scripts_in_order(lang: str) -> None:
+def test_the_page_loads_the_four_scripts_in_order(lang: str) -> None:
     urls = load_assets().urls
     scripts = re.findall(r'<script src="([^"]+)" defer></script>', _page(lang))
 
-    assert scripts == [urls["panel.js"], urls["session.js"], urls["try.js"]]
+    # 11e-2: live.js («En directo») last
+    assert scripts == [urls["panel.js"], urls["session.js"], urls["try.js"], urls["live.js"]]
 
 
 # --- what the prototype had and this screen must not -----------------------------------------

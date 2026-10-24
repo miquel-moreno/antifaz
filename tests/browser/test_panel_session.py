@@ -14,12 +14,15 @@ the fake clock from its first line); the gateway's own clock is real, so its ses
 - A failed «Seguir» says so and leaves the button usable. axe finds nothing with the banner.
 """
 
+import contextlib
 import re
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Route
 
 from antifaz.web.i18n import load_catalogs
@@ -286,3 +289,63 @@ def test_on_a_phone_the_banner_stays_in_the_flow(
     assert tab.page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth") <= 0
     assert tab.page.evaluate(LAYOUT_JS)["covered"] is False
     axe_clean(tab)
+
+
+SECOND_NAVIGATION_WINDOW_MS = 2_000
+
+
+def _until(check: Callable[[], bool], tab: Tab, what: str) -> None:
+    """Let Playwright deliver its events until `check()` (bounded: a hang guard only). Nothing
+    is evaluated in the page: it may be in the middle of a navigation."""
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    while not check():
+        assert time.monotonic() < deadline, what
+        tab.page.wait_for_timeout(20)
+
+
+def test_the_expiry_and_a_late_401_leave_for_the_login_only_once(
+    tab: Tab, server: PanelServer
+) -> None:
+    """Review 1 of 11e-2: session.js leaves at the expiry while a request of panel.js («Estado»)
+    is still pending; when that request then answers 401, panel.js must not leave a second time
+    (the second navigation would abort the first). The login page's document is held until the
+    late answer has been handled, and every request for it is counted."""
+    held_status: list[Route] = []
+    held_login: list[Route] = []
+    logins: list[str] = []
+    _start(tab, server)
+    tab.page.route(f"{tab.origin}/panel/api/status", lambda route: held_status.append(route))
+    tab.page.route(f"{tab.origin}/panel/login*", lambda route: held_login.append(route))
+    tab.page.on(
+        "request",
+        lambda request: (
+            logins.append(request.url)
+            if request.resource_type == "document" and urlsplit(request.url).path == "/panel/login"
+            else None
+        ),
+    )
+    try:
+        tab.page.click("#tab-status")
+        _until(lambda: len(held_status) == 1, tab, "the status request is held")
+
+        tab.page.clock.run_for((IDLE_SECONDS + 1) * 1000)  # session.js leaves: login held
+        _until(lambda: len(held_login) == 1, tab, "the expiry asked for the login")
+        # Firefox cancels the page's pending fetch when the navigation starts (so the late 401
+        # never reaches panel.js there); Chromium and WebKit deliver it.
+        with contextlib.suppress(PlaywrightError):
+            held_status.pop().fulfill(
+                status=401,
+                headers={"Content-Type": "application/json"},
+                body='{"error": {"code": "unauthorized"}}',
+            )
+        # The page is navigating: nothing can be evaluated in it any more. A second navigation
+        # would start right after the 401 reaches panel.js: a bounded window to see it.
+        tab.page.wait_for_timeout(SECOND_NAVIGATION_WINDOW_MS)
+
+        assert len(logins) == 1, "a second navigation to the login"
+        held_login.pop().continue_()
+        tab.page.wait_for_url(f"{server.origin}/panel/login*", wait_until="load")
+    finally:  # never leave a request held: the context would wait for it
+        for route in [*held_status, *held_login]:
+            with contextlib.suppress(PlaywrightError):
+                route.abort()

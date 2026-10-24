@@ -30,6 +30,7 @@ import jinja2
 
 from antifaz.web.assets import Assets
 from antifaz.web.i18n import Catalogs, load_catalogs
+from antifaz.web.live_limits import MAX_PER_SESSION, MAX_STREAMS
 from antifaz.web.sessions import MAX_AGE_SECONDS
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -74,7 +75,14 @@ class Pages:
         for code in self.catalogs.codes:  # rendered at startup: a missing value stops it here
             for words in (None, 1):  # the NER off and on
                 self.panel(
-                    code, "", idle_seconds=0, max_seconds=0, ner_words=words, max_text_bytes=1
+                    code,
+                    "",
+                    idle_seconds=0,
+                    max_seconds=0,
+                    ner_words=words,
+                    max_text_bytes=1,
+                    live_per_session=1,
+                    live_total=1,
                 )
 
     @property
@@ -105,10 +113,14 @@ class Pages:
         max_seconds: int = 0,
         ner_words: int | None = None,
         max_text_bytes: int = 0,
+        live_per_session: int = MAX_PER_SESSION,
+        live_total: int = MAX_STREAMS,
     ) -> str:
         """The panel in `lang` for a live session: its CSRF token in the meta, and nowhere else;
         the seconds it has left (11d-b, session.js), the words a Try may give the name detector
-        (None: the NER is off) and the bytes a Try text may have, all server values."""
+        (None: the NER is off), the bytes a Try text may have and (11e-2) the limits of «En
+        directo» streams per session and in total (web/live_stream.py, for its busy text),
+        all server values."""
         return self._panel.render(
             **self._context(lang, PANEL_PATH),
             csrf_meta=CSRF_META,
@@ -118,4 +130,6 @@ class Pages:
             ner_words=ner_words,
             max_text_bytes=max_text_bytes,
             session_hours=MAX_AGE_SECONDS // 3600,
+            live_per_session=live_per_session,
+            live_total=live_total,
         )

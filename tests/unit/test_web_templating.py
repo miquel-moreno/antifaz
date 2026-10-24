@@ -101,6 +101,13 @@ def test_the_login_page_is_rendered_once_and_has_no_csrf_meta(
         *(PAGES.panel(code, "csrf-token-x") for code in CATALOGS.codes),
         HTTPS_ONLY_PAGE,
     ],
+    # Short ids (11e-2): pytest puts the id in an environment variable, which Windows caps at
+    # 32 767 characters, and the panel page is longer than that now.
+    ids=[
+        *(f"login-{code}" for code in CATALOGS.codes),
+        *(f"panel-{code}" for code in CATALOGS.codes),
+        "https-only",
+    ],
 )
 def test_served_pages_hold_nothing_the_csp_would_block(page: str) -> None:
     assert page.startswith("<!doctype html>")

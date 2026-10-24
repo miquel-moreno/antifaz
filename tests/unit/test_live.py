@@ -299,7 +299,10 @@ def test_the_totals_count_the_proxy_and_never_try_or_scan() -> None:
         Outcome.BLOCKED: 1,
         Outcome.UPSTREAM_ERROR: 1,
     }
-    assert snapshot.checks == 3  # «Prueba un texto» and /antifaz/scan: apart
+    # «Prueba un texto» and /antifaz/scan: apart, each with its own count (11e-2)
+    assert (snapshot.tries, snapshot.scans) == (1, 2)
+    # 11e-2: the proxy's blocks by reason (the blocked scan is not one of them)
+    assert dict(snapshot.blocks) == {Reason.ATTACHMENT: 1}
     assert len(snapshot.recent) == 8  # every origin is in the feed
 
 
@@ -308,7 +311,25 @@ def test_the_totals_list_every_outcome_and_only_types_with_a_value() -> None:
     assert dict(snapshot.outcomes) == dict.fromkeys(Outcome, 0)
     assert dict(snapshot.hidden) == {}
     assert snapshot.recent == ()
-    assert snapshot.checks == 0
+    assert (snapshot.tries, snapshot.scans, dict(snapshot.blocks)) == (0, 0, {})
+
+
+def test_blocks_are_counted_by_reason_in_reason_order() -> None:
+    """11e-2: «Bloqueos» says why («2 adjuntos · 1 detector»): one count per reason, only the
+    reasons with a block, in the order of the enum, and their sum is the blocked outcome."""
+    feed = MemoryLiveFeed(clock=_Clock(), processes=1)
+    for reason in (Reason.EGRESS_GUARD, Reason.ATTACHMENT, Reason.ATTACHMENT, Reason.NONE):
+        feed.record(_event(outcome=Outcome.BLOCKED, types={}, reason=reason))
+
+    snapshot = feed.snapshot()
+    assert list(snapshot.blocks.items()) == [
+        (Reason.ATTACHMENT, 2),
+        (Reason.EGRESS_GUARD, 1),
+        (Reason.NONE, 1),
+    ]
+    assert sum(snapshot.blocks.values()) == snapshot.outcomes[Outcome.BLOCKED] == 4
+    with pytest.raises(TypeError):
+        snapshot.blocks[Reason.TOO_DEEP] = 1  # type: ignore[index]  # read-only
 
 
 def test_the_uptime_and_the_processes_are_in_the_snapshot() -> None:
@@ -399,7 +420,7 @@ def test_the_null_feed_keeps_nothing() -> None:
     snapshot = feed.snapshot()
     assert snapshot.recent == ()
     assert dict(snapshot.hidden) == {}
-    assert snapshot.checks == 0
+    assert (snapshot.tries, snapshot.scans, dict(snapshot.blocks)) == (0, 0, {})
     assert snapshot.processes == 2
     assert woken == []
     assert subscription.drain() == (False, ())

@@ -79,7 +79,7 @@ def _clean(tab: Tab, browser_name: str, refused: int = 0, since: int = 0) -> Non
     where = tab.console_locations[since:]
     assert unexpected_console(lines, browser_name, sys.platform, where, refused=refused) == []
     assert tab.errors == []
-    assert tab.failed == []
+    assert tab.unexpected_failures() == []
     assert tab.blocked == []
     assert tab.foreign_requests() == []
 

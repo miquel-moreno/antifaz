@@ -377,6 +377,20 @@ mark.pii[data-text-type]::after{content:attr(data-text-type);display:inline-bloc
 .feed-empty .orb{width:44px;height:44px;border-radius:14px}
 .feed-empty .orb .ic{width:20px;height:20px}
 .feed-empty p{max-width:46ch}
+/* «En directo» (11e-2): the pill's dot by state (its word says the state too) */
+.live-pill.is-connecting .dot{color:var(--color-warn)}
+.live-pill.is-off .dot{color:var(--color-danger)}
+.live-data{display:flex;flex-direction:column;gap:22px;min-width:0}
+.stat.s-prot>#live-uptime{margin-top:12px}
+.bars li>span:first-child{min-width:0;overflow-wrap:anywhere}
+/* A bar's fill: live.js sets data-v to 0..20, twentieths of the largest count (no inline style) */
+.meter>i[data-v="1"]{--v:.05}.meter>i[data-v="2"]{--v:.1}.meter>i[data-v="3"]{--v:.15}.meter>i[data-v="4"]{--v:.2}.meter>i[data-v="5"]{--v:.25}
+.meter>i[data-v="6"]{--v:.3}.meter>i[data-v="7"]{--v:.35}.meter>i[data-v="8"]{--v:.4}.meter>i[data-v="9"]{--v:.45}.meter>i[data-v="10"]{--v:.5}
+.meter>i[data-v="11"]{--v:.55}.meter>i[data-v="12"]{--v:.6}.meter>i[data-v="13"]{--v:.65}.meter>i[data-v="14"]{--v:.7}.meter>i[data-v="15"]{--v:.75}
+.meter>i[data-v="16"]{--v:.8}.meter>i[data-v="17"]{--v:.85}.meter>i[data-v="18"]{--v:.9}.meter>i[data-v="19"]{--v:.95}.meter>i[data-v="20"]{--v:1}
+/* Disconnected: the figures from before stay, dimmed (muted text, grey fills) */
+.live-data.is-stale .stat-num,.live-data.is-stale .bars .n,.live-data.is-stale .ev-who{color:var(--color-text-muted)}
+.live-data.is-stale .meter>i,.live-data.is-stale .bars li:first-child .meter>i{background:var(--color-control)}
 
 /* ---------- Claves ---------- */
 .keys{width:100%;border-collapse:collapse;font-size:.875rem}
@@ -803,6 +817,9 @@ body{container:page/inline-size}
   .marker{border:1px solid CanvasText}
   .restored{text-decoration:underline}
   .pswitch button[aria-pressed="true"]{border:1px solid CanvasText}
+  /* «En directo» (11e-2): a bar keeps its track and its fill */
+  .meter{outline:1px solid CanvasText;outline-offset:-1px}
+  .meter>i,.bars li:first-child .meter>i,.live-data.is-stale .meter>i{background:CanvasText}
 }
 
 /* Reduced motion: the system setting */

@@ -73,7 +73,6 @@
   }
 
   function failed() {
-    asking = false;
     var node = box.firstElementChild;
     if (!node) {
       return;
@@ -85,25 +84,27 @@
     }
   }
 
-  function extended(data) {
-    asking = false;
+  function renewed(data) {
     if (!data || typeof data !== "object" || !valid(data.idle_seconds) ||
         !valid(data.max_seconds)) {
-      failed();
-      return;
+      return false;
     }
     var now = Date.now();
     maxDeadline = now + ahead(data.max_seconds);
     idleDeadline = Math.min(now + ahead(data.idle_seconds), maxDeadline);
     schedule();
+    return true;
   }
 
-  function extend(event) {
-    if (asking || expired) {
+  function ask(done, refused) {
+    if (expired) {
+      return;
+    }
+    if (asking) {
+      refused();
       return;
     }
     asking = true;
-    event.currentTarget.setAttribute("aria-disabled", "true");
     var csrf = document.querySelector("meta[name=antifaz-csrf]");
     fetch("/panel/api/session", {
       method: "POST",
@@ -114,16 +115,34 @@
       headers: {"Content-Type": "application/json", "X-Antifaz-CSRF": csrf ? csrf.content : ""},
       body: "{}"
     }).then(function (response) {
+      asking = false;
       if (response.status === 401) {
         expire();
         return;
       }
       if (response.status !== 200) {
-        failed();
+        refused();
         return;
       }
-      return response.json().then(extended, failed);
-    }, failed);
+      return response.json().then(function (data) {
+        if (renewed(data)) {
+          done();
+        } else {
+          refused();
+        }
+      }, refused);
+    }, function () {
+      asking = false;
+      refused();
+    });
+  }
+
+  function extend(event) {
+    if (asking || expired) {
+      return;
+    }
+    event.currentTarget.setAttribute("aria-disabled", "true");
+    ask(function () {}, failed);
   }
 
   function show(nearMax, end) {
@@ -179,6 +198,14 @@
   });
 
   document.addEventListener("antifaz:unauthorized", expire);
+
+  document.addEventListener("antifaz:live-check", function () {
+    ask(function () {
+      document.dispatchEvent(new CustomEvent("antifaz:live-ok"));
+    }, function () {
+      document.dispatchEvent(new CustomEvent("antifaz:live-failed"));
+    });
+  });
 
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") {
