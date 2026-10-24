@@ -499,8 +499,23 @@ SCENARIOS: list[Scenario] = [
     ),
     ("502 redirect", _redirect, "POST", "", {"json": GATEWAY_BODY, "headers": CANARY_AUTH}),
     (
+        # Not 401/403: those never pass the provider's body (issue 76, test_key_fragments.py).
         "provider error echoing its headers",
+        _echo_headers(400),
+        "POST",
+        "",
+        {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
+    ),
+    (
+        "auth error 401 echoing its headers",
         _echo_headers(401),
+        "POST",
+        "",
+        {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
+    ),
+    (
+        "auth error 403 with the key escaped",
+        _escaped_key(403),
         "POST",
         "",
         {"json": GATEWAY_BODY, "headers": CANARY_AUTH},
