@@ -217,7 +217,7 @@ async def _checked(
         await upstream.aclose()
         raise UpstreamRedirectError()  # the destination is fixed in settings
     if stream and upstream.is_success and is_event_stream(upstream):
-        if _holds_a_key(_content_type(upstream), keys):
+        if _holds_a_key(_content_type(upstream), KeyFragments(keys)):
             await upstream.aclose()
             raise UpstreamEchoedKeyError()
         return upstream  # open: its events are checked as they arrive
@@ -270,8 +270,8 @@ def _content_type(upstream: httpx.Response) -> bytes:
     return value.encode("latin-1", "replace")
 
 
-def _holds_a_key(raw: bytes, keys: Sequence[str]) -> bool:
-    return KeyFragments(keys).found_in(raw.decode("latin-1"))
+def _holds_a_key(raw: bytes, fragments: KeyFragments) -> bool:
+    return fragments.found_in(raw.decode("latin-1"))
 
 
 def _decoded(text: str) -> list[str]:
@@ -312,16 +312,20 @@ def key_texts(raw: bytes | str) -> Iterator[str]:
 def contains_key(raw: bytes | str, keys: Sequence[str]) -> bool:
     """True if a key, or a recognisable fragment of one (antifaz.api.key_fragments), is in
     `raw` as it is or in any decoded layer of it (invariant 13)."""
-    fragments = KeyFragments(keys)
+    return _contains(raw, KeyFragments(keys))
+
+
+def _contains(raw: bytes | str, fragments: KeyFragments) -> bool:
     return any(fragments.found_in(text) for text in key_texts(raw))
 
 
 def _echoes_a_key(upstream: httpx.Response, keys: Sequence[str]) -> bool:
     """True if the body (raw or any decoded layer) or the content type holds a key or a
     fragment of one."""
-    if _holds_a_key(_content_type(upstream), keys):
-        return True
-    return contains_key(upstream.content, keys)
+    fragments = KeyFragments(keys)  # once per answer
+    return _holds_a_key(_content_type(upstream), fragments) or _contains(
+        upstream.content, fragments
+    )
 
 
 def restored_json(body: dict[str, Any], keys: Sequence[str], status_code: int) -> Response:
