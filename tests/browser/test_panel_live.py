@@ -28,6 +28,7 @@ it) without waiting for a reconnection that should not come.
   en), forced colours, 320 and 390 px without a horizontal scroll, text at 200 % without clipping.
 """
 
+import contextlib
 import re
 import sys
 import time
@@ -35,6 +36,8 @@ from collections.abc import Callable
 from urllib.parse import urlsplit
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from antifaz.web.i18n import load_catalogs
@@ -433,6 +436,94 @@ def test_reconnect_with_the_gateway_unreachable_stays_lost(
     assert _shown(tab, "live-reconnect")
     assert _live_requests(tab) == 1
     assert tab.page.url.split("?")[0].endswith("/panel")
+
+
+SESSION_OK = '{"idle_seconds": 1700, "max_seconds": 28000}'
+
+
+def _until(check: Callable[[], bool], tab: Tab, what: str) -> None:
+    """Let Playwright deliver its events until `check()` (bounded; never evaluates in a page
+    that may be navigating)."""
+    deadline = time.monotonic() + TIMEOUT_MS / 1000
+    while not check():
+        assert time.monotonic() < deadline, what
+        tab.page.wait_for_timeout(20)
+
+
+def _release(routes: list[Route]) -> None:
+    for route in routes:
+        with contextlib.suppress(PlaywrightError):
+            route.abort()
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_logout_during_a_reconnect_check_opens_no_stream(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    """Re-review: «Salir» while the reconnect check is pending. The check answers 200 while the
+    logout's own request is still pending (both held here): no stream may open, and once the
+    logout answers the page reaches the login once."""
+    tab = _tab(new_tab, "en")
+    log_in(tab, server, "en")
+    _open_live(tab)
+    _lose_the_stream(tab, server)
+    held_session: list[Route] = []
+    held_logout: list[Route] = []
+    logins: list[str] = []
+    tab.page.route(f"{tab.origin}{SESSION_PATH}", lambda route: held_session.append(route))
+    tab.page.route(f"{tab.origin}/panel/logout", lambda route: held_logout.append(route))
+    tab.page.on(
+        "request",
+        lambda request: (
+            logins.append(request.url)
+            if request.resource_type == "document" and urlsplit(request.url).path == "/panel/login"
+            else None
+        ),
+    )
+    try:
+        tab.page.click("#live-reconnect")
+        _until(lambda: len(held_session) == 1, tab, "the check is held")
+        tab.page.click(".app-sidebar-foot [data-logout]")
+        _until(lambda: len(held_logout) == 1, tab, "the logout is held")
+        with tab.page.expect_response(lambda r: urlsplit(r.url).path == SESSION_PATH):
+            held_session.pop().fulfill(
+                status=200, headers={"Content-Type": "application/json"}, body=SESSION_OK
+            )
+        tab.page.evaluate(SETTLE_JS)  # the late 200 has reached the page's scripts
+
+        assert _live_requests(tab) == 1  # the one from before: none was opened
+        held_logout.pop().continue_()
+        _at_the_login(tab, server)
+        assert len(logins) == 1
+        assert _live_requests(tab) == 1
+    finally:
+        _release([*held_session, *held_logout])
+
+
+@pytest.mark.parametrize("server_options", [FAKE])
+def test_a_double_click_on_reconnect_checks_the_session_once(
+    new_tab: NewTab, server: PanelServer
+) -> None:
+    tab = _tab(new_tab, "es")
+    log_in(tab, server, "es")
+    _open_live(tab)
+    _lose_the_stream(tab, server)
+    held: list[Route] = []
+    tab.page.route(f"{tab.origin}{SESSION_PATH}", lambda route: held.append(route))
+    try:
+        tab.page.click("#live-reconnect")
+        # A person can click again: aria-disabled does not stop a click (Playwright would wait).
+        tab.page.click("#live-reconnect", force=True)
+        _until(lambda: len(held) >= 1, tab, "the check is held")
+        tab.page.wait_for_timeout(500)  # bounded: a second check would be asked by now
+
+        assert _paths(tab, SESSION_PATH).count(SESSION_PATH) == 1
+        with tab.page.expect_request(lambda request: _is_live(request.url)):
+            held.pop().continue_()
+        _pill(tab, "connected")
+        assert _live_requests(tab) == 2
+    finally:
+        _release(held)
 
 
 @pytest.mark.parametrize("server_options", [FAKE])
