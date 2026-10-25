@@ -217,6 +217,44 @@ def test_more_shapes_that_are_not_fragments(text: str) -> None:
     assert not KeyFragments(KEYS).found_in(text)
 
 
+# --- Masked shapes only for provider keys (second review of issue 76) --------------------------
+
+# Hexadecimal like `openssl rand -hex 32`, built at run time; 4 hex characters are only 16 bits.
+HEX_STARTING_2025 = "2025" + "c0ffee15" * 7 + "9a"
+HEX_ENDING_2025 = "9a" + "c0ffee15" * 7 + "2025"
+
+
+@pytest.mark.parametrize(
+    ("key", "text"),
+    [
+        (HEX_STARTING_2025, "Las ventas crecieron in 2025... y siguieron"),
+        (HEX_STARTING_2025, "(2025**)"),
+        (HEX_ENDING_2025, "El plan acaba …2025."),
+        (HEX_ENDING_2025, "ver ***2025"),
+        (GATEWAY, "ver ****" + GATEWAY[-SHOWN_SUFFIX:] + "."),
+        (GATEWAY, "(" + GATEWAY[:6] + "***)"),
+    ],
+)
+def test_a_key_without_a_provider_prefix_has_no_masked_shape(key: str, text: str) -> None:
+    """Only providers mask their own keys; the Antifaz key and admin token are not masked."""
+    assert not KeyFragments([key]).found_in(text)
+
+
+@pytest.mark.parametrize("key", [HEX_STARTING_2025, HEX_ENDING_2025, GATEWAY])
+def test_a_key_without_a_provider_prefix_keeps_its_runs_and_the_whole_key(key: str) -> None:
+    fragments = KeyFragments([key])
+    assert fragments.found_in("x " + key + " y")
+    assert fragments.found_in("x " + key[7 : 7 + FRAGMENT_LENGTH] + " y")
+
+
+@pytest.mark.parametrize("key", [OPENAI, ANTHROPIC, LEGACY])
+def test_provider_keys_keep_their_masked_shapes(key: str) -> None:
+    secret = secret_part(key)
+    fragments = KeyFragments([key, HEX_STARTING_2025, GATEWAY])
+    assert fragments.found_in("key ****..." + secret[-SHOWN_SUFFIX:] + ".")
+    assert fragments.found_in("key " + key[: len(key) - len(secret)] + secret[:5] + "***")
+
+
 # --- The fast path is the slow, obvious rule (review of issue 76) -------------------------------
 
 MASK = "*•·.…"
@@ -257,7 +295,8 @@ def reference(keys: tuple[str, ...], text: str) -> bool:
         runs = (secret[i : i + FRAGMENT_LENGTH] for i in range(len(secret) - FRAGMENT_LENGTH + 1))
         if any(run in text for run in runs):
             return True
-        if len(secret) < 2 * SHOWN_SUFFIX:
+        # Only a provider masks its own key: keys without a provider prefix have no shapes.
+        if not key.startswith("sk-") or len(secret) < 2 * SHOWN_SUFFIX:
             continue
         for visible in range(SHOWN_SUFFIX, min(FRAGMENT_LENGTH, len(secret))):
             tail, head = secret[-visible:], secret[:visible]

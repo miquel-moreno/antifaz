@@ -396,7 +396,9 @@ def provider_keys(draw: st.DrawFn) -> str:
 @st.composite
 def fragments(draw: st.DrawFn, key: str) -> str:
     secret = secret_part(key)
-    kind = draw(st.sampled_from(["run", "masked", "dots", "ellipsis"]))
+    # Only a provider masks its own key: a key without a provider prefix gets runs only.
+    kinds = ["run", "masked", "dots", "ellipsis"] if key.startswith("sk-") else ["run"]
+    kind = draw(st.sampled_from(kinds))
     if kind == "run":
         size = draw(st.integers(FRAGMENT_LENGTH, len(secret)))
         start = draw(st.integers(0, len(secret) - size))
