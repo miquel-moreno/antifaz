@@ -10,14 +10,18 @@ not only the whole key. KeyFragments finds, for every configured key:
   for every key of a provider and is never a fragment. Ten characters are at least 40 bits even
   for a hexadecimal key (about 59 for the usual letters and digits), so ordinary text does not
   match one by chance, and a shorter piece is too little of the key to be useful;
-- the provider-style masked key, with SHOWN_SUFFIX (4) to 9 characters of the secret part
-  visible at one end:
+- for a PROVIDER key only (one that starts with `sk-`), the provider-style masked key, with
+  SHOWN_SUFFIX (4) to 9 characters of the secret part visible at one end:
   - its last 4-9 characters right after a MASK (two or more of `*`, `•`, `·`, `.`, `…`, or one
     `…`) and followed by nothing that continues it (no letter, digit, `*` or `•`):
     `sk-proj-****...WxYz`;
   - its first 4-9 characters followed by a mask, with nothing before them that continues them
     (no letter, digit or mask character; the generic prefix ends in `-`): `sk-proj-AbCd****`.
-  So `**WxYz**` (markdown bold) and "ends in WxYz" are not fragments.
+  So `**WxYz**` (markdown bold) and "ends in WxYz" are not fragments. Only a provider masks its
+  own key, and a key without a provider prefix may be hexadecimal (the Antifaz key, the admin
+  token: `openssl rand -hex 32`), where 4 characters are only 16 bits: one starting with
+  "2025" would cut every answer that says "in 2025...". Those keys keep the whole key and the
+  runs, never a masked shape.
 A secret part shorter than FRAGMENT_LENGTH has no runs (only the whole key); one shorter than
 2 * SHOWN_SUFFIX has no masked shape.
 
@@ -65,7 +69,11 @@ def secret_part(key: str) -> str:
 
 
 ANCHOR = FRAGMENT_LENGTH // 2  # any run of 10 holds a whole 5-character piece at a multiple of 5
+# After the last characters, `*` or `•` continue a mask (`**WxYz**` is markdown bold). `·` and
+# `…` do not: they end sentences and lists ("...WxYz…", "WxYz · next"), and `.` ends the
+# provider's own message ("Incorrect API key provided: sk-...WxYz.").
 _CONTINUES_AFTER = frozenset("*•")
+_PROVIDER = "sk-"  # every provider prefix starts so (secret_part strips the rest)
 
 
 def _masked_before(text: str, position: int) -> bool:
@@ -115,7 +123,7 @@ class KeyFragments:
                 starts = range(len(secret) - FRAGMENT_LENGTH + 1)
                 runs.update(secret[i : i + FRAGMENT_LENGTH] for i in starts)
                 anchors.update(secret[i : i + ANCHOR] for i in range(len(secret) - ANCHOR + 1))
-            if len(secret) >= 2 * SHOWN_SUFFIX:
+            if key.startswith(_PROVIDER) and len(secret) >= 2 * SHOWN_SUFFIX:
                 self._ends.append((secret, secret[:SHOWN_SUFFIX], secret[-SHOWN_SUFFIX:]))
         self._runs = frozenset(runs)
         self._anchors = frozenset(anchors)
