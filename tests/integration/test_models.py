@@ -117,13 +117,28 @@ def test_the_other_provider_still_works_without_the_first_key(upstream: FakeUpst
 
 
 def test_provider_errors_are_returned_as_they_are(upstream: FakeUpstream) -> None:
-    error = {"error": {"type": "authentication_error", "message": "invalid x-api-key"}}
-    upstream.handler = lambda request: httpx.Response(401, json=error)
+    error = {"error": {"type": "rate_limit_error", "message": "slow down"}}
+    upstream.handler = lambda request: httpx.Response(429, json=error)
     for client in gateway_client(upstream):
         response = client.get("/v1/models", headers=ANTHROPIC_KEY)
 
-        assert response.status_code == 401
+        assert response.status_code == 429
         assert response.json() == error
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_provider_auth_error_is_a_fixed_upstream_auth_failed(
+    upstream: FakeUpstream, status: int
+) -> None:
+    """Issue 76: the provider's body about its own key never reaches the client."""
+    error = {"error": {"type": "authentication_error", "message": "invalid x-api-key"}}
+    upstream.handler = lambda request: httpx.Response(status, json=error)
+    for client in gateway_client(upstream):
+        response = client.get("/v1/models", headers=ANTHROPIC_KEY)
+
+        assert response.status_code == status
+        assert response.json()["error"]["code"] == "upstream_auth_failed"
+        assert "invalid x-api-key" not in response.text
 
 
 @pytest.mark.parametrize(

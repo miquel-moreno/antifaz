@@ -29,7 +29,10 @@ data across requests or users, bypasses the fail-closed checks, leaks data into 
 errors or metrics, or compromises the gateway itself (SSRF, key exposure, denial of
 service). This includes reaching a route without the key, using the gateway from a web
 page in someone's browser, getting a request past the gateway with a `Host` it does not
-allow, or making it start without a safe key.
+allow, or making it start without a safe key. It also includes getting a recognisable piece of
+a configured key to the client (for example a provider error that quotes `sk-...abcd`): a
+provider 401 or 403 is always answered with a fixed `upstream_auth_failed`, and any other answer
+holding a piece of a key is dropped.
 
 ## Out of scope
 
@@ -45,8 +48,6 @@ allow, or making it start without a safe key.
   allows a data type. (A default that is unsafe *is* in scope.)
 - **Deployments without TLS** or behind a proxy that rewrites or adds headers (CORS, `Host`):
   see `docs/TECNICO.md` for how to deploy it.
-- **The provider's own error messages** that show part of its own key (for example
-  `sk-...abcd`); the full key is never returned.
 - **Denial of service by volume** (many requests from many clients): v0.1 has size and time
   limits, but no rate limits yet.
 

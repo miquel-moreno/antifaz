@@ -26,6 +26,7 @@ import httpx
 from fastapi.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
+from antifaz.api.key_fragments import KeyFragments
 from antifaz.api.proxy import key_texts
 from antifaz.providers.sse import MalformedStream, SSEEvent, SSEParser
 from antifaz.providers.streaming import StreamCut, StreamTransformer, is_index
@@ -91,7 +92,11 @@ def _leaves(node: Any) -> Iterator[tuple[Path, str]]:
 
 
 class KeyWatch:
-    """Invariant 13 in a stream: no configured key may reach the client.
+    """Invariant 13 in a stream: no configured key, nor a fragment of one, may reach the client.
+
+    A fragment is a run of 10 characters of a key's secret part or the provider-style masked
+    key (`sk-proj-****...WxYz`): antifaz.api.key_fragments. Tails are as long as the longest
+    key, so a fragment split between deltas is caught like a whole key.
 
     Checked on what the gateway SENDS (after restoring: a value decoded from escapes in tool
     arguments could be a key), and on what the provider sent:
@@ -107,12 +112,13 @@ class KeyWatch:
 
     def __init__(self, keys: Sequence[str]) -> None:
         self._keys = [key for key in keys if key]
+        self._fragments = KeyFragments(self._keys)
         self._keep = max((len(key) for key in self._keys), default=1) - 1
         self._tails: dict[Path, str] = {}
         self._names: dict[str, str] = {}  # field name -> tail of its last value, any path
 
     def _holds(self, text: str) -> bool:
-        return any(key in text for key in self._keys)
+        return self._fragments.found_in(text)
 
     def check(self, event: SSEEvent) -> None:
         """An event as the provider sent it: raw and decoded, no tails."""
