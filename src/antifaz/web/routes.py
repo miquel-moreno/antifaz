@@ -115,6 +115,8 @@ from antifaz import __version__
 from antifaz.detect.types import EntityType
 from antifaz.http_errors import (
     AppError,
+    CheckBusyError,
+    CheckCooldownError,
     InvalidTryBodyError,
     NotAcceptableError,
     PanelInternalError,
@@ -135,7 +137,7 @@ from antifaz.web.forwarded import client_ip
 from antifaz.web.live_stream import LiveStreams, accepts_event_stream
 from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
-from antifaz.web.status_response import SessionResponse, StatusResponse
+from antifaz.web.status_response import CheckResponse, SessionResponse, StatusResponse
 from antifaz.web.templating import Pages
 from antifaz.web.try_response import TryResponse
 from antifaz.web.try_text import (
@@ -328,6 +330,8 @@ def build_router(state: PanelState) -> APIRouter:
         if times is None:  # pragma: no cover - the door found it live a moment ago, no await
             raise PanelUnauthorizedError()
         idle, end = times
+        # 11e-4: the header pill and the Estado tab's dot, from the local overall (no call).
+        overall = snapshot(state.status, panel_context(request.scope).scheme)["overall"]
         page = pages.panel(
             lang,
             session.csrf_token,
@@ -337,6 +341,7 @@ def build_router(state: PanelState) -> APIRouter:
             max_text_bytes=MAX_TEXT_BYTES,
             live_per_session=streams.per_session,  # the limits really applied
             live_total=streams.max_streams,
+            overall=overall,
         )
         return _page(page, lang)
 
@@ -346,6 +351,45 @@ def build_router(state: PanelState) -> APIRouter:
         if context.session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         return StatusResponse.model_validate(snapshot(state.status, context.scheme))
+
+    @router.post("/panel/api/status/check", response_model=None)
+    async def status_check(request: Request) -> Response:
+        # The door checked the session, its CSRF token and same origin + JSON, and counted the
+        # press as a use. The body is never read.
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        gate = state.check_gate
+        refused = gate.begin(gate.now())  # before anything awaits: check and take in one call
+        if refused is not None:
+            kind, wait = refused
+            if kind == "busy":
+                raise CheckBusyError()
+            raise CheckCooldownError(wait)
+        answer: CheckResponse | None = None
+        failure = ""
+        try:
+            if state.check_runner is None:
+                raise RuntimeError("no check runner")
+            results = await state.check_runner()
+            answer = CheckResponse.model_validate(
+                {
+                    "schema": 1,
+                    "providers": results,
+                    "status": snapshot(state.status, context.scheme),
+                }
+            )
+        except Exception as error:
+            failure = type(error).__name__  # only the type: never the message
+        finally:
+            gate.end(gate.now())
+        if answer is None:
+            logger.error("panel status check failed: %s", failure)
+            raise PanelInternalError()
+        # Only the closed values (enums): never an HTTP code or anything a provider sent.
+        logger.info("provider check: %s", " ".join(f"{p.id}={p.result}" for p in answer.providers))
+        body = answer.model_dump_json(by_alias=True).encode()
+        return Response(body, media_type="application/json")
 
     # response_model=None: the answer is validated once, in the route's try block below; FastAPI
     # must not validate or serialise it again (a failure there would bypass the fixed 500).

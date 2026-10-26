@@ -328,7 +328,6 @@ def test_nothing_that_depends_on_future_work(lang: str) -> None:
         "journey",
         "mask-anim",
         "anim-replay",
-        "app-status",
         "504",
         "claude-",
         "special_category",
