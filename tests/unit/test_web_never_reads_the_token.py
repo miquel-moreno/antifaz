@@ -42,6 +42,7 @@ PURE = (
     "status.py",
     "try_limit.py",
     "live_limits.py",  # 11e-2
+    "check_gate.py",  # 11e-4
 )
 # The templates (11c-1): Jinja2, the standard library and the pure pieces, nothing else (no
 # FastAPI, no other project module).
@@ -66,6 +67,9 @@ FORBIDDEN_IMPORTS = ("antifaz.config", "pydantic", "pydantic_settings")
 SCHEMA = "status_response.py"
 SCHEMA_MODULE = "antifaz.web.status_response"
 SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictBool", "StrictInt"})
+# 11e-4: the check answer (CheckResponse) lives with the status schema and cross-checks each
+# result against its HTTP code with a model_validator.
+STATUS_SCHEMA_PYDANTIC_NAMES = SCHEMA_PYDANTIC_NAMES | {"model_validator"}
 # 11d-a: the Try answer's schema, with the same pieces plus model_validator (its cross checks).
 TRY_SCHEMA = "try_response.py"
 TRY_SCHEMA_MODULE = "antifaz.web.try_response"
@@ -75,7 +79,7 @@ LIVE_SCHEMA = "live_response.py"
 LIVE_SCHEMA_MODULE = "antifaz.web.live_response"
 LIVE_SCHEMA_PYDANTIC_NAMES = frozenset({"BaseModel", "ConfigDict", "Field", "StrictInt"})
 SCHEMAS = {
-    SCHEMA: SCHEMA_PYDANTIC_NAMES,
+    SCHEMA: STATUS_SCHEMA_PYDANTIC_NAMES,
     TRY_SCHEMA: TRY_SCHEMA_PYDANTIC_NAMES,
     LIVE_SCHEMA: LIVE_SCHEMA_PYDANTIC_NAMES,
 }

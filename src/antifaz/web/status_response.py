@@ -58,3 +58,11 @@ class SessionResponse(_Closed):
 
     idle_seconds: StrictInt = Field(ge=0)
     max_seconds: StrictInt = Field(ge=0)
+
+
+# 11e-4: signatures only, to be implemented.
+CheckResult = Literal["ok"]
+
+
+class CheckResponse(_Closed):
+    pass
