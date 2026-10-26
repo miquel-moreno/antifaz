@@ -337,7 +337,7 @@ def test_the_messages_template_holds_every_label_the_script_needs(lang: str) -> 
     }
     text = CATALOGS[lang].text
 
-    assert set(inside) == set(MESSAGES)
+    assert set(inside) == set(MESSAGES) | set(CHECK_MESSAGES)  # 11e-4: the check's labels too
     assert inside["unknown"] == text("status.unknown")
     assert inside["ner.circuit_open"] == text("status.ner.circuit_open")
     assert "{time}" in inside["checked"] and "{time}" in inside["checked.old"]

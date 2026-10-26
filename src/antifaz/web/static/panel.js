@@ -277,6 +277,18 @@
   var statusCheckedAt = null;
   var statusInFlight = null;
   var TONES = ["ok", "warn", "danger", "neutral"];
+  var OVERALLS = ["ok", "warn", "danger"];
+  var appStatuses = Array.prototype.slice.call(document.querySelectorAll("[data-app-status]"));
+  var statusDot = document.getElementById("status-dot");
+  var checkButton = document.getElementById("status-check");
+  var checkLine = document.getElementById("check-line");
+  var checkInFlight = false;
+  var snapshotsAsked = 0;
+  var snapshotShown = 0;
+  var CHECK_RESULTS = ["ok", "refused", "redirect", "unexpected", "timeout", "unreachable",
+    "no_key", "not_checked_credentials"];
+  var CHECK_TONES = {ok: "ok", refused: "danger", redirect: "warn", unexpected: "warn",
+    timeout: "warn", unreachable: "danger", no_key: "neutral", not_checked_credentials: "neutral"};
   var HOST_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.-:[]";
   var VERSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789.+-";
 
@@ -310,6 +322,33 @@
       pill.classList.toggle(name, name === tone);
     });
     pill.querySelector("[data-label]").textContent = text;
+  }
+
+  function setAppStatus(overall) {
+    var known = OVERALLS.indexOf(overall) !== -1;
+    var tone = known ? overall : "neutral";
+    var text = known ? statusText("overall." + overall)
+      : statusText(overall === "stale" ? "overall.stale" : "unknown");
+    appStatuses.forEach(function (pill) {
+      TONES.forEach(function (name) {
+        pill.classList.toggle("is-" + name, name === tone);
+      });
+      pill.setAttribute("data-overall", known || overall === "stale" ? overall : "unknown");
+      pill.querySelector("[data-label]").textContent = text;
+    });
+    statusDot.hidden = tone !== "warn" && tone !== "danger";
+    statusDot.classList.toggle("is-warn", tone !== "danger");
+    statusDot.classList.toggle("is-danger", tone === "danger");
+    statusDot.querySelector("[data-label]").textContent =
+      statusText(tone === "danger" ? "dot.danger" : "dot.warn");
+  }
+
+  function freshSnapshot(order) {
+    if (order < snapshotShown) {
+      return false;
+    }
+    snapshotShown = order;
+    return true;
   }
 
   function count(value) {
@@ -377,9 +416,10 @@
   function renderStatus(data) {
     var detectors = data.detectors && typeof data.detectors === "object" ? data.detectors : {};
     var limits = data.limits && typeof data.limits === "object" ? data.limits : {};
-    var overall = known(data.overall, ["ok", "warn", "danger"]) ? data.overall : "neutral";
+    var overall = known(data.overall, OVERALLS) ? data.overall : "neutral";
     setPill(document.getElementById("status-overall"), overall,
-      label("overall", data.overall, ["ok", "warn", "danger"]));
+      label("overall", data.overall, OVERALLS));
+    setAppStatus(known(data.overall, OVERALLS) ? data.overall : "unknown");
     var version = typeof data.version === "string" ? data.version.toLowerCase() : "";
     field("status-version", onlyChars(version, VERSION_CHARS, 64) ? data.version
       : statusText("unknown"));
@@ -407,35 +447,65 @@
     renderProviders(data.providers);
   }
 
+  function settle() {
+    var busy = statusInFlight !== null || checkInFlight;
+    statusGrid.setAttribute("aria-busy", busy ? "true" : "false");
+    if (busy) {
+      statusButton.setAttribute("aria-disabled", "true");
+    } else {
+      statusButton.removeAttribute("aria-disabled");
+    }
+    if (checkInFlight) {
+      checkButton.setAttribute("aria-disabled", "true");
+    } else {
+      checkButton.removeAttribute("aria-disabled");
+    }
+  }
+
   function statusIdle(fromButton) {
     statusInFlight = null;
-    statusGrid.setAttribute("aria-busy", "false");
-    statusButton.removeAttribute("aria-disabled");
+    settle();
     if (fromButton) {
       statusButton.focus();
     }
   }
 
-  function statusShown(data, fromButton) {
+  function snapshotShownNow(data) {
     renderStatus(data);
     statusCheckedAt = new Date();
     statusGrid.classList.remove("is-stale");
     statusGrid.hidden = false;
     statusTime.textContent = statusText("checked").replace("{time}", clockTime(statusCheckedAt));
-    statusIdle(fromButton);
   }
 
-  function statusFailed(key, fromButton) {
+  function markStale(key) {
     statusAlertText.textContent = statusText("error." + key);
     statusAlert.hidden = false;
     setPill(document.getElementById("status-overall"), "neutral", statusText("overall.stale"));
+    setAppStatus("stale");
     statusGrid.classList.add("is-stale");
     statusTime.textContent = statusCheckedAt
       ? statusText("checked.old").replace("{time}", clockTime(statusCheckedAt)) : "";
+  }
+
+  function statusShown(data, fromButton, order) {
+    if (freshSnapshot(order)) {
+      snapshotShownNow(data);
+    }
+    statusIdle(fromButton);
+  }
+
+  function statusFailed(key, fromButton, order) {
+    if (freshSnapshot(order)) {
+      markStale(key);
+    }
     statusIdle(fromButton);
   }
 
   function loadStatus(fromButton) {
+    if (fromButton && checkInFlight) {
+      return;
+    }
     if (statusInFlight) {
       if (!fromButton || statusInFlight.fromButton) {
         return;
@@ -444,12 +514,13 @@
     }
     statusSequence += 1;
     var sequence = statusSequence;
+    snapshotsAsked += 1;
+    var order = snapshotsAsked;
     var controller = new AbortController();
     statusInFlight = {controller: controller, fromButton: fromButton};
     statusAlert.hidden = true;
     statusAlertText.textContent = "";
-    statusGrid.setAttribute("aria-busy", "true");
-    statusButton.setAttribute("aria-disabled", "true");
+    settle();
     statusTime.textContent = statusText("checking");
     fetch("/panel/api/status", {
       credentials: "same-origin",
@@ -467,7 +538,7 @@
         return;
       }
       if (response.status !== 200) {
-        statusFailed("refused", fromButton);
+        statusFailed("refused", fromButton, order);
         return;
       }
       return response.json().then(function (data) {
@@ -475,21 +546,136 @@
           return;
         }
         if (data && typeof data === "object") {
-          statusShown(data, fromButton);
+          statusShown(data, fromButton, order);
         } else {
-          statusFailed("refused", fromButton);
+          statusFailed("refused", fromButton, order);
         }
       }, function () {
         if (sequence === statusSequence) {
-          statusFailed("refused", fromButton);
+          statusFailed("refused", fromButton, order);
         }
       });
     }, function () {
       if (sequence === statusSequence) {
-        statusFailed("network", fromButton);
+        statusFailed("network", fromButton, order);
       }
     });
   }
+
+  function renderChecks(providers) {
+    var list = Array.isArray(providers) ? providers : [];
+    document.querySelectorAll("[data-provider]").forEach(function (row) {
+      var found = null;
+      list.forEach(function (item) {
+        if (item && typeof item === "object" && item.id === row.getAttribute("data-provider")) {
+          found = item;
+        }
+      });
+      var result = found && known(found.result, CHECK_RESULTS) ? found.result : "";
+      var text = result ? statusText("check." + result) : statusText("unknown");
+      if (result === "refused" || result === "unexpected") {
+        var code = found.http_status;
+        text = typeof code === "number" && Number.isInteger(code) && code >= 100 && code <= 599
+          ? text.replace("{code}", String(code)) : statusText("unknown");
+      }
+      var line = row.querySelector("[data-check]");
+      TONES.forEach(function (name) {
+        line.classList.toggle(name, name === (result ? CHECK_TONES[result] : "neutral"));
+      });
+      line.querySelector("[data-label]").textContent = text;
+      line.hidden = false;
+    });
+  }
+
+  function waitSeconds(value) {
+    var seconds = Number(value);
+    return Number.isInteger(seconds) && seconds > 0 && seconds <= 3600 ? seconds : 0;
+  }
+
+  function checkIdle() {
+    checkInFlight = false;
+    settle();
+    if (document.activeElement === document.body || document.activeElement === checkButton) {
+      checkButton.focus();
+    }
+  }
+
+  function checkFailed(key, order) {
+    checkLine.textContent = "";
+    if (freshSnapshot(order)) {
+      markStale(key);
+    }
+    checkIdle();
+  }
+
+  function checkShown(data, order) {
+    renderChecks(data.providers);
+    if (data.status && typeof data.status === "object" && freshSnapshot(order)) {
+      statusAlert.hidden = true;
+      snapshotShownNow(data.status);
+    }
+    checkLine.textContent = statusText("check.checked").replace("{time}", clockTime(new Date()));
+    checkIdle();
+  }
+
+  function runCheck() {
+    if (checkInFlight) {
+      return;
+    }
+    checkInFlight = true;
+    snapshotsAsked += 1;
+    var order = snapshotsAsked;
+    var meta = document.querySelector("meta[name=antifaz-csrf]");
+    statusAlert.hidden = true;
+    statusAlertText.textContent = "";
+    checkLine.textContent = statusText("check.checking");
+    settle();
+    fetch("/panel/api/status/check", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+      headers: {"Content-Type": "application/json", "X-Antifaz-CSRF": meta ? meta.content : ""},
+      body: "{}"
+    }).then(function (response) {
+      activity(response.status);
+      if (response.status === 401) {
+        leave();
+        return;
+      }
+      var wait = waitSeconds(response.headers.get("Retry-After"));
+      if (response.status === 429 && wait) {
+        checkLine.textContent = statusText("check.cooldown").replace("{s}", String(wait));
+        checkIdle();
+        return;
+      }
+      if (response.status === 503) {
+        checkLine.textContent = statusText("check.busy");
+        checkIdle();
+        return;
+      }
+      if (response.status !== 200) {
+        checkFailed("refused", order);
+        return;
+      }
+      return response.json().then(function (data) {
+        if (data && typeof data === "object") {
+          checkShown(data, order);
+        } else {
+          checkFailed("refused", order);
+        }
+      }, function () {
+        checkFailed("refused", order);
+      });
+    }, function () {
+      checkFailed("network", order);
+    });
+  }
+
+  checkButton.addEventListener("click", function () {
+    runCheck();
+  });
 
   function statusFirstShown() {
     if (!statusStarted) {

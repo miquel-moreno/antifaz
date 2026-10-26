@@ -50,6 +50,16 @@ CSRF again.
   state at that moment and the uptime) and never calls a provider. No language: no Vary or
   Content-Language. Only GET: POST and the others are 405 once the door let them through, HEAD
   is 405 too.
+- POST /panel/api/status/check (11e-4): «Comprobar ahora», for a live session with its CSRF token
+  (the door; the press is a use of the session). The body is never read. The gate
+  (web/check_gate.py) is taken BEFORE anything awaits: one check per process (else 503
+  check_busy, Retry-After: 1) and 30 s from the end of the last one (else 429 check_cooldown with
+  the seconds left). Then PanelState.check_runner (the gateway's api/provider_check.py, on its
+  own client: the panel never sees the settings or the client) and the closed CheckResponse of
+  web/status_response.py, with a fresh local snapshot. The gate is given back in a `finally`.
+  Any failure is a fixed 500 and one log line with the error's type; a good check logs one INFO
+  line with the closed values only (`openai=ok anthropic=refused`). GET and HEAD are 405.
+  GET /panel renders the header pill and the Estado tab's dot from the local overall.
 - POST /panel/api/try (11d-a): «Prueba un texto», for a live session with its CSRF token (the
   door). In this order:
   1. The rate limit (web/try_limit.py), keyed by the session's fingerprint: at most 30 tries
@@ -88,7 +98,8 @@ CSRF again.
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
 in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
-`logout` and `session_times` never await; `try_a_text` takes its try before its first await.
+`logout` and `session_times` never await; `try_a_text` takes its try before its first await, and
+`status_check` its gate (11e-4).
 tests/unit/test_web_concurrency.py checks it: every route is a coroutine function, no await,
 async for or async with comes after `limiter.allowed(` in `login`, `logout` has none at all, and
 none comes before `.take(` in `try_a_text`.
