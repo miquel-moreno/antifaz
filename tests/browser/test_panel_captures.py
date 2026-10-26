@@ -361,3 +361,77 @@ def test_capture_the_live_view(
 
 def _live_locale(lang: str) -> str:
     return "es-ES" if lang == "es" else "en-US"
+
+
+# 11e-4: «Comprobar ahora» and the header pill, with the invented provider of server.py (never
+# a real one). (capture name, check mode, presses: the second press of the cooldown capture is
+# refused with its «wait» line)
+CHECK_CAPTURES = {
+    "24-status-check-ok": ("ok", 1),
+    "25-status-check-mixed": ("mixed", 1),
+    "26-status-check-cooldown": ("ok", 2),
+}
+CHECK_IDLE_JS = (
+    "() => document.getElementById('status-check').getAttribute('aria-disabled') !== 'true'"
+    " && document.getElementById('check-line').textContent !== ''"
+)
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    ("name", "server_options"),
+    [
+        (name, ServerOptions(fake_provider=True, check_mode=mode))
+        for name, (mode, _) in CHECK_CAPTURES.items()
+    ],
+    ids=list(CHECK_CAPTURES),
+)
+def test_capture_the_status_check(
+    new_tab: NewTab, server: PanelServer, name: str, lang: str, theme: str, width: int
+) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    _, presses = CHECK_CAPTURES[name]
+    tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+    for _ in range(presses):
+        with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/status/check")):
+            tab.page.click("#status-check")
+        tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#status-check").blur()
+    tab.page.mouse.move(0, 0)
+    if width < 768:  # the window only (fixed tab bar): the providers card
+        tab.page.evaluate("() => document.getElementById('s-prov').scrollIntoView()")
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-{name}", full_page=width >= 768)
+
+    assert path.stat().st_size > 0
+    assert server.provider_calls == []
+
+
+PILL_CAPTURES = {
+    "27-pill-warn": ServerOptions(fake_provider=True, ner_state="starting"),
+    "28-pill-danger": ServerOptions(),
+}
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    ("name", "server_options"), list(PILL_CAPTURES.items()), ids=list(PILL_CAPTURES)
+)
+def test_capture_the_header_pill(
+    new_tab: NewTab, server: PanelServer, name: str, lang: str, theme: str, width: int
+) -> None:
+    """The header pill (desktop) or the phone bar's, and the dot on the «Estado» tab, at load."""
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme=theme, width=width, scale=2)
+    _log_in(tab, server, lang)
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-{name}")
+
+    assert path.stat().st_size > 0

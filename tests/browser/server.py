@@ -25,6 +25,10 @@
   LiveStreams has for tests). `cut_live_streams()` makes the next frame of every open stream
   fail, so uvicorn drops those connections mid-stream (the browser sees a broken stream, not an
   `end`).
+- 11e-4 («Comprobar ahora»): the same in-process fake provider answers GET .../models as
+  `check_mode` says (ok, 401, 302, timeout, connect or mixed), counted in `fake_provider_calls`
+  and `fake_model_list_calls`; `check_seconds` and `check_cooldown` shorten the check's deadline
+  and its cooldown. The real providers are never reached: `provider_calls` stays empty.
 
 Standard library, httpx, uvicorn and Antifaz only: no Playwright here.
 """
@@ -94,6 +98,13 @@ class ServerOptions:
     live_max_streams: int | None = None  # None: the gateway's own limit
     live_per_session: int | None = None  # None: the gateway's own limit
     live_max_seconds: float | None = None  # None: the gateway's 30 minutes
+    # 11e-4 («Comprobar ahora», with fake_provider): how the fake provider answers GET .../models:
+    # "ok" (200), "401", "302" (to another invented host), "timeout" (never answers), "connect"
+    # (a connection error) or "mixed" (OpenAI 200, Anthropic 401). check_seconds shortens the
+    # check's deadline and check_cooldown the 30 s between checks (None: the gateway's own).
+    check_mode: str = "ok"
+    check_seconds: float | None = None
+    check_cooldown: float | None = None
 
 
 class FakeNer:
@@ -203,6 +214,20 @@ def _fake_provider(request: httpx.Request) -> httpx.Response:
     )
 
 
+async def _fake_model_list(request: httpx.Request, mode: str) -> httpx.Response:
+    """GET .../models of the invented provider (11e-4), as the check mode says."""
+    anthropic = "anthropic-version" in request.headers
+    if mode == "timeout":
+        await asyncio.sleep(HANG_GUARD_SECONDS)  # the check's deadline cuts it first
+    if mode == "connect":
+        raise httpx.ConnectError("invented connection error", request=request)
+    if mode == "401" or (mode == "mixed" and anthropic):
+        return httpx.Response(401, json={"error": {"message": "invented refusal"}})
+    if mode == "302":
+        return httpx.Response(302, headers={"Location": "https://elsewhere.invalid/models"})
+    return httpx.Response(200, json={"object": "list", "data": [{"id": "m", "object": "model"}]})
+
+
 SHUTDOWN_LIMIT_MESSAGE = "timeout graceful shutdown exceeded"
 
 
@@ -264,6 +289,8 @@ class PanelServer:
             from tests.nerfakes import fake_detector
 
             self.ner = fake_detector()[0]
+        self.check_mode = options.check_mode  # a test may change it between presses
+        self.fake_model_list_calls = 0
         transport = httpx.MockTransport(
             self._answer_as_the_fake_provider if options.fake_provider else self._provider
         )
@@ -282,6 +309,10 @@ class PanelServer:
             streams.per_session = options.live_per_session
         if options.live_max_seconds is not None:
             streams.max_seconds = options.live_max_seconds
+        if options.check_seconds is not None:
+            app.state.provider_check.seconds = options.check_seconds
+        if options.check_cooldown is not None:
+            app.state.panel_state.check_gate.cooldown = options.check_cooldown
         self._cutter = _LiveCutter(app)
         self._recorder = _PostRecorder(self._cutter)
         config = uvicorn.Config(
@@ -305,8 +336,11 @@ class PanelServer:
         self.origin = f"http://{HOST}:{self.port}"
         self._thread = threading.Thread(target=self._run, name="panel-server", daemon=True)
 
-    def _answer_as_the_fake_provider(self, request: httpx.Request) -> httpx.Response:
+    async def _answer_as_the_fake_provider(self, request: httpx.Request) -> httpx.Response:
         self.fake_provider_calls += 1
+        if request.method == "GET" and request.url.path.endswith("/models"):
+            self.fake_model_list_calls += 1
+            return await _fake_model_list(request, self.check_mode)
         return _fake_provider(request)
 
     # --- 11e-2: driving «En directo» through the real engine ------------------------------------
