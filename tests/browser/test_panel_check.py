@@ -393,6 +393,54 @@ def test_a_refused_press_keeps_the_callout_of_a_failed_read(
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["stale", "stale"]
 
 
+FOREIGN_REFUSALS = {
+    "429-no-code": (429, {"Retry-After": "12"}, "text/plain", "Too Many Requests"),
+    "429-other-code": (
+        429,
+        {"Retry-After": "12"},
+        "application/json",
+        '{"error": {"code": "rate_limited", "message": "x"}}',
+    ),
+    "503-no-code": (503, {"Retry-After": "1"}, "text/html", "<h1>Service Unavailable</h1>"),
+    "503-other-code": (
+        503,
+        {"Retry-After": "1"},
+        "application/json",
+        '{"error": {"code": "service_unavailable", "message": "x"}}',
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(FOREIGN_REFUSALS))
+def test_a_429_or_503_without_the_gateways_code_is_a_failed_check(
+    tab: Tab, server: PanelServer, case: str
+) -> None:
+    """Review 4: busy and cooldown are decided by the body's error.code (check_busy,
+    check_cooldown); the same status from something in front of the gateway is a failed check:
+    the error callout, «Sin actualizar», and no «wait» or «running» line."""
+    status, headers, content_type, body = FOREIGN_REFUSALS[case]
+    _log_in(tab, server, "es")
+    _open_status(tab)
+    tab.page.route(
+        f"{tab.origin}{CHECK_PATH}",
+        lambda route: route.fulfill(
+            status=status, headers=headers, content_type=content_type, body=body
+        ),
+    )
+
+    with tab.page.expect_response(_is_check):
+        tab.page.click("#status-check")
+    tab.page.locator("#status-alert").wait_for(state="visible")
+    tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+
+    assert tab.page.evaluate(CALLOUT_JS) == {
+        "shown": True,
+        "text": _text("es", "status.error.refused"),
+    }
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["stale", "stale"]
+    assert tab.page.locator("#check-line").inner_text() == ""
+
+
 VISIBILITY_JS = """(state) => {
   Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => state});
   Object.defineProperty(document, 'hidden', {configurable: true, get: () => state === 'hidden'});
