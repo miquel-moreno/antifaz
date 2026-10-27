@@ -503,7 +503,7 @@
   }
 
   function loadStatus(fromButton) {
-    if (fromButton && checkInFlight) {
+    if (checkInFlight) {
       return;
     }
     if (statusInFlight) {
