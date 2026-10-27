@@ -627,8 +627,6 @@
     snapshotsAsked += 1;
     var order = snapshotsAsked;
     var meta = document.querySelector("meta[name=antifaz-csrf]");
-    statusAlert.hidden = true;
-    statusAlertText.textContent = "";
     checkLine.textContent = statusText("check.checking");
     settle();
     fetch("/panel/api/status/check", {
