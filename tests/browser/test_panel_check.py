@@ -482,6 +482,45 @@ def test_a_read_failing_during_a_check_never_hides_the_checks_fresh_snapshot(
     assert len([u for u in tab.requests if u.endswith(STATUS_PATH)]) == reads_before
 
 
+GRID_SHOWN_JS = "() => !document.getElementById('status-grid').hidden"
+
+
+@pytest.mark.parametrize("failure", ["abort", "500", "503-no-code"])
+def test_the_first_read_of_estado_is_not_lost_while_a_check_runs(
+    tab: Tab, server: PanelServer, failure: str
+) -> None:
+    """Re-verification of 11e-4: a check is in flight when «Estado» is shown for the first time
+    (the press is dispatched straight to the button: in the page it sits in the hidden view).
+    The first-show read waits for the check; when the check fails without painting a snapshot,
+    that read still happens and fills the grid in."""
+    held: list[Route] = []
+    _log_in(tab, server, "en")
+    tab.page.route(f"{tab.origin}{CHECK_PATH}", lambda route: held.append(route))
+    tab.page.locator("#status-check").dispatch_event("click")
+    for _ in range(ROUND_TRIPS):
+        if held:
+            break
+        tab.page.evaluate(SETTLE_JS)
+    assert held, "the check never reached the route"
+    tab.page.click("#tab-status")  # the first show, while the check runs
+    tab.page.evaluate(SETTLE_JS)
+
+    with tab.page.expect_response(_is_status):
+        if failure == "abort":
+            held[0].abort()
+        elif failure == "500":
+            held[0].fulfill(status=500, json={"error": {"code": "internal_error"}})
+        else:
+            held[0].fulfill(status=503, content_type="text/plain", body="Service Unavailable")
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+
+    assert tab.page.evaluate(GRID_SHOWN_JS) is True
+    assert len([u for u in tab.requests if u.endswith(STATUS_PATH)]) == 1
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    assert tab.page.evaluate(CALLOUT_JS) == {"shown": False, "text": ""}
+
+
 def test_a_401_goes_to_the_login_with_the_language(tab: Tab, server: PanelServer) -> None:
     _log_in(tab, server, "es")
     _open_status(tab)
