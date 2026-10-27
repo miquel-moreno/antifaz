@@ -267,8 +267,10 @@ def test_one_info_line_per_check_with_only_the_closed_values(
     assert [(r.levelno, r.getMessage()) for r in checks] == [
         (logging.INFO, "provider check: openai=ok anthropic=refused")
     ]
-    assert "401" not in caplog.text
-    assert "Incorrect" not in caplog.text
+    # The messages, not caplog.text: its format carries the source line number.
+    messages = " ".join(r.getMessage() for r in caplog.records)
+    assert "401" not in messages
+    assert "Incorrect" not in messages
 
 
 def test_the_status_in_the_answer_is_a_fresh_local_snapshot(client: TestClient) -> None:
