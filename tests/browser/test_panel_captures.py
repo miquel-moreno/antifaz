@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 98 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 198 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
@@ -31,6 +31,12 @@ window), driven through the real engine with the invented provider of tests/brow
 (`*-18-live-connecting.png`), empty (`*-19-live-empty.png`), disconnected (`*-20-live-lost.png`),
 too many views (`*-21-live-busy.png`), several processes (`*-22-live-processes.png`) and closed
 after its time (`*-23-live-aged.png`, the 30 minutes shortened to one second).
+11e-4: «Comprobar ahora» with the invented provider (never a real one), both languages and themes,
+at 1280x800 (the whole page) and 390x844 (the window, on the providers card): both answering
+(`*-24-status-check-ok.png`), one refusing (`*-25-status-check-mixed.png`) and the «wait» line of a
+second press (`*-26-status-check-cooldown.png`); and the header pill (or the phone bar's) with the
+dot on «Estado» at load, warning (`*-27-pill-warn.png`, the NER starting) and alert
+(`*-28-pill-danger.png`, no provider key).
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
 throwaway. Right before every capture the token field is checked to be empty (an error shows

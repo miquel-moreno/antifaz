@@ -139,7 +139,9 @@ panel-check:
 # with the text at 200 % (390x844 and 320x844), and the Status view with its data and in its
 # error state (11c-3b), the login and Status under forced colours (11c-4), and «Prueba un texto»
 # empty, with a result, with the too-long offer, without the name detector and with the session
-# warning, at 1280 and 390 px (11d-b). Synthetic only: the
+# warning, at 1280 and 390 px (11d-b), «En directo» (11e-2), and «Comprobar ahora» (ok, mixed,
+# cooldown) and the header pill in warn and danger (11e-4), with the in-process fake provider
+# only. Synthetic only: the
 # token field is checked empty before every capture. Chromium only. Not part of `check` nor of `panel-check`.
 panel-captures:
 	uv run --frozen --group panel pytest tests/browser/test_panel_captures.py -vv --no-cov --panel --panel-captures --panel-browser chromium -p no:cacheprovider
