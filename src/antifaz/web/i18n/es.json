@@ -107,7 +107,7 @@
   "status.provider.anthropic": "Anthropic",
   "status.address.default": "dirección oficial",
   "status.address.custom": "dirección propia",
-  "status.key.yes": "Con clave",
+  "status.key.yes": "Clave configurada",
   "status.key.no": "Sin clave",
   "status.credentials": "Su dirección lleva un usuario o una contraseña: sácalos de la dirección.",
   "status.evidence": "Evidencias",

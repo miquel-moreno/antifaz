@@ -406,7 +406,7 @@
       var info = found || {};
       row.querySelector("[data-address]").textContent = address(info.address);
       var hasKey = info.has_key;
-      setPill(row.querySelector("[data-key]"), hasKey === true ? "ok" : "neutral",
+      setPill(row.querySelector("[data-key]"), "neutral",
         hasKey === true ? statusText("key.yes") : hasKey === false ? statusText("key.no")
           : statusText("unknown"));
       row.querySelector("[data-credentials]").hidden = info.has_credentials !== true;

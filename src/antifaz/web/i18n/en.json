@@ -107,7 +107,7 @@
   "status.provider.anthropic": "Anthropic",
   "status.address.default": "official address",
   "status.address.custom": "own address",
-  "status.key.yes": "Key set",
+  "status.key.yes": "Key configured",
   "status.key.no": "No key",
   "status.credentials": "Its address carries a user name or a password: move them out of the address.",
   "status.evidence": "Evidence",
