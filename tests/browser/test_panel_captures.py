@@ -418,6 +418,34 @@ def test_capture_the_status_check(
     assert server.provider_calls == []
 
 
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    "server_options", [ServerOptions(fake_provider=True, check_mode="mixed")], ids=["mixed"]
+)
+def test_capture_the_providers_pill(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str, width: int
+) -> None:
+    """Miquel's review: after a check with a refusal, the header pill (or the phone bar's) says
+    «Revisa los proveedores»; the window at the top of «Estado»."""
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+    with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/status/check")):
+        tab.page.click("#status-check")
+    tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#status-check").blur()
+    tab.page.mouse.move(0, 0)
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-29-pill-providers")
+
+    assert path.stat().st_size > 0
+
+
 PILL_CAPTURES = {
     "27-pill-warn": ServerOptions(fake_provider=True, ner_state="starting"),
     "28-pill-danger": ServerOptions(),

@@ -194,6 +194,7 @@ CHECK_MESSAGES = (
     ),
     "dot.warn",
     "dot.danger",
+    "overall.providers",  # Miquel's review: the last check's warning
 )
 APPROVED = {
     "es": {
@@ -218,6 +219,7 @@ APPROVED = {
         "status.dot.danger": " (alerta)",
         # Miquel's review of the captures: a key that is set, not one that works (neutral).
         "status.key.yes": "Clave configurada",
+        "status.overall.providers": "Revisa los proveedores",
     },
     "en": {
         "status.check": "Check now",
@@ -236,6 +238,7 @@ APPROVED = {
         "status.dot.warn": " (warning)",
         "status.dot.danger": " (alert)",
         "status.key.yes": "Key configured",
+        "status.overall.providers": "Check the providers",
     },
 }
 

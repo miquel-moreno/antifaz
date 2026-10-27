@@ -294,7 +294,7 @@ CHECK_MODES = {
     [ServerOptions(fake_provider=True, check_mode=mode, check_seconds=0.5) for mode in CHECK_MODES],
     ids=list(CHECK_MODES),
 )
-def test_each_answer_of_a_provider_has_its_line_and_never_changes_the_pill(
+def test_each_answer_of_a_provider_has_its_line_and_turns_the_pill_to_check_them(
     tab: Tab, server: PanelServer, browser_name: str
 ) -> None:
     openai_key, anthropic_key, code = CHECK_MODES[server.check_mode]
@@ -307,7 +307,12 @@ def test_each_answer_of_a_provider_has_its_line_and_never_changes_the_pill(
         return _text("es", key).replace("{code}", code or "")
 
     assert _rows(tab) == {"openai": expected(openai_key), "anthropic": expected(anthropic_key)}
-    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]  # local: unchanged
+    # Miquel's review: a bad answer of the last check makes the pill «Revisa los proveedores»
+    # (warn), never «Todo en orden»; the tab's dot stays tied to the local state.
+    pill = tab.page.evaluate(VISIBLE_PILL_JS)
+    assert pill["overall"] == ["providers", "providers"]
+    assert pill["tones"] == [["warn"], ["warn"]]
+    assert pill["labels"] == [_text("es", "status.overall.providers")] * 2
     assert tab.page.evaluate(DOT_JS)["hidden"] is True
     assert server.fake_model_list_calls == 2  # a redirect is never followed
     assert server.provider_calls == []
@@ -521,6 +526,105 @@ def test_the_first_read_of_estado_is_not_lost_while_a_check_runs(
     assert tab.page.evaluate(CALLOUT_JS) == {"shown": False, "text": ""}
 
 
+# --- Miquel's review of the captures: the pill remembers the last check of this page ----------
+
+
+@pytest.mark.parametrize(
+    "server_options",
+    [ServerOptions(fake_provider=True, check_mode="mixed", check_cooldown=0)],
+    ids=["mixed"],
+)
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_the_pill_keeps_the_last_checks_warning_until_a_good_check(
+    new_tab: NewTab, server: PanelServer, browser_name: str, lang: str
+) -> None:
+    tab = new_tab(locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+
+    _press_check(tab, lang)
+    warned = tab.page.evaluate(VISIBLE_PILL_JS)
+    assert warned["overall"] == ["providers", "providers"]
+    assert warned["tones"] == [["warn"], ["warn"]]
+    assert warned["label"] == _text(lang, "status.overall.providers")
+    assert warned["text"].endswith(_text(lang, "app_status.as_of"))
+    assert tab.page.evaluate(DOT_JS)["hidden"] is True  # the dot: local state only
+
+    with tab.page.expect_response(_is_status):  # «Actualizar» does not clear it
+        tab.page.click("#status-refresh")
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["providers", "providers"]
+
+    tab.page.goto(f"{server.origin}/panel?lang={lang}")  # page memory only: a new page forgets
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    _open_status(tab)
+    server.check_mode = "ok"
+    _press_check(tab, lang)  # a new check with everything good clears it
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    _clean(tab, browser_name)
+
+
+@pytest.mark.parametrize(
+    "server_options",
+    [ServerOptions(fake_provider=True, check_mode="mixed", check_cooldown=0)],
+    ids=["mixed"],
+)
+def test_a_good_check_after_a_bad_one_clears_the_warning(tab: Tab, server: PanelServer) -> None:
+    _log_in(tab, server, "es")
+    _open_status(tab)
+    _press_check(tab, "es")
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["providers", "providers"]
+
+    server.check_mode = "ok"
+    _press_check(tab, "es")
+
+    pill = tab.page.evaluate(VISIBLE_PILL_JS)
+    assert pill["overall"] == ["ok", "ok"]
+    assert pill["label"] == _text("es", "status.overall.ok")
+
+
+LOCAL_ALERTS = {
+    "danger": ServerOptions(fake_provider=True, ner_state="closed", check_mode="401"),
+    "warn": ServerOptions(fake_provider=True, ner_state="starting", check_mode="401"),
+}
+
+
+@pytest.mark.parametrize(
+    ("local", "server_options"), list(LOCAL_ALERTS.items()), ids=list(LOCAL_ALERTS)
+)
+def test_a_local_alert_wins_over_the_checks_warning(
+    tab: Tab, server: PanelServer, local: str
+) -> None:
+    _log_in(tab, server, "es")
+    _open_status(tab)
+
+    _press_check(tab, "es")
+
+    pill = tab.page.evaluate(VISIBLE_PILL_JS)
+    assert pill["overall"] == [local, local]
+    assert pill["tones"] == [[local], [local]]
+    assert pill["label"] == _text("es", f"status.overall.{local}")
+    dot = tab.page.evaluate(DOT_JS)
+    assert dot["hidden"] is False and dot["tones"] == [local]
+
+
+@pytest.mark.parametrize("server_options", [ServerOptions(fake_provider=True, check_mode="mixed")])
+def test_a_failed_read_after_a_bad_check_says_not_refreshed(tab: Tab, server: PanelServer) -> None:
+    _log_in(tab, server, "es")
+    _open_status(tab)
+    _press_check(tab, "es")
+    tab.page.route(f"{tab.origin}{STATUS_PATH}", lambda route: route.abort())
+
+    tab.page.click("#status-refresh")
+    tab.page.locator("#status-alert").wait_for(state="visible")
+
+    pill = tab.page.evaluate(VISIBLE_PILL_JS)
+    assert pill["overall"] == ["stale", "stale"]
+    assert pill["tones"] == [["neutral"], ["neutral"]]
+    assert pill["label"] == _text("es", "status.overall.stale")
+
+
 KEY_PILLS_JS = """() => [...document.querySelectorAll('[data-provider] [data-key]')].map((p) => ({
   label: p.querySelector('[data-label]').textContent,
   tones: ['ok', 'warn', 'danger', 'neutral'].filter((t) => p.classList.contains(t))}))"""
@@ -656,7 +760,7 @@ def test_forced_colours_keep_the_word_and_the_dots(
                   dot: getComputedStyle(dot).backgroundColor,
                   lineDot: getComputedStyle(line.querySelector('.dot')).backgroundColor}; }"""
     )
-    assert shown["word"] == _text("es", "status.overall.ok")
+    assert shown["word"] == _text("es", "status.overall.providers")  # the mixed check
     for colour in (shown["dot"], shown["lineDot"]):
         assert colour not in ("rgba(0, 0, 0, 0)", "transparent")
     assert tab.csp_violations() == []
