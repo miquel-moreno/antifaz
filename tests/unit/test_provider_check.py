@@ -366,3 +366,29 @@ def test_the_check_results_match_the_panel_schema() -> None:
     from antifaz.web.status_response import CheckResult
 
     assert set(typing.get_args(CheckResult)) == set(CHECK_RESULTS)
+
+
+@pytest.mark.parametrize("status", [600, 999])
+async def test_a_status_outside_100_to_599_is_unexpected_without_a_code(status: int) -> None:
+    """Review of 11e-4: h11 accepts any three digits; such an answer is unexpected, no code."""
+    client, _ = _client(lambda request: httpx.Response(status))
+
+    outcomes = await check_providers(client, _settings())
+
+    assert outcomes == [
+        {"id": "openai", "result": "unexpected", "http_status": None},
+        {"id": "anthropic", "result": "unexpected", "http_status": None},
+    ]
+
+
+def test_the_schema_takes_unexpected_without_a_code_and_no_other_error_without_one() -> None:
+    from pydantic import ValidationError
+
+    from antifaz.web.status_response import ProviderResult
+
+    ProviderResult.model_validate({"id": "openai", "result": "unexpected", "http_status": None})
+    for result in ("refused", "redirect"):
+        with pytest.raises(ValidationError, match="HTTP code"):
+            ProviderResult.model_validate({"id": "openai", "result": result, "http_status": None})
+    with pytest.raises(ValidationError):
+        ProviderResult.model_validate({"id": "openai", "result": "unexpected", "http_status": 999})

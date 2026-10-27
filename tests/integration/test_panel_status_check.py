@@ -350,3 +350,22 @@ def test_the_panel_page_renders_the_pill_and_the_dot_from_the_local_overall(
     dot = page.text.split('id="status-dot"', 1)[1].split(">", 1)[0]
     assert ("hidden" in dot) is (overall == "ok")
     assert upstream.requests == []  # rendering the page never calls a provider
+
+
+def test_a_status_outside_100_to_599_is_unexpected_and_the_other_result_stays() -> None:
+    """Review of 11e-4: a 999 from one provider is never a 500 for the whole check."""
+
+    def odd_openai(request: httpx.Request) -> httpx.Response:
+        if "anthropic-version" in request.headers:
+            return models_list(request)
+        return httpx.Response(999)
+
+    with panel_client(HTTPS_URL, upstream=FakeUpstream(odd_openai)) as client:
+        session_id, token = logged_in(client)
+        response = _press(client, session_id, token)
+
+    assert response.status_code == 200
+    assert response.json()["providers"] == [
+        {"id": "openai", "result": "unexpected", "http_status": None},
+        {"id": "anthropic", "result": "ok", "http_status": None},
+    ]
