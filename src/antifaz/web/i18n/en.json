@@ -72,6 +72,7 @@
   "status.overall.warn": "Check the warnings",
   "status.overall.danger": "Something is blocking",
   "status.overall.stale": "Not refreshed",
+  "status.overall.providers": "Check the providers",
   "app_status.as_of": ", as of the last read",
   "status.dot.warn": " (warning)",
   "status.dot.danger": " (alert)",

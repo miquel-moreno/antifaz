@@ -72,6 +72,7 @@
   "status.overall.warn": "Revisa los avisos",
   "status.overall.danger": "Algo está bloqueando",
   "status.overall.stale": "Sin actualizar",
+  "status.overall.providers": "Revisa los proveedores",
   "app_status.as_of": ", según la última lectura",
   "status.dot.warn": " (aviso)",
   "status.dot.danger": " (alerta)",

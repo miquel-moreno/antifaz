@@ -285,6 +285,9 @@
   var checkInFlight = false;
   var snapshotsAsked = 0;
   var snapshotShown = 0;
+  var GOOD_CHECKS = ["ok", "no_key", "not_checked_credentials"];
+  var providerWarning = false;
+  var localOverall = appStatuses.length ? appStatuses[0].getAttribute("data-overall") : "ok";
   var CHECK_RESULTS = ["ok", "refused", "redirect", "unexpected", "timeout", "unreachable",
     "no_key", "not_checked_credentials"];
   var CHECK_TONES = {ok: "ok", refused: "danger", redirect: "warn", unexpected: "warn",
@@ -325,22 +328,30 @@
   }
 
   function setAppStatus(overall) {
+    localOverall = overall;
     var known = OVERALLS.indexOf(overall) !== -1;
-    var tone = known ? overall : "neutral";
+    var local = known ? overall : "neutral";
+    var tone = local;
+    var shown = known || overall === "stale" ? overall : "unknown";
     var text = known ? statusText("overall." + overall)
       : statusText(overall === "stale" ? "overall.stale" : "unknown");
+    if (overall === "ok" && providerWarning) {
+      tone = "warn";
+      shown = "providers";
+      text = statusText("overall.providers");
+    }
     appStatuses.forEach(function (pill) {
       TONES.forEach(function (name) {
         pill.classList.toggle("is-" + name, name === tone);
       });
-      pill.setAttribute("data-overall", known || overall === "stale" ? overall : "unknown");
+      pill.setAttribute("data-overall", shown);
       pill.querySelector("[data-label]").textContent = text;
     });
-    statusDot.hidden = tone !== "warn" && tone !== "danger";
-    statusDot.classList.toggle("is-warn", tone !== "danger");
-    statusDot.classList.toggle("is-danger", tone === "danger");
+    statusDot.hidden = local !== "warn" && local !== "danger";
+    statusDot.classList.toggle("is-warn", local !== "danger");
+    statusDot.classList.toggle("is-danger", local === "danger");
     statusDot.querySelector("[data-label]").textContent =
-      statusText(tone === "danger" ? "dot.danger" : "dot.warn");
+      statusText(local === "danger" ? "dot.danger" : "dot.warn");
   }
 
   function freshSnapshot(order) {
@@ -564,6 +575,7 @@
 
   function renderChecks(providers) {
     var list = Array.isArray(providers) ? providers : [];
+    var warning = false;
     document.querySelectorAll("[data-provider]").forEach(function (row) {
       var found = null;
       list.forEach(function (item) {
@@ -572,6 +584,9 @@
         }
       });
       var result = found && known(found.result, CHECK_RESULTS) ? found.result : "";
+      if (GOOD_CHECKS.indexOf(result) === -1) {
+        warning = true;
+      }
       var text = result ? statusText("check." + result) : statusText("unknown");
       if (result === "refused" || result === "unexpected") {
         var code = found.http_status;
@@ -585,6 +600,8 @@
       line.querySelector("[data-label]").textContent = text;
       line.hidden = false;
     });
+    providerWarning = warning;
+    setAppStatus(localOverall);
   }
 
   function waitSeconds(value) {
