@@ -556,7 +556,7 @@ def test_the_pill_keeps_the_last_checks_warning_until_a_good_check(
     tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["providers", "providers"]
 
-    tab.page.goto(f"{server.origin}/panel?lang={lang}")  # page memory only: a new page forgets
+    tab.goto(f"/panel?lang={lang}")  # page memory only: a new page forgets
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
     _open_status(tab)
     server.check_mode = "ok"
