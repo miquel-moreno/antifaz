@@ -643,16 +643,23 @@
         leave();
         return;
       }
-      var wait = waitSeconds(response.headers.get("Retry-After"));
-      if (response.status === 429 && wait) {
-        checkLine.textContent = statusText("check.cooldown").replace("{s}", String(wait));
-        checkIdle();
-        return;
-      }
-      if (response.status === 503) {
-        checkLine.textContent = statusText("check.busy");
-        checkIdle();
-        return;
+      if (response.status === 429 || response.status === 503) {
+        var wait = waitSeconds(response.headers.get("Retry-After"));
+        return response.json().then(function (body) {
+          var error = body && typeof body === "object" && body.error &&
+            typeof body.error === "object" ? body.error : {};
+          if (response.status === 429 && error.code === "check_cooldown" && wait) {
+            checkLine.textContent = statusText("check.cooldown").replace("{s}", String(wait));
+            checkIdle();
+          } else if (response.status === 503 && error.code === "check_busy") {
+            checkLine.textContent = statusText("check.busy");
+            checkIdle();
+          } else {
+            checkFailed("refused", order);
+          }
+        }, function () {
+          checkFailed("refused", order);
+        });
       }
       if (response.status !== 200) {
         checkFailed("refused", order);
