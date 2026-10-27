@@ -599,6 +599,9 @@
     if (!active || active === document.body || active.contains(checkButton)) {
       checkButton.focus();
     }
+    if (statusTab.getAttribute("aria-selected") === "true") {
+      statusFirstShown();
+    }
   }
 
   function checkFailed(key, order) {
@@ -613,7 +616,9 @@
     renderChecks(data.providers);
     if (data.status && typeof data.status === "object" && freshSnapshot(order)) {
       statusAlert.hidden = true;
+      statusAlertText.textContent = "";
       snapshotShownNow(data.status);
+      statusStarted = true;
     }
     checkLine.textContent = statusText("check.checked").replace("{time}", clockTime(new Date()));
     checkIdle();
@@ -684,7 +689,7 @@
   });
 
   function statusFirstShown() {
-    if (!statusStarted) {
+    if (!statusStarted && !checkInFlight) {
       statusStarted = true;
       loadStatus(false);
     }
