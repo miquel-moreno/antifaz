@@ -216,6 +216,8 @@ APPROVED = {
         "app_status.as_of": ", según la última lectura",
         "status.dot.warn": " (aviso)",
         "status.dot.danger": " (alerta)",
+        # Miquel's review of the captures: a key that is set, not one that works (neutral).
+        "status.key.yes": "Clave configurada",
     },
     "en": {
         "status.check": "Check now",
@@ -233,6 +235,7 @@ APPROVED = {
         "app_status.as_of": ", as of the last read",
         "status.dot.warn": " (warning)",
         "status.dot.danger": " (alert)",
+        "status.key.yes": "Key configured",
     },
 }
 

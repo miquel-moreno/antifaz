@@ -521,6 +521,32 @@ def test_the_first_read_of_estado_is_not_lost_while_a_check_runs(
     assert tab.page.evaluate(CALLOUT_JS) == {"shown": False, "text": ""}
 
 
+KEY_PILLS_JS = """() => [...document.querySelectorAll('[data-provider] [data-key]')].map((p) => ({
+  label: p.querySelector('[data-label]').textContent,
+  tones: ['ok', 'warn', 'danger', 'neutral'].filter((t) => p.classList.contains(t))}))"""
+
+
+@pytest.mark.parametrize("lang", ["es", "en"])
+def test_a_configured_key_is_neutral_only_a_working_one_is_green(
+    new_tab: NewTab, server: PanelServer, lang: str
+) -> None:
+    """Miquel's review of the captures: «Clave configurada» says a key is set, not that it works,
+    so it is neutral (no green dot); green stays for «Responde · la clave funciona»."""
+    tab = new_tab(locale=_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+
+    configured = {"label": _text(lang, "status.key.yes"), "tones": ["neutral"]}
+    assert tab.page.evaluate(KEY_PILLS_JS) == [configured, configured]
+    _press_check(tab, lang)
+    assert tab.page.evaluate(KEY_PILLS_JS) == [configured, configured]
+    lines = tab.page.evaluate(
+        "() => [...document.querySelectorAll('[data-check]')]"
+        ".map((l) => l.classList.contains('ok'))"
+    )
+    assert lines == [True, True]
+
+
 def test_a_401_goes_to_the_login_with_the_language(tab: Tab, server: PanelServer) -> None:
     _log_in(tab, server, "es")
     _open_status(tab)
