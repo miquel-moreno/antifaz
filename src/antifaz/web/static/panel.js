@@ -595,7 +595,8 @@
   function checkIdle() {
     checkInFlight = false;
     settle();
-    if (document.activeElement === document.body || document.activeElement === checkButton) {
+    var active = document.activeElement;
+    if (!active || active === document.body || active.contains(checkButton)) {
       checkButton.focus();
     }
   }
