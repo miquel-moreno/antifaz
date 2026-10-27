@@ -13,12 +13,18 @@ provider is never called.
 - A base URL with a user or password is never called.
 - The check uses the gateway's own client: building any new httpx client during a check fails
   the check (it would be a new way out), the client that sends is app.state.http_client, and the
-  host and path are the ones /v1/models uses. With HTTP(S)_PROXY set, the request still goes
-  through that same client (no other transport is built).
-- httpx and httpcore log nothing about the check, even with every logger at DEBUG.
+  host and path are the ones /v1/models uses. With HTTP(S)_PROXY set, it still builds no client
+  and sends through that same one (review 7 of 11e-4: reworded, it proves no new way out, not
+  which proxy the gateway's client honours).
+- httpx and httpcore log nothing about the check, with a REAL httpx client over loopback (so
+  httpcore runs) and the gateway at DEBUG; a companion test shows the same press does log both
+  when their loggers are not kept quiet, so the check is not empty (review 7).
 """
 
+import contextlib
+import http.server
 import logging
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -27,6 +33,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+import antifaz.logging
+from antifaz.api.app import create_app
 from antifaz.api.key_fragments import KeyFragments
 from tests.conftest import forbid_network
 from tests.integration.fakes import FakeUpstream
@@ -207,26 +215,113 @@ def test_the_client_that_sends_is_the_gateways_own(monkeypatch: pytest.MonkeyPat
     assert sorted(checked) == sorted(listed)
 
 
-def test_a_proxy_in_the_environment_changes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """HTTP(S)_PROXY set: the check still goes through the gateway's client and transport."""
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
-    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
-    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+def test_with_a_proxy_in_the_environment_the_check_builds_no_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP(S)_PROXY set: the check builds no httpx client (nothing that could read those
+    variables for it) and sends through app.state.http_client. Honest scope: with an injected
+    client this proves the check takes no new way out; which proxy the gateway's own client
+    honours is that client's business (providers/http.py), the same as for the proxy routes."""
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    senders: list[object] = []
+    real_stream = httpx.AsyncClient.stream
+
+    def spy(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> Any:
+        senders.append(self)
+        return real_stream(self, *args, **kwargs)
+
+    built: list[str] = []
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        built.append("client")
+        raise AssertionError("the check built a new HTTP client")
+
     clients, upstream = _client(_echo_everything(200))
     for client in clients:
-        body = _press(client).json()
+        session_id, token = logged_in(client)
+        own = client.app.state.http_client  # type: ignore[attr-defined]
+        with monkeypatch.context() as during:
+            during.setattr(httpx.AsyncClient, "stream", spy)
+            during.setattr(httpx.AsyncClient, "__init__", refuse)
+            during.setattr(httpx.Client, "__init__", refuse)
+            response = client.post(
+                PATH, content=b"{}", headers=action_headers(client, session_id, token)
+            )
 
-    assert [p["result"] for p in body["providers"]] == ["ok", "ok"]
+    assert response.status_code == 200
+    assert built == []
+    assert len(senders) == 2 and all(sender is own for sender in senders)
     assert len(upstream.requests) == 2
 
 
-def test_httpx_and_httpcore_log_nothing_about_the_check(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG)
-    clients, _ = _client(_echo_everything(401))
-    for client in clients:
-        caplog.clear()
-        _press(client)
+class _RefusingProvider(http.server.BaseHTTPRequestHandler):
+    """A loopback stand-in for a provider: every GET is a 401 (never a real provider)."""
 
-    noisy = [r for r in caplog.records if r.name.split(".")[0] in ("httpx", "httpcore")]
-    assert noisy == []
-    assert "check.invalid" not in caplog.text
+    def do_GET(self) -> None:  # the name http.server calls
+        self.send_response(401)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@contextlib.contextmanager
+def _real_http_gateway() -> Iterator[TestClient]:
+    """The panel with a REAL httpx client (so httpcore really runs) to a loopback server, the
+    gateway's log level at DEBUG."""
+    provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RefusingProvider)
+    thread = threading.Thread(target=provider.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{provider.server_address[1]}"
+    try:
+        settings = _settings(openai_base_url=base, anthropic_base_url=base, log_level="DEBUG")
+        http_client = httpx.AsyncClient(trust_env=False)
+        app = create_app(settings, http_client=http_client)
+        with TestClient(app, base_url=HTTPS_URL, raise_server_exceptions=False) as client:
+            yield client
+    finally:
+        provider.shutdown()
+        provider.server_close()
+        thread.join(10)
+
+
+def _http_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name.split(".")[0] in ("httpx", "httpcore")]
+
+
+def test_httpx_and_httpcore_log_nothing_about_the_check(caplog: pytest.LogCaptureFixture) -> None:
+    """A real httpx client over loopback (httpcore runs) and the gateway at DEBUG: httpx and
+    httpcore log nothing about the check (their loggers stay at WARNING)."""
+    caplog.set_level(logging.DEBUG)
+    with _real_http_gateway() as client:
+        caplog.clear()
+        body = _press(client).json()
+
+    assert [p["result"] for p in body["providers"]] == ["refused", "refused"]
+    assert _http_records(caplog) == []
+    assert "127.0.0.1:" not in " ".join(r.getMessage() for r in caplog.records)
+
+
+def test_the_log_check_would_see_httpx_and_httpcore_if_they_were_not_quiet(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The guard of the test above is not empty: without the quiet loggers, the same press
+    gives httpx and httpcore records."""
+    monkeypatch.setattr(antifaz.logging, "QUIET_LOGGERS", ())
+    loggers = [logging.getLogger(name) for name in ("httpx", "httpcore")]
+    levels = [logger.level for logger in loggers]
+    caplog.set_level(logging.DEBUG)
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.NOTSET)
+        with _real_http_gateway() as client:
+            caplog.clear()
+            _press(client)
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.setLevel(level)
+
+    names = {r.name.split(".")[0] for r in _http_records(caplog)}
+    assert names == {"httpx", "httpcore"}
