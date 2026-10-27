@@ -393,6 +393,47 @@ def test_a_refused_press_keeps_the_callout_of_a_failed_read(
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["stale", "stale"]
 
 
+VISIBILITY_JS = """(state) => {
+  Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => state});
+  Object.defineProperty(document, 'hidden', {configurable: true, get: () => state === 'hidden'});
+  document.dispatchEvent(new Event('visibilitychange'));
+}"""
+
+
+def test_a_read_failing_during_a_check_never_hides_the_checks_fresh_snapshot(
+    tab: Tab, server: PanelServer
+) -> None:
+    """Review 3: while a check runs, the page comes back to visible on «Estado». No status read
+    starts then (the check brings a fresh snapshot); so a read that would fail cannot leave the
+    pill «Sin actualizar» after the check answered."""
+    held: list[Route] = []
+    _log_in(tab, server, "en")
+    _open_status(tab)
+    reads_before = len([u for u in tab.requests if u.endswith(STATUS_PATH)])
+    tab.page.route(f"{tab.origin}{CHECK_PATH}", lambda route: held.append(route))
+    tab.page.locator("#status-check").dispatch_event("click")
+    for _ in range(ROUND_TRIPS):
+        if held:
+            break
+        tab.page.evaluate(SETTLE_JS)
+    assert held, "the check never reached the route"
+    tab.page.route(f"{tab.origin}{STATUS_PATH}", lambda route: route.abort())
+
+    tab.page.evaluate(VISIBILITY_JS, "hidden")
+    tab.page.evaluate(VISIBILITY_JS, "visible")
+    for _ in range(5):  # a read started here would be aborted within a few tasks
+        tab.page.evaluate(SETTLE_JS)
+    with tab.page.expect_response(_is_check):
+        held[0].continue_()
+    prefix = _text("en", "status.check.checked").split("{", 1)[0]
+    tab.page.wait_for_function(LINE_STARTS_JS, arg=prefix, timeout=TIMEOUT_MS)
+    tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    assert tab.page.evaluate(CALLOUT_JS)["shown"] is False
+    assert len([u for u in tab.requests if u.endswith(STATUS_PATH)]) == reads_before
+
+
 def test_a_401_goes_to_the_login_with_the_language(tab: Tab, server: PanelServer) -> None:
     _log_in(tab, server, "es")
     _open_status(tab)
