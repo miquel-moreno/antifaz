@@ -14,7 +14,8 @@
   - no key: `no_key`, and no call;
   - a base URL with a user or password: `not_checked_credentials`, and no call;
   - a URL httpx refuses: `unreachable`;
-  - 200 `ok`; 401 or 403 `refused`; 3xx `redirect` (never followed); any other `unexpected`;
+  - 200 `ok`; 401 or 403 `refused`; 3xx `redirect` (never followed); any other `unexpected`
+    (a code outside 100-599, which h11 accepts, is `unexpected` without its code);
   - the deadline or an httpx timeout: `timeout`; any other exception: `unreachable`.
   The HTTP code travels only with refused, redirect and unexpected. An exception is never kept,
   returned or logged (its text could hold the URL or a header).
@@ -109,6 +110,8 @@ async def _check_one(
             if result.isdigit():
                 status = int(result)
                 result = _result(status)
+                if not 100 <= status <= 599:  # h11 takes any three digits: no code to show
+                    status = None
     return {
         "id": provider,
         "result": result,

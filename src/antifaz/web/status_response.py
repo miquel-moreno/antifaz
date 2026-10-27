@@ -79,7 +79,8 @@ CheckResult = Literal[
 
 class ProviderResult(_Closed):
     """One provider's result. The HTTP code only with refused (401 or 403), redirect (3xx) and
-    unexpected (any other but 200), and never with the others."""
+    unexpected (any other but 200, or none when the provider's code was outside 100-599), and
+    never with the others."""
 
     id: ProviderId
     result: CheckResult
@@ -93,11 +94,9 @@ class ProviderResult(_Closed):
         elif self.result == "redirect":
             fits = code is not None and 300 <= code < 400
         elif self.result == "unexpected":
-            fits = (
-                code is not None
-                and code != 200
-                and code not in (401, 403)
-                and not (300 <= code < 400)
+            # None: the provider sent a code outside 100-599 (h11 accepts any three digits).
+            fits = code is None or (
+                code != 200 and code not in (401, 403) and not (300 <= code < 400)
             )
         else:
             fits = code is None
