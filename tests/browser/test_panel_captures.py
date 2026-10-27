@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 198 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 206 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
