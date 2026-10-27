@@ -350,6 +350,49 @@ def test_a_busy_answer_says_a_check_is_running(tab: Tab, server: PanelServer) ->
     assert tab.page.locator("#check-line").inner_text() == _text("es", "status.check.busy")
 
 
+# --- review of 11e-4 --------------------------------------------------------------------------
+
+REFUSALS = {
+    429: ("check_cooldown", {"Retry-After": "12"}, "status.check.cooldown"),
+    503: ("check_busy", {"Retry-After": "1"}, "status.check.busy"),
+}
+CALLOUT_JS = """() => ({shown: !document.getElementById('status-alert').hidden,
+  text: document.getElementById('status-alert-text').textContent})"""
+
+
+def _fail_a_refresh(tab: Tab) -> None:
+    """«Estado» loaded, then a refresh the browser refuses: the callout and «Sin actualizar»."""
+    _open_status(tab)
+    tab.page.route(f"{tab.origin}{STATUS_PATH}", lambda route: route.abort())
+    tab.page.click("#status-refresh")
+    tab.page.locator("#status-alert").wait_for(state="visible")
+    tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
+
+
+@pytest.mark.parametrize("status", sorted(REFUSALS))
+def test_a_refused_press_keeps_the_callout_of_a_failed_read(
+    tab: Tab, server: PanelServer, status: int
+) -> None:
+    """Review 2: a 429 or 503 press says why on its line and leaves the error callout (and the
+    stale pill) of the failed read as they were."""
+    code, headers, line_key = REFUSALS[status]
+    _log_in(tab, server, "es")
+    _fail_a_refresh(tab)
+    before = tab.page.evaluate(CALLOUT_JS)
+    tab.page.route(
+        f"{tab.origin}{CHECK_PATH}",
+        lambda route: route.fulfill(
+            status=status, headers=headers, json={"error": {"code": code, "message": "x"}}
+        ),
+    )
+
+    _press_check(tab, "es", line_key)
+
+    assert before["shown"] is True
+    assert tab.page.evaluate(CALLOUT_JS) == before
+    assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["stale", "stale"]
+
+
 def test_a_401_goes_to_the_login_with_the_language(tab: Tab, server: PanelServer) -> None:
     _log_in(tab, server, "es")
     _open_status(tab)
