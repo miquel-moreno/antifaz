@@ -368,6 +368,46 @@ def test_the_check_results_match_the_panel_schema() -> None:
     assert set(typing.get_args(CheckResult)) == set(CHECK_RESULTS)
 
 
+async def test_the_deadline_is_total_even_for_headers_that_drip_forever() -> None:
+    """Review 6 of 11e-4: a loopback server sends a header line every 50 ms and never ends the
+    headers. httpx's own timeouts are per read (each byte resets them); the check's deadline is
+    total, so it ends as `timeout` soon after the deadline. A real httpx client on 127.0.0.1
+    (the socket guard allows loopback only), never a provider."""
+    drip_seconds = 0.05
+    deadline = 0.5
+
+    async def drip(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\n")
+            while True:
+                writer.write(b"X-Drip: a\r\n")
+                await writer.drain()
+                await asyncio.sleep(drip_seconds)
+        except (ConnectionError, asyncio.CancelledError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(drip, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    settings = _settings(openai_base_url=base, anthropic_base_url=base)
+    loop = asyncio.get_running_loop()
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=httpx.Timeout(2.0)) as client:
+            started = loop.time()
+            outcomes = await asyncio.wait_for(
+                check_providers(client, settings, seconds=deadline), timeout=15
+            )
+            elapsed = loop.time() - started
+    finally:
+        server.close()
+
+    assert [o["result"] for o in outcomes] == ["timeout", "timeout"]
+    assert elapsed < deadline + 1.5  # the deadline plus a margin; per read it would be 15 s
+
+
 @pytest.mark.parametrize("status", [600, 999])
 async def test_a_status_outside_100_to_599_is_unexpected_without_a_code(status: int) -> None:
     """Review of 11e-4: h11 accepts any three digits; such an answer is unexpected, no code."""
