@@ -477,3 +477,24 @@ def test_the_memory_store_follows_the_protocol() -> None:
     store, _ = make_store()
 
     assert isinstance(store, KeyStore)
+
+
+def test_the_store_needs_a_pepper_ring() -> None:
+    with pytest.raises(TypeError):
+        MemoryKeyStore({1: PEPPER_1})  # type: ignore[arg-type]
+
+
+def test_a_clock_that_returns_no_datetime_is_refused() -> None:
+    ring = PepperRing({1: PEPPER_1}, current=1)
+    store = MemoryKeyStore(ring, lambda: "now")  # type: ignore[arg-type,return-value]
+
+    with pytest.raises(ValueError, match="UTC"):
+        store.create("app", ALL_SCOPES)
+    assert store.list() == ()
+
+
+def test_the_store_repr_shows_only_how_many_keys_it_has() -> None:
+    store, _ = make_store()
+    store.create("app", ALL_SCOPES)
+
+    assert repr(store) == str(store) == "MemoryKeyStore(keys=1)"

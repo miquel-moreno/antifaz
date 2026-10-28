@@ -1,9 +1,11 @@
 """Virtual key format (issue 121, PR 8a, ADR-0020): `afz_` + 43 base62 + 6 base62 checksum."""
 
 import zlib
+from pathlib import Path
 
 import pytest
 
+from antifaz.keys import format as format_module
 from antifaz.keys.format import (
     ALPHABET,
     BODY_LENGTH,
@@ -161,6 +163,6 @@ def test_the_parse_frame_does_not_keep_the_refused_text() -> None:
     traceback = caught.value.__traceback__
     while traceback is not None:
         frame = traceback.tb_frame
-        if frame.f_code.co_filename.endswith("format.py"):
+        if Path(frame.f_code.co_filename).resolve() == Path(format_module.__file__).resolve():
             assert all(value is not typo for value in frame.f_locals.values())
         traceback = traceback.tb_next

@@ -97,3 +97,20 @@ def test_the_ring_has_no_attribute_dictionary() -> None:
     assert not hasattr(ring, "__dict__")
     with pytest.raises(AttributeError):
         ring.extra = 1  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("text", ["afz_ñ" + "K" * 48, b"afz_", 7])
+def test_digest_refuses_what_is_not_ascii_text_without_echoing_it(text: object) -> None:
+    ring = PepperRing({1: PEPPER_1}, current=1)
+
+    with pytest.raises(ValueError) as caught:
+        ring.digest(text, 1)  # type: ignore[arg-type]
+
+    assert not isinstance(caught.value, UnicodeError)
+    assert str(caught.value) == "only a parsed key can be hashed"
+    assert caught.value.__context__ is None
+
+
+def test_a_ring_needs_a_mapping() -> None:
+    with pytest.raises(ValueError):
+        PepperRing([(1, PEPPER_1)], current=1)  # type: ignore[arg-type]
