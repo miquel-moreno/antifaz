@@ -23,6 +23,7 @@ Scopes, one per group of routes (the mapping to routes is the door's, 8d):
 - SCAN: POST /antifaz/scan
 """
 
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
@@ -31,7 +32,10 @@ from typing import NoReturn
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
 HASH_BYTES = 32  # SHA-256
-FORBIDDEN_NAME_CATEGORIES: frozenset[str] = frozenset()  # stub, filled in the next commit
+# Unicode categories never allowed in a key name: controls (Cc), invisible format characters
+# such as the bidi controls and the zero-width ones (Cf), line and paragraph separators (Zl, Zp),
+# surrogates (Cs), private use (Co) and unassigned code points (Cn).
+FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
 
 
 class Scope(StrEnum):
@@ -63,13 +67,21 @@ def is_utc(value: object) -> bool:
 
 
 def check_name(name: object) -> None:
-    """1 to MAX_NAME_LENGTH printable characters, without spaces at either end."""
+    """1 to MAX_NAME_LENGTH printable characters, without whitespace at either end, and no
+    control or invisible format character anywhere (FORBIDDEN_NAME_CATEGORIES).
+
+    The name is shown to the admin: a bidi control (U+202E...) could make it read as another
+    name, a zero-width character (U+200B...) could make two names look the same. The errors
+    never repeat the name.
+    """
     if type(name) is not str:
         raise TypeError("a key name must be text")
+    if any(unicodedata.category(character) in FORBIDDEN_NAME_CATEGORIES for character in name):
+        raise ValueError("a key name cannot hold control or invisible characters")
     if not 1 <= len(name) <= MAX_NAME_LENGTH or name != name.strip() or not name.isprintable():
         raise ValueError(
             f"a key name must be 1 to {MAX_NAME_LENGTH} printable characters, "
-            "without spaces at either end"
+            "without whitespace at either end"
         )
 
 
@@ -160,6 +172,7 @@ class CreatedKey:
 
 __all__ = [
     "DEFAULT_LIFETIME",
+    "FORBIDDEN_NAME_CATEGORIES",
     "HASH_BYTES",
     "MAX_NAME_LENGTH",
     "Caller",
