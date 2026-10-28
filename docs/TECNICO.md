@@ -1211,6 +1211,26 @@ En pocas palabras: en «Estado», el botón «Comprobar ahora» pregunta a cada 
 - Navegadores (`tests/browser/test_panel_check.py`, Chromium, Firefox y WebKit, siempre con el proveedor falso del propio proceso): píldora y punto en ok, aviso, alerta y «Sin actualizar», en escritorio y móvil; ninguna petición al cargar ni 27 minutos después; cada modo del proveedor falso (ok, 401, 302, sin respuesta, sin conexión, mixto); dos llamadas al proveedor falso por pulsación y ninguna a uno real; el foco; el 429, el 503 y el 401; el contador; axe, CSP, colores forzados, texto al 200 % (también a 320 px) y tema oscuro.
 - `make panel-captures` añade 48 capturas: la comprobación correcta, mixta y en enfriamiento (`*-24-status-check-ok.png`, `*-25-status-check-mixed.png`, `*-26-status-check-cooldown.png`), la píldora en aviso y en alerta (`*-27-pill-warn.png`, `*-28-pill-danger.png`) y la píldora «Revisa los proveedores» tras una comprobación mixta (`*-29-pill-providers.png`), en es/en × claro/oscuro × 1280x800 y 390x844. Datos inventados. En total, 206 PNG.
 
+## Claves virtuales: la librería (issue 121, PR 8a)
+
+[ADR-0020](adr/0020-claves-virtuales.md) (propuesta). `antifaz/keys/` es solo biblioteca estándar y todavía no la usa nada: ni la puerta, ni la CLI, ni los ajustes, ni una base de datos (llegan en 8b–8f).
+
+```python
+from antifaz.keys import MemoryKeyStore, PepperRing, Scope
+
+store = MemoryKeyStore(PepperRing({1: pepper_de_32_bytes_o_mas}, current=1))
+created = store.create("facturas", {Scope.OPENAI_CHAT})  # created.key: se ve una vez
+store.verify(created.key)  # Verified(caller=Caller(key_id=1, scopes=...))
+store.verify("afz_inventada")  # Refused(reason=RefusalReason.MALFORMED)
+```
+
+- **Formato** (`format.py`): `afz_` + 43 base62 de `secrets` + 6 base62 de control (CRC32). El control solo filtra erratas, no es seguridad. `parse_key()` no usa expresiones regulares y su error es siempre `malformed key`.
+- **Hash** (`pepper.py`): HMAC-SHA256 con el pepper de una versión. El almacén busca por (versión, hash) con cada versión del anillo, así una rotación no invalida las claves antiguas mientras su versión siga en el anillo.
+- **Registros** (`records.py`): cerrados y congelados; tiempos `datetime` con `tzinfo is UTC`; el `repr` no enseña ni el nombre ni el hash y la igualdad no compara el hash. Vale mientras `ahora < expires_at`.
+- **Almacén** (`store.py`): `KeyStore` es el protocolo que también implementará PostgreSQL. `MemoryKeyStore` no tiene cerrojo (un solo hilo, como las sesiones del panel), se puede cargar con registros existentes y no se puede serializar ni copiar.
+- **La clave en claro no se queda**: ni en el almacén ni en los objetos que devuelve; si una llamada falla a medias, se limpian las variables de los marcos de la librería en el traceback (`tests/redteam/test_keys_secrets.py`).
+- **El pepper**: sin él, ninguna clave virtual funciona. Cómo generarlo y guardar su copia llega con `antifaz init` (8c).
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |
