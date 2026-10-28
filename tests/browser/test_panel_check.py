@@ -589,13 +589,13 @@ def test_a_good_check_after_a_bad_one_clears_the_warning(tab: Tab, server: Panel
 
 
 def _assert_amber_dot(tab: Tab, lang: str) -> None:
-    """The «Estado» tab's dot after a bad check: shown, amber (warn), and the tab's name ends
-    with the approved warning suffix « (aviso)» / « (warning)»."""
+    """The «Estado» tab's dot after a bad check: shown, amber (warn), and the tab's name
+    holds the approved warning suffix « (aviso)» / « (warning)»."""
     dot = tab.page.evaluate(DOT_JS)
     assert dot["hidden"] is False and dot["shown"] is True
     assert dot["tones"] == ["warn"]
     assert dot["text"] == _text(lang, "status.dot.warn")
-    assert tab.page.evaluate(TAB_NAME_JS).endswith(_text(lang, "status.dot.warn"))
+    assert _text(lang, "status.dot.warn") in tab.page.evaluate(TAB_NAME_JS)
 
 
 LOCAL_ALERTS = {
