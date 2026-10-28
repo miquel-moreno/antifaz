@@ -24,6 +24,7 @@ MINIMUMS = {
     "providers": 90.0,
     "api": 90.0,
     "web": 90.0,
+    "keys": 90.0,
 }
 
 
