@@ -308,12 +308,12 @@ def test_each_answer_of_a_provider_has_its_line_and_turns_the_pill_to_check_them
 
     assert _rows(tab) == {"openai": expected(openai_key), "anthropic": expected(anthropic_key)}
     # Miquel's review: a bad answer of the last check makes the pill «Revisa los proveedores»
-    # (warn), never «Todo en orden»; the tab's dot stays tied to the local state.
+    # (warn), never «Todo en orden», and the tab's dot follows the pill (amber).
     pill = tab.page.evaluate(VISIBLE_PILL_JS)
     assert pill["overall"] == ["providers", "providers"]
     assert pill["tones"] == [["warn"], ["warn"]]
     assert pill["labels"] == [_text("es", "status.overall.providers")] * 2
-    assert tab.page.evaluate(DOT_JS)["hidden"] is True
+    _assert_amber_dot(tab, "es")
     assert server.fake_model_list_calls == 2  # a redirect is never followed
     assert server.provider_calls == []
     _clean(tab, browser_name)
@@ -549,19 +549,22 @@ def test_the_pill_keeps_the_last_checks_warning_until_a_good_check(
     assert warned["tones"] == [["warn"], ["warn"]]
     assert warned["label"] == _text(lang, "status.overall.providers")
     assert warned["text"].endswith(_text(lang, "app_status.as_of"))
-    assert tab.page.evaluate(DOT_JS)["hidden"] is True  # the dot: local state only
+    _assert_amber_dot(tab, lang)  # the dot follows the pill
 
     with tab.page.expect_response(_is_status):  # «Actualizar» does not clear it
         tab.page.click("#status-refresh")
     tab.page.wait_for_function(STATUS_IDLE_JS, timeout=TIMEOUT_MS)
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["providers", "providers"]
+    _assert_amber_dot(tab, lang)
 
     tab.goto(f"/panel?lang={lang}")  # page memory only: a new page forgets
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    assert tab.page.evaluate(DOT_JS)["hidden"] is True
     _open_status(tab)
     server.check_mode = "ok"
     _press_check(tab, lang)  # a new check with everything good clears it
     assert tab.page.evaluate(VISIBLE_PILL_JS)["overall"] == ["ok", "ok"]
+    assert tab.page.evaluate(DOT_JS)["hidden"] is True
     _clean(tab, browser_name)
 
 
@@ -582,6 +585,17 @@ def test_a_good_check_after_a_bad_one_clears_the_warning(tab: Tab, server: Panel
     pill = tab.page.evaluate(VISIBLE_PILL_JS)
     assert pill["overall"] == ["ok", "ok"]
     assert pill["label"] == _text("es", "status.overall.ok")
+    assert tab.page.evaluate(DOT_JS)["hidden"] is True  # the dot goes with the warning
+
+
+def _assert_amber_dot(tab: Tab, lang: str) -> None:
+    """The «Estado» tab's dot after a bad check: shown, amber (warn), and the tab's name ends
+    with the approved warning suffix « (aviso)» / « (warning)»."""
+    dot = tab.page.evaluate(DOT_JS)
+    assert dot["hidden"] is False and dot["shown"] is True
+    assert dot["tones"] == ["warn"]
+    assert dot["text"] == _text(lang, "status.dot.warn")
+    assert tab.page.evaluate(TAB_NAME_JS).endswith(_text(lang, "status.dot.warn"))
 
 
 LOCAL_ALERTS = {
@@ -623,6 +637,7 @@ def test_a_failed_read_after_a_bad_check_says_not_refreshed(tab: Tab, server: Pa
     assert pill["overall"] == ["stale", "stale"]
     assert pill["tones"] == [["neutral"], ["neutral"]]
     assert pill["label"] == _text("es", "status.overall.stale")
+    assert tab.page.evaluate(DOT_JS)["hidden"] is True  # «Sin actualizar»: no dot
 
 
 KEY_PILLS_JS = """() => [...document.querySelectorAll('[data-provider] [data-key]')].map((p) => ({
@@ -756,12 +771,16 @@ def test_forced_colours_keep_the_word_and_the_dots(
           .find((x) => x.getClientRects().length > 0);
           const dot = p.querySelector('.app-status-dot');
           const line = document.querySelector('[data-check]');
+          const tabDot = document.getElementById('status-dot');
           return {word: p.querySelector('[data-label]').textContent,
                   dot: getComputedStyle(dot).backgroundColor,
-                  lineDot: getComputedStyle(line.querySelector('.dot')).backgroundColor}; }"""
+                  lineDot: getComputedStyle(line.querySelector('.dot')).backgroundColor,
+                  tabDot: getComputedStyle(tabDot).backgroundColor,
+                  tabDotShown: tabDot.getClientRects().length > 0}; }"""
     )
     assert shown["word"] == _text("es", "status.overall.providers")  # the mixed check
-    for colour in (shown["dot"], shown["lineDot"]):
+    assert shown["tabDotShown"] is True  # the tab's dot follows the pill
+    for colour in (shown["dot"], shown["lineDot"], shown["tabDot"]):
         assert colour not in ("rgba(0, 0, 0, 0)", "transparent")
     assert tab.csp_violations() == []
     assert unexpected_console(tab.console, browser_name, sys.platform) == []
