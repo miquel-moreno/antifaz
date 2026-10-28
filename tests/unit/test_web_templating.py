@@ -84,8 +84,9 @@ def test_the_login_page_is_rendered_once_and_has_no_csrf_meta(
     monkeypatch.setattr(jinja2.Template, "render", spy)
     pages = Pages(ASSETS, version=__version__)
     languages = len(CATALOGS.codes)
-    # at startup: the login once per language, the panel twice (11d-b: the NER off and on)
-    assert sorted(calls) == ["login.html"] * languages + ["panel.html"] * 2 * languages
+    # at startup: the login once per language, the panel three times (11d-b: the NER off and on;
+    # 11e-4: each of the three overall states of the pill once)
+    assert sorted(calls) == ["login.html"] * languages + ["panel.html"] * 3 * languages
     calls.clear()
 
     for code in CATALOGS.codes:
@@ -117,7 +118,9 @@ def test_served_pages_hold_nothing_the_csp_would_block(page: str) -> None:
     assert "http://" not in page and "https://" not in page
 
 
-@pytest.mark.parametrize("page", [PAGES.login("en"), PAGES.panel("en", "csrf-token-x")])
+@pytest.mark.parametrize(
+    "page", [PAGES.login("en"), PAGES.panel("en", "csrf-token-x")], ids=["login", "panel"]
+)
 def test_the_pages_load_the_panel_styles_and_favicon_from_the_manifest(page: str) -> None:
     urls = html_urls(page)
     for logical in ("fonts.css", "tokens.css", "panel.css", "logo.svg"):

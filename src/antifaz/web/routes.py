@@ -50,6 +50,16 @@ CSRF again.
   state at that moment and the uptime) and never calls a provider. No language: no Vary or
   Content-Language. Only GET: POST and the others are 405 once the door let them through, HEAD
   is 405 too.
+- POST /panel/api/status/check (11e-4): «Comprobar ahora», for a live session with its CSRF token
+  (the door; the press is a use of the session). The body is never read. The gate
+  (web/check_gate.py) is taken BEFORE anything awaits: one check per process (else 503
+  check_busy, Retry-After: 1) and 30 s from the end of the last one (else 429 check_cooldown with
+  the seconds left). Then PanelState.check_runner (the gateway's api/provider_check.py, on its
+  own client: the panel never sees the settings or the client) and the closed CheckResponse of
+  web/status_response.py, with a fresh local snapshot. The gate is given back in a `finally`.
+  Any failure is a fixed 500 and one log line with the error's type; a good check logs one INFO
+  line with the closed values only (`openai=ok anthropic=refused`). GET and HEAD are 405.
+  GET /panel renders the header pill and the Estado tab's dot from the local overall.
 - POST /panel/api/try (11d-a): «Prueba un texto», for a live session with its CSRF token (the
   door). In this order:
   1. The rate limit (web/try_limit.py), keyed by the session's fingerprint: at most 30 tries
@@ -88,7 +98,8 @@ CSRF again.
 Concurrency: the session store and the login limiter have no locks. They are correct only
 because these routes are `async def` (never run in the thread pool) on the one event loop, and
 in `login` nothing awaits from the limiter check to the response (steps 3 to 5 are plain code);
-`logout` and `session_times` never await; `try_a_text` takes its try before its first await.
+`logout` and `session_times` never await; `try_a_text` takes its try before its first await, and
+`status_check` its gate (11e-4).
 tests/unit/test_web_concurrency.py checks it: every route is a coroutine function, no await,
 async for or async with comes after `limiter.allowed(` in `login`, `logout` has none at all, and
 none comes before `.take(` in `try_a_text`.
@@ -115,6 +126,8 @@ from antifaz import __version__
 from antifaz.detect.types import EntityType
 from antifaz.http_errors import (
     AppError,
+    CheckBusyError,
+    CheckCooldownError,
     InvalidTryBodyError,
     NotAcceptableError,
     PanelInternalError,
@@ -135,7 +148,7 @@ from antifaz.web.forwarded import client_ip
 from antifaz.web.live_stream import LiveStreams, accepts_event_stream
 from antifaz.web.sessions import CloseReason, SessionStore
 from antifaz.web.status import ner_state, snapshot
-from antifaz.web.status_response import SessionResponse, StatusResponse
+from antifaz.web.status_response import CheckResponse, SessionResponse, StatusResponse
 from antifaz.web.templating import Pages
 from antifaz.web.try_response import TryResponse
 from antifaz.web.try_text import (
@@ -328,6 +341,8 @@ def build_router(state: PanelState) -> APIRouter:
         if times is None:  # pragma: no cover - the door found it live a moment ago, no await
             raise PanelUnauthorizedError()
         idle, end = times
+        # 11e-4: the header pill and the Estado tab's dot, from the local overall (no call).
+        overall = snapshot(state.status, panel_context(request.scope).scheme)["overall"]
         page = pages.panel(
             lang,
             session.csrf_token,
@@ -337,6 +352,7 @@ def build_router(state: PanelState) -> APIRouter:
             max_text_bytes=MAX_TEXT_BYTES,
             live_per_session=streams.per_session,  # the limits really applied
             live_total=streams.max_streams,
+            overall=overall,
         )
         return _page(page, lang)
 
@@ -346,6 +362,45 @@ def build_router(state: PanelState) -> APIRouter:
         if context.session is None:  # pragma: no cover - the door never lets it through
             raise PanelUnauthorizedError()
         return StatusResponse.model_validate(snapshot(state.status, context.scheme))
+
+    @router.post("/panel/api/status/check", response_model=None)
+    async def status_check(request: Request) -> Response:
+        # The door checked the session, its CSRF token and same origin + JSON, and counted the
+        # press as a use. The body is never read.
+        context = panel_context(request.scope)
+        if context.session is None:  # pragma: no cover - the door never lets it through
+            raise PanelUnauthorizedError()
+        gate = state.check_gate
+        refused = gate.begin(gate.now())  # before anything awaits: check and take in one call
+        if refused is not None:
+            kind, wait = refused
+            if kind == "busy":
+                raise CheckBusyError()
+            raise CheckCooldownError(wait)
+        answer: CheckResponse | None = None
+        failure = ""
+        try:
+            if state.check_runner is None:
+                raise RuntimeError("no check runner")
+            results = await state.check_runner()
+            answer = CheckResponse.model_validate(
+                {
+                    "schema": 1,
+                    "providers": results,
+                    "status": snapshot(state.status, context.scheme),
+                }
+            )
+        except Exception as error:
+            failure = type(error).__name__  # only the type: never the message
+        finally:
+            gate.end(gate.now())
+        if answer is None:
+            logger.error("panel status check failed: %s", failure)
+            raise PanelInternalError()
+        # Only the closed values (enums): never an HTTP code or anything a provider sent.
+        logger.info("provider check: %s", " ".join(f"{p.id}={p.result}" for p in answer.providers))
+        body = answer.model_dump_json(by_alias=True).encode()
+        return Response(body, media_type="application/json")
 
     # response_model=None: the answer is validated once, in the route's try block below; FastAPI
     # must not validate or serialise it again (a failure there would bypass the fixed 500).

@@ -287,3 +287,22 @@ def test_the_try_check_catches_an_await_before_the_take() -> None:
     )
 
     assert _awaits_before(bad, "try_a_text", "take") == [2]
+
+
+# --- «Comprobar ahora» (11e-4): the gate is taken before anything awaits ---------------------
+
+
+def test_the_check_route_takes_its_gate_before_any_await() -> None:
+    """One check per process: begin() checks and takes it in one plain call, so two presses
+    can never both pass it (web/check_gate.py has no lock)."""
+    tree = _tree("routes.py")
+
+    assert _awaits_before(tree, "status_check", "begin") == []
+    assert _async_nodes_in(tree, "status_check")  # the providers are asked afterwards
+
+
+def test_the_check_gate_is_lock_free_and_never_awaits() -> None:
+    tree = _tree("check_gate.py")
+
+    assert [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)] == []
+    assert [n for n in ast.walk(tree) if isinstance(n, _ASYNC_NODES)] == []

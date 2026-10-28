@@ -26,6 +26,7 @@ from antifaz.api.errors import register_error_handlers
 from antifaz.api.gate import CaseInsensitiveTrustedHost, GateMiddleware
 from antifaz.api.live_record import LiveRecorder
 from antifaz.api.middleware import RequestIdMiddleware
+from antifaz.api.provider_check import ProviderCheck
 from antifaz.api.streaming import StreamCounters
 from antifaz.config import Settings, check_safe_to_start, get_settings
 from antifaz.detect.ner.chunker import OVERLAP_TOKENS, WINDOW_TOKENS
@@ -236,6 +237,11 @@ def _panel(
         checked = isolated is not None and answer["blocked_reason"] != "detector_failed"
         return {**answer, "names_checked": checked}
 
+    # «Comprobar ahora» (11e-4): the model lists on the gateway's own client, read from app.state
+    # at each call (it is made in the lifespan). Kept in app.state so tests can shorten the
+    # deadline; the panel gets only the callable.
+    check = ProviderCheck(app.state, settings)
+    app.state.provider_check = check
     token = settings.admin_token.get_secret_value().encode()
     sessions = MemorySessionStore()
     feed = MemoryLiveFeed(processes=processes)
@@ -251,6 +257,7 @@ def _panel(
         try_limiter=TryLimiter(),
         try_ner_words=None if try_ner is None else TRY_NER_MAX_WORDS,
         live_streams=streams,
+        check_runner=check,
     )
     app.state.live_feed = feed
     app.state.live_streams = streams

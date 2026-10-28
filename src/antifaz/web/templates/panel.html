@@ -16,12 +16,20 @@
   ("policies", "i-policy", "i-policy", t("tab.policies"), t("tab.policies.short"), t("view.policies.intro"), t("view.policies.empty")),
   ("status", "i-status", "i-status", t("tab.status"), t("tab.status.short"), t("view.status.intro"), none),
 ] %}
+{#- 11e-4: the header pill (the desktop header and the phone bar: both [data-app-status], only one
+    shown by panel.css) and the Estado tab's dot, rendered here from the LOCAL overall state (no
+    request at load); panel.js updates both from every status or check answer. -#}
+{% set overall_labels = {"ok": t("status.overall.ok"), "warn": t("status.overall.warn"), "danger": t("status.overall.danger")} %}
+{% macro app_status(labels) -%}
+<span class="app-status is-{{ overall }}" data-app-status data-overall="{{ overall }}"><span class="app-status-dot" aria-hidden="true"></span><span data-label>{{ labels[overall] }}</span><span class="sr-only">{{ t("app_status.as_of") }}</span></span>
+{%- endmacro %}
 {#- A status pill: its dot and its label; panel.js sets the tone class and the label. -#}
 {% macro pill(id="") -%}
 <span class="status neutral"{% if id %} id="{{ id }}"{% else %} data-key{% endif %}><span class="dot" aria-hidden="true"></span><span data-label></span></span>
 {%- endmacro %}
 {#- «Estado» (11c-3b): the error callout, four cards (hidden until the first answer) and the note
-    that nothing updates by itself. No /healthz, address, database or latency (review of the
+    that nothing updates by itself. 11e-4: «Comprobar ahora» in the providers card (its note says
+    it is free), a role=status line for it and a hidden result line per provider. No /healthz, address, database or latency (review of the
     design): only local facts, never a key, a base URL or a personal value. -#}
 {% macro status_view() -%}
 <div class="callout danger" id="status-alert" role="alert" hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg><strong>{{ t("status.error.title") }}</strong><p id="status-alert-text"></p></div>
@@ -54,12 +62,14 @@
 </ul>
 </article>
 <article class="surface scard" aria-labelledby="s-prov">
-<div class="sh"><h2 id="s-prov">{{ t("status.providers") }}</h2></div>
+<div class="sh"><h2 id="s-prov">{{ t("status.providers") }}</h2><button class="btn ghost" type="button" id="status-check" aria-describedby="check-note"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>{{ t("status.check") }}</button></div>
+<p class="desc" id="check-note">{{ t("status.check.note") }}</p>
 <ul class="prov">
 {%- for provider, provider_name in [("openai", t("status.provider.openai")), ("anthropic", t("status.provider.anthropic"))] %}
-<li data-provider="{{ provider }}"><span class="nm">{{ provider_name }}<span class="ident" data-address></span></span>{{ pill() }}<p class="prov-warn" data-credentials hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>{{ t("status.credentials") }}</p></li>
+<li data-provider="{{ provider }}"><span class="nm">{{ provider_name }}<span class="ident" data-address></span></span>{{ pill() }}<p class="prov-warn" data-credentials hidden><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>{{ t("status.credentials") }}</p><p class="prov-check neutral" data-check hidden><span class="dot" aria-hidden="true"></span><span data-label></span></p></li>
 {%- endfor %}
 </ul>
+<p class="check-line" id="check-line" role="status"></p>
 <p class="cmd">{{ t("view.status.cli") }} <code class="code ident">{{ t("view.status.command") }}</code></p>
 </article>
 <article class="surface scard" aria-labelledby="s-ev">
@@ -194,6 +204,7 @@
 <div class="app-sidebar"><nav class="app-sidebar-inner" aria-labelledby="nav-label">
 <div class="app-brand">{{ parts.logo() }}<span class="app-wordmark">{{ t("app.name") }}</span><span class="app-version ident">{{ t("app.version", version=version) }}</span>
 <div class="app-bar-tools">
+{{ app_status(overall_labels) }}
 <button class="app-iconbtn settings-btn" id="settings-btn" type="button" aria-label="{{ t('settings.label') }}" aria-expanded="false" aria-controls="settings-menu"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></button>
 <div class="settings-menu" id="settings-menu" hidden>{{ parts.languages_nav(landmark=false) }}{{ parts.theme_switch() }}<button class="btn quiet logout logout-bar" type="button" data-logout><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg>{{ t("logout") }}</button></div>
 </div>
@@ -202,7 +213,7 @@
 <div class="app-nav">
 <div class="app-tablist" role="tablist" aria-labelledby="nav-label" aria-orientation="vertical">
 {%- for name, icon, _, label, short, _, _ in views %}
-<button class="app-tab" role="tab" id="tab-{{ name }}" aria-controls="panel-{{ name }}" aria-selected="{{ 'true' if loop.first else 'false' }}" aria-keyshortcuts="{{ loop.index }}" tabindex="{{ '0' if loop.first else '-1' }}"><svg class="ic" aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="app-tab-label">{{ label }}</span><span class="app-tab-short">{{ short }}</span><kbd aria-hidden="true">{{ loop.index }}</kbd></button>
+<button class="app-tab" role="tab" id="tab-{{ name }}" aria-controls="panel-{{ name }}" aria-selected="{{ 'true' if loop.first else 'false' }}" aria-keyshortcuts="{{ loop.index }}" tabindex="{{ '0' if loop.first else '-1' }}"><svg class="ic" aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="app-tab-label">{{ label }}</span><span class="app-tab-short">{{ short }}</span>{% if name == "status" %}<span class="app-tab-dot is-{{ 'danger' if overall == 'danger' else 'warn' }}" id="status-dot"{% if overall == "ok" %} hidden{% endif %}><span class="sr-only" data-label>{{ t("status.dot.danger") if overall == "danger" else t("status.dot.warn") }}</span></span>{% endif %}<kbd aria-hidden="true">{{ loop.index }}</kbd></button>
 {%- endfor %}
 </div>
 </div>
@@ -215,6 +226,7 @@
 <div class="app-main">
 <header class="app-header">
 <p class="app-crumb">{{ t("app.name") }} · <b id="crumb-name">{{ t("tab.playground") }}</b></p>
+{{ app_status(overall_labels) }}
 {{ parts.languages_nav() }}{{ parts.theme_button() }}
 </header>
 <main class="app-content" id="main" tabindex="-1">
@@ -266,6 +278,7 @@
 <span data-msg="overall.warn">{{ t("status.overall.warn") }}</span>
 <span data-msg="overall.danger">{{ t("status.overall.danger") }}</span>
 <span data-msg="overall.stale">{{ t("status.overall.stale") }}</span>
+<span data-msg="overall.providers">{{ t("status.overall.providers") }}</span>
 <span data-msg="ner.off">{{ t("status.ner.off") }}</span>
 <span data-msg="ner.ok">{{ t("status.ner.ok") }}</span>
 <span data-msg="ner.starting">{{ t("status.ner.starting") }}</span>
@@ -287,6 +300,18 @@
 <span data-msg="uptime.hours">{{ t("status.uptime.hours") }}</span>
 <span data-msg="uptime.minutes">{{ t("status.uptime.minutes") }}</span>
 <span data-msg="uptime.less">{{ t("status.uptime.less") }}</span>
+{%- for result, result_label in [
+  ("ok", t("status.check.ok")), ("refused", t("status.check.refused")),
+  ("redirect", t("status.check.redirect")), ("unexpected", t("status.check.unexpected")),
+  ("timeout", t("status.check.timeout")), ("unreachable", t("status.check.unreachable")),
+  ("no_key", t("status.check.no_key")), ("not_checked_credentials", t("status.check.not_checked_credentials")),
+  ("checking", t("status.check.checking")), ("checked", t("status.check.checked")),
+  ("busy", t("status.check.busy")), ("cooldown", t("status.check.cooldown")),
+] %}
+<span data-msg="check.{{ result }}">{{ result_label }}</span>
+{%- endfor %}
+<span data-msg="dot.warn">{{ t("status.dot.warn") }}</span>
+<span data-msg="dot.danger">{{ t("status.dot.danger") }}</span>
 </template>
 <template id="try-messages">
 <span data-msg="example">{{ t("try.example.text") }}</span>

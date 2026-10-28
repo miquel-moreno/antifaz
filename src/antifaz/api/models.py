@@ -21,6 +21,7 @@ from fastapi import APIRouter, Request, Response
 
 from antifaz.api.anthropic import anthropic_headers
 from antifaz.api.errors import InvalidQueryError, NotConfiguredError, error_responses
+from antifaz.api.provider_check import model_list_request
 from antifaz.api.proxy import (
     answer_json,
     client_values_hold_a_key,
@@ -101,15 +102,15 @@ async def list_models(request: Request) -> Response:
     """The provider's model list, as the provider sends it. Provider errors pass as they are."""
     state = request.app.state
     settings: Settings = state.settings
+    # The URL from the one builder (api/provider_check.py), shared with doctor and the panel.
     if "anthropic-version" in request.headers:
-        headers = anthropic_headers(request, settings)
-        url = settings.anthropic_base_url.rstrip("/") + "/v1/models"
+        headers = anthropic_headers(request, settings)  # the client's checked version
+        url, _ = model_list_request("anthropic", settings)
         allowed = ANTHROPIC_QUERY
     else:
         if settings.openai_api_key is None:
             raise NotConfiguredError()
-        headers = {"Authorization": f"Bearer {settings.openai_api_key.get_secret_value()}"}
-        url = settings.openai_base_url.rstrip("/") + "/models"
+        url, headers = model_list_request("openai", settings)
         allowed = frozenset()
     keys = configured_keys(settings)
     params = _query(request, allowed, keys)

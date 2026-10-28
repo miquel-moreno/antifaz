@@ -301,6 +301,7 @@ def test_panel_routes_reached_without_the_door_fail_closed() -> None:
         ("GET", "/panel/api/status"),
         ("POST", "/panel/api/try"),
         ("POST", "/panel/api/session"),
+        ("POST", "/panel/api/status/check"),  # 11e-4
     ):
         response = client.request(method, path, json={"token": "x"})
 

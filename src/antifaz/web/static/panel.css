@@ -96,6 +96,8 @@ body::after{content:"";position:fixed;inset:0;z-index:150;pointer-events:none;op
    (never colour alone). No infinite loops anywhere: nothing moves while nobody acts. */
 .app-status{display:inline-flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-medium);white-space:nowrap}
 .app-status.is-ok{color:var(--color-ok)} .app-status.is-warn{color:var(--color-warn)} .app-status.is-danger{color:var(--color-danger)}
+/* 11e-4: a status read that failed leaves the header pill neutral («Sin actualizar»), never green */
+.app-status.is-neutral{color:var(--color-text-muted)}
 .app-status-dot{position:relative;width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
 .app-status .app-status-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid currentColor;opacity:0;animation:ring 2.6s var(--ease-out) 3}
 .app-status .app-status-dot.is-reset::after{animation:none}
@@ -519,6 +521,13 @@ mark.pii[data-text-type]::after{content:attr(data-text-type);display:inline-bloc
 .prov .prov-warn{grid-column:1/-1;display:flex;align-items:flex-start;gap:8px;margin-top:-4px;font-size:var(--text-sm);color:var(--color-warn)}
 .prov .prov-warn .ic{width:16px;height:16px;flex:none;margin-top:2px}
 .ner .dot.neutral{color:var(--color-text-faint)}
+/* 11e-4: «Comprobar ahora». Each provider's result takes a whole line under its row, its dot in
+   the text's colour and its word always there (never colour alone); the live line says when. */
+.prov .prov-check{grid-column:1/-1;display:flex;align-items:flex-start;gap:8px;margin-top:-4px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.prov .prov-check .dot{margin-top:calc(.5lh - 3.5px)}
+.prov .prov-check.ok{color:var(--color-ok)} .prov .prov-check.warn{color:var(--color-warn)} .prov .prov-check.danger{color:var(--color-danger)}
+.check-line{padding:0 20px 12px;font-size:var(--text-sm);color:var(--color-text-muted)}
+.check-line:empty{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 /* While the status is being read the cards dim a little (opacity .85 at least: the text stays AA);
    the live region says "Checking". */
 .sgrid{transition:opacity var(--duration-base) var(--ease-out)}
@@ -545,7 +554,7 @@ mark.pii[data-text-type]::after{content:attr(data-text-type);display:inline-bloc
 .app-version,.app-nav-label,kbd,.app-sidebar-foot p,.app-local,.app-status,.status,.app-crumb,.vh-side,
 .composer label.cap,.bar .lbl,.kh,.hint,.seg label,.eyebrow,.mcap,.flight,.rm-note,.pfoot,.note .sub,.found dt,.found dd,.found dd b,
 .meta,.sh .aside,.tag,.foot,.live-pill,.stat-sub,.bars li,.ev-what,.keys th,.pol-bar .lbl,.help dt,.help dd,.rules .fixed,
-.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-text-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.num,
+.rules-foot,.pol-bar .msg,.btn.quiet,.prow .nm span,.ev time,.k-id,.scard .desc,.keys td[data-text-label]::before,.kv dt,.kv dd,.scard .cmd,.ner li,.ner p,.prov .nm span,.prov .status,.prov-check,.check-line,.num,
 .pswitch button{letter-spacing:var(--tracking-small)}
 
 /* ---------- Medium: one pane at a time, grids stack ---------- */
@@ -660,7 +669,7 @@ mark.pii[data-text-type]::after{content:attr(data-text-type);display:inline-bloc
   /* Estado */
   .kv{margin:0 16px 6px}
   .kv dt,.kv dd{padding:7px 0}
-  .scard .desc,.scard .cmd{padding-inline:16px}
+  .scard .desc,.scard .cmd,.check-line{padding-inline:16px}
   .ner{padding:0 6px 10px}
   .ner li{padding:6px 10px}
   .prov{padding:0 16px 6px}
@@ -798,7 +807,7 @@ body{container:page/inline-size}
    the system's colours too). Only system colours here, so the browser keeps them; no
    forced-color-adjust. */
 @media (forced-colors: active){
-  .dot{background:CanvasText}
+  .dot,.app-status-dot,.app-tab-dot{background:CanvasText}
   .btn{border:1px solid ButtonText}
   .btn[aria-disabled="true"]{color:GrayText;border-color:GrayText}
   .tag{border:1px solid CanvasText;border-radius:var(--radius-xs)}

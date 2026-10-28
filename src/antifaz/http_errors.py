@@ -152,6 +152,29 @@ class TryBusyError(AppError):
         super().__init__("busy right now: try again in a second", headers={"Retry-After": "1"})
 
 
+class CheckBusyError(AppError):
+    """«Comprobar ahora» (11e-4): another check is running in this process. Never queued."""
+
+    status_code = 503
+    code = "check_busy"
+
+    def __init__(self) -> None:
+        super().__init__("a check is already running: try again in a second", {"Retry-After": "1"})
+
+
+class CheckCooldownError(AppError):
+    """«Comprobar ahora» (11e-4): the last check ended less than 30 s ago."""
+
+    status_code = 429
+    code = "check_cooldown"
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            "the providers were checked a moment ago: wait and try again",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 class NotAcceptableError(AppError):
     """«En directo» (11e-1): GET /panel/api/live without `Accept: text/event-stream`."""
 

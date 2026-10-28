@@ -567,7 +567,9 @@ def test_at_twice_the_text_size_the_end_of_the_view_clears_the_bar(
         " document.querySelector('#panel-status').appendChild(b); }"
     )
     tab.page.evaluate("() => window.scrollTo(0, 0)")
-    tab.page.focus("#status-refresh")  # the view's last focusable before the probe (11c-3b)
+    # The view's last focusable before the probe: «Comprobar ahora» since 11e-4 (11c-3b had
+    # «Actualizar» there).
+    tab.page.focus("#status-check")
     tab.page.keyboard.press("Tab")
     assert tab.page.evaluate(ACTIVE_ID_JS) == "probe-end"
     tab.page.evaluate(TWO_FRAMES_JS)

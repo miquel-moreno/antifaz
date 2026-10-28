@@ -9,7 +9,11 @@ Rendered from the real templates and catalogs, per language:
   process), the NER (its five states, none marked yet), the providers (OpenAI and Anthropic, with
   the `antifaz doctor --providers` line) and the evidence placeholder.
 - What the approved design had and this view must not: «Escucha en», «Base de datos»,
-  /healthz, latency meters, «Comprobar ahora». No header pill, no dot on the tab, no counters.
+  /healthz, latency meters and timings.
+- 11e-4: «Comprobar ahora» (never disabled, described by its note «Lista los modelos: gratis, no se
+  genera nada.»), a `role=status` line for the check, a hidden result line per provider, and the
+  header pill (twice: desktop header and phone bar) and the tab's dot rendered from the server's
+  local overall, with the approved texts.
 - A `<template id="status-messages">` with every label the script needs, from the catalog:
   each enum value, "unknown", the loading and checked lines, the errors and the uptime units.
 """
@@ -164,12 +168,168 @@ def test_nothing_the_review_removed(lang: str) -> None:
 
     for gone in ("/healthz", "meter", "Escucha en", "Listens on", "Base de datos", "Database"):
         assert gone not in view, gone
-    for gone in ("Comprobar ahora", "Check now", "app-status"):
-        assert gone not in page, gone
     assert "live-pill" not in view  # 11e-2: the pill is «En directo»'s, never here
+    assert "latency" not in page and " ms<" not in page  # 11e-4: no timings, as decided
+
+
+# --- 11e-4: «Comprobar ahora», the header pill and the tab's dot ------------------------------
+
+CHECK_MESSAGES = (
+    *(
+        f"check.{value}"
+        for value in (
+            "ok",
+            "refused",
+            "redirect",
+            "unexpected",
+            "timeout",
+            "unreachable",
+            "no_key",
+            "not_checked_credentials",
+            "checking",
+            "checked",
+            "busy",
+            "cooldown",
+        )
+    ),
+    "dot.warn",
+    "dot.danger",
+    "overall.providers",  # Miquel's review: the last check's warning
+)
+APPROVED = {
+    "es": {
+        "status.check": "Comprobar ahora",
+        "status.check.note": "Lista los modelos: gratis, no se genera nada.",
+        "status.check.ok": "Responde · la clave funciona",
+        "status.check.refused": "Rechaza las credenciales o el acceso de la cuenta (HTTP {code})",
+        "status.check.timeout": "No responde a tiempo",
+        "status.check.unreachable": "No se puede conectar",
+        "status.check.redirect": "Redirige; no se sigue",
+        "status.check.unexpected": "Respuesta inesperada (HTTP {code})",
+        "status.check.not_checked_credentials": (
+            "Sin comprobar: la dirección lleva usuario o contraseña"
+        ),
+        "status.check.no_key": "Sin clave: no se comprueba",
+        "status.check.checking": "Comprobando los proveedores…",
+        "status.check.checked": "Proveedores comprobados a las {time}",
+        "status.check.busy": "Ya hay una comprobación en marcha",
+        "status.check.cooldown": "Espera {s} s para volver a comprobar.",
+        "app_status.as_of": ", según la última lectura",
+        "status.dot.warn": " (aviso)",
+        "status.dot.danger": " (alerta)",
+        # Miquel's review of the captures: a key that is set, not one that works (neutral).
+        "status.key.yes": "Clave configurada",
+        "status.overall.providers": "Revisa los proveedores",
+    },
+    "en": {
+        "status.check": "Check now",
+        "status.check.ok": "Answers · the key works",
+        "status.check.refused": "Refuses the credentials or account access (HTTP {code})",
+        "status.check.timeout": "No answer in time",
+        "status.check.unreachable": "Cannot connect",
+        "status.check.redirect": "Redirects; not followed",
+        "status.check.unexpected": "Unexpected answer (HTTP {code})",
+        "status.check.not_checked_credentials": "Not checked: the address has a user or password",
+        "status.check.no_key": "No key: not checked",
+        "status.check.checking": "Checking the providers…",
+        "status.check.checked": "Providers checked at {time}",
+        "status.check.busy": "A check is already running",
+        "app_status.as_of": ", as of the last read",
+        "status.dot.warn": " (warning)",
+        "status.dot.danger": " (alert)",
+        "status.key.yes": "Key configured",
+        "status.overall.providers": "Check the providers",
+    },
+}
+
+
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_the_approved_texts_are_in_the_catalogs(lang: str) -> None:
+    for key, value in APPROVED[lang].items():
+        assert CATALOGS[lang].text(key) == value, key
+
+
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_the_check_button_its_note_and_its_live_line(lang: str) -> None:
+    elements = _tree(lang)
+    text = CATALOGS[lang].text
+
+    button = _by_id(elements, "status-check")
+    assert button["tag"] == "button"
+    assert button["attrs"]["type"] == "button"  # type: ignore[index]
+    assert "disabled" not in button["attrs"]  # type: ignore[operator]
+    assert button["attrs"]["aria-describedby"] == "check-note"  # type: ignore[index]
+    words = "".join(str(e["text"]) for e in [button, *_inside(elements, "status-check")])
+    assert text("status.check") in words
+    assert str(_by_id(elements, "check-note")["text"]).strip() == text("status.check.note")
+    line = _by_id(elements, "check-line")
+    assert line["attrs"]["role"] == "status"  # type: ignore[index]
+    assert str(line["text"]).strip() == ""
+    # «Actualizar» stays: it reads the local state only.
+    assert _by_id(elements, "status-refresh")["tag"] == "button"
+
+
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_each_provider_row_has_a_hidden_result_line(lang: str) -> None:
+    elements = _tree(lang)
+    lines = [e for e in elements if "data-check" in e["attrs"]]  # type: ignore[operator]
+
+    assert len(lines) == 2
+    for line in lines:
+        assert "hidden" in line["attrs"]  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_the_messages_template_holds_the_check_and_dot_labels(lang: str) -> None:
+    elements = _tree(lang)
+    inside = {
+        e["attrs"].get("data-msg"): str(e["text"])  # type: ignore[union-attr]
+        for e in _inside(elements, "status-messages")
+    }
+    text = CATALOGS[lang].text
+
+    for key in CHECK_MESSAGES:
+        assert inside[key] == text(f"status.{key}"), key
+
+
+@pytest.mark.parametrize("overall", ["ok", "warn", "danger"])
+@pytest.mark.parametrize("lang", CATALOGS.codes)
+def test_the_pill_and_the_dot_come_from_the_server_overall(lang: str, overall: str) -> None:
+    page = PAGES.panel(lang, "csrf-x", overall=overall)
+    text = CATALOGS[lang].text
+    parser = _Tree()
+    parser.feed(page)
+    pills = [e for e in parser.elements if "data-app-status" in e["attrs"]]  # type: ignore[operator]
+
+    assert len(pills) == 2  # the desktop header and the phone bar; panel.css shows one
+    for pill in pills:
+        assert pill["attrs"]["data-overall"] == overall  # type: ignore[index]
+        assert f"is-{overall}" in str(pill["attrs"]["class"]).split()  # type: ignore[index]
+    assert page.count(text(f"status.overall.{overall}")) >= 2
+    assert page.count(text("app_status.as_of")) == 2
     start = page.index('id="tab-status"')
     tab = page[start : page.index("</button>", start)]
-    assert "dot" not in tab  # no warning dot on the tab
+    dot = _by_id(parser.elements, "status-dot")
+    assert 'id="status-dot"' in tab
+    assert ("hidden" in dot["attrs"]) is (overall == "ok")  # type: ignore[operator]
+    expected = "status.dot.danger" if overall == "danger" else "status.dot.warn"
+    assert text(expected) in tab
+    assert f"is-{'danger' if overall == 'danger' else 'warn'}" in str(dot["attrs"]["class"])  # type: ignore[index]
+
+
+def test_an_unknown_overall_never_renders() -> None:
+    with pytest.raises(ValueError, match="overall"):
+        PAGES.panel("en", "csrf-x", overall="RAW")
+
+
+def test_the_pill_has_a_neutral_tone_and_forced_colours_keep_the_dots() -> None:
+    from antifaz.web.assets import STATIC_DIR
+
+    css = (STATIC_DIR / "panel.css").read_text("utf-8")
+    assert ".app-status.is-neutral{" in css
+    forced = css[css.index("@media (forced-colors: active)") :]
+    assert ".app-status-dot" in forced and ".app-tab-dot" in forced
+    assert ".prov-check" in css
 
 
 @pytest.mark.parametrize("lang", CATALOGS.codes)
@@ -183,7 +343,7 @@ def test_the_messages_template_holds_every_label_the_script_needs(lang: str) -> 
     }
     text = CATALOGS[lang].text
 
-    assert set(inside) == set(MESSAGES)
+    assert set(inside) == set(MESSAGES) | set(CHECK_MESSAGES)  # 11e-4: the check's labels too
     assert inside["unknown"] == text("status.unknown")
     assert inside["ner.circuit_open"] == text("status.ner.circuit_open")
     assert "{time}" in inside["checked"] and "{time}" in inside["checked.old"]

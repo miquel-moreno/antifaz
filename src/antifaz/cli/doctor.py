@@ -46,6 +46,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import ValidationError
 
+from antifaz.api.provider_check import ANTHROPIC_VERSION, model_list_request
 from antifaz.config import Settings, UnsafeConfigError, _format_problem, check_safe_to_start
 from antifaz.healthcheck import host_header
 from antifaz.logging import QUIET_LOGGERS
@@ -54,7 +55,6 @@ from antifaz.trusted_networks import is_wide, parse_proxy_network, proxy_network
 DEFAULT_URL = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT = 5.0
 MAX_TIMEOUT = 120.0
-ANTHROPIC_VERSION = "2023-06-01"
 DOCS_URL = "https://github.com/miquel-moreno/antifaz/blob/main/docs/install.md"
 MAX_HEALTH_BYTES = 64 * 1024
 NER_STATES = frozenset({"ok", "starting", "circuit_open", "closed"})
@@ -392,14 +392,12 @@ def provider_client(timeout: float) -> httpx.Client:
     return httpx.Client(timeout=timeout, follow_redirects=False, transport=_provider_transport())
 
 
-def _provider_request(name: str, key: str, settings: Settings) -> tuple[str, dict[str, str], str]:
-    """(url, headers, base URL variable) for the model list of `name`."""
+def _provider_request(name: str, settings: Settings) -> tuple[str, dict[str, str], str]:
+    """(url, headers, base URL variable) for the model list of `name`: the gateway's own builder
+    (api/provider_check.py), so doctor, GET /v1/models and the panel reach the same URL."""
     if name == "OpenAI":
-        url = settings.openai_base_url.rstrip("/") + "/models"
-        return url, {"Authorization": f"Bearer {key}"}, "ANTIFAZ_OPENAI_BASE_URL"
-    url = settings.anthropic_base_url.rstrip("/") + "/v1/models"
-    headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION}
-    return url, headers, "ANTIFAZ_ANTHROPIC_BASE_URL"
+        return (*model_list_request("openai", settings), "ANTIFAZ_OPENAI_BASE_URL")
+    return (*model_list_request("anthropic", settings), "ANTIFAZ_ANTHROPIC_BASE_URL")
 
 
 def _provider_status(
@@ -408,7 +406,7 @@ def _provider_status(
     secret = settings.openai_api_key if name == "OpenAI" else settings.anthropic_api_key
     if secret is None or _format_problem(secret.get_secret_value()) is not None:
         return "fail", f"{name}: not checked: fix {key_variable} first"
-    url, headers, base_variable = _provider_request(name, secret.get_secret_value(), settings)
+    url, headers, base_variable = _provider_request(name, settings)
     if has_userinfo(url):
         return "fail", f"{name}: not checked: {base_variable} holds a user or password"
 
@@ -505,4 +503,11 @@ def run(args: argparse.Namespace) -> int:
     return 1 if report.failed else 0
 
 
-__all__ = ["add_parser", "choose_host", "marks_for", "run"]
+__all__ = [
+    "ANTHROPIC_VERSION",
+    "add_parser",
+    "choose_host",
+    "marks_for",
+    "model_list_request",
+    "run",
+]

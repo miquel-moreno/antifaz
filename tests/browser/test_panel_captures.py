@@ -1,6 +1,6 @@
 """Reference captures of the real panel (issue 53, PR 11c-2b): `make panel-captures` only.
 
-Skipped unless --panel-captures. Writes 98 PNG files to build/panel-captures/ (git ignores
+Skipped unless --panel-captures. Writes 206 PNG files to build/panel-captures/ (git ignores
 build/): for Spanish and English, the login page empty, the login page after a wrong token and
 the panel, in light and dark, at 1280x800 and 390x844, both at 2x; at 390x844 the panel with
 the settings menu open and its theme switch (`*-390x844-4-panel-menu.png`); and at 390x844 and
@@ -31,6 +31,12 @@ window), driven through the real engine with the invented provider of tests/brow
 (`*-18-live-connecting.png`), empty (`*-19-live-empty.png`), disconnected (`*-20-live-lost.png`),
 too many views (`*-21-live-busy.png`), several processes (`*-22-live-processes.png`) and closed
 after its time (`*-23-live-aged.png`, the 30 minutes shortened to one second).
+11e-4: «Comprobar ahora» with the invented provider (never a real one), both languages and themes,
+at 1280x800 (the whole page) and 390x844 (the window, on the providers card): both answering
+(`*-24-status-check-ok.png`), one refusing (`*-25-status-check-mixed.png`) and the «wait» line of a
+second press (`*-26-status-check-cooldown.png`); and the header pill (or the phone bar's) with the
+dot on «Estado» at load, warning (`*-27-pill-warn.png`, the NER starting) and alert
+(`*-28-pill-danger.png`, no provider key).
 
 Synthetic only: the wrong token is a throwaway made here, the right one is the test gateway's
 throwaway. Right before every capture the token field is checked to be empty (an error shows
@@ -361,3 +367,105 @@ def test_capture_the_live_view(
 
 def _live_locale(lang: str) -> str:
     return "es-ES" if lang == "es" else "en-US"
+
+
+# 11e-4: «Comprobar ahora» and the header pill, with the invented provider of server.py (never
+# a real one). (capture name, check mode, presses: the second press of the cooldown capture is
+# refused with its «wait» line)
+CHECK_CAPTURES = {
+    "24-status-check-ok": ("ok", 1),
+    "25-status-check-mixed": ("mixed", 1),
+    "26-status-check-cooldown": ("ok", 2),
+}
+CHECK_IDLE_JS = (
+    "() => document.getElementById('status-check').getAttribute('aria-disabled') !== 'true'"
+    " && document.getElementById('check-line').textContent !== ''"
+)
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    ("name", "server_options"),
+    [
+        (name, ServerOptions(fake_provider=True, check_mode=mode))
+        for name, (mode, _) in CHECK_CAPTURES.items()
+    ],
+    ids=list(CHECK_CAPTURES),
+)
+def test_capture_the_status_check(
+    new_tab: NewTab, server: PanelServer, name: str, lang: str, theme: str, width: int
+) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    _, presses = CHECK_CAPTURES[name]
+    tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+    for _ in range(presses):
+        with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/status/check")):
+            tab.page.click("#status-check")
+        tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#status-check").blur()
+    tab.page.mouse.move(0, 0)
+    if width < 768:  # the window only (fixed tab bar): the providers card
+        tab.page.evaluate("() => document.getElementById('s-prov').scrollIntoView()")
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-{name}", full_page=width >= 768)
+
+    assert path.stat().st_size > 0
+    assert server.provider_calls == []
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    "server_options", [ServerOptions(fake_provider=True, check_mode="mixed")], ids=["mixed"]
+)
+def test_capture_the_providers_pill(
+    new_tab: NewTab, server: PanelServer, lang: str, theme: str, width: int
+) -> None:
+    """Miquel's review: after a check with a refusal, the header pill (or the phone bar's) says
+    «Revisa los proveedores»; the window at the top of «Estado»."""
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme=theme, width=width, scale=2, locale=_live_locale(lang))
+    _log_in(tab, server, lang)
+    _open_status(tab)
+    with tab.page.expect_response(lambda r: r.url.endswith("/panel/api/status/check")):
+        tab.page.click("#status-check")
+    tab.page.wait_for_function(CHECK_IDLE_JS, timeout=TIMEOUT_MS)
+    tab.page.locator("#status-check").blur()
+    tab.page.mouse.move(0, 0)
+    tab.page.evaluate("() => window.scrollTo(0, 0)")
+    tab.page.evaluate("() => document.fonts.ready.then(() => true)")
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-29-pill-providers")
+
+    assert path.stat().st_size > 0
+
+
+PILL_CAPTURES = {
+    "27-pill-warn": ServerOptions(fake_provider=True, ner_state="starting"),
+    "28-pill-danger": ServerOptions(),
+}
+
+
+@pytest.mark.parametrize("width", sorted(SIZES, reverse=True))
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("lang", ["es", "en"])
+@pytest.mark.parametrize(
+    ("name", "server_options"), list(PILL_CAPTURES.items()), ids=list(PILL_CAPTURES)
+)
+def test_capture_the_header_pill(
+    new_tab: NewTab, server: PanelServer, name: str, lang: str, theme: str, width: int
+) -> None:
+    """The header pill (desktop) or the phone bar's, and the dot on the «Estado» tab, at load."""
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    tab = new_tab(color_scheme=theme, width=width, scale=2)
+    _log_in(tab, server, lang)
+
+    path = _capture(tab, f"{lang}-{theme}-{SIZES[width]}-{name}")
+
+    assert path.stat().st_size > 0

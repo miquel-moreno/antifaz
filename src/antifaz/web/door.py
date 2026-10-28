@@ -72,6 +72,7 @@ from antifaz.http_errors import (
 )
 from antifaz.routing import route_path
 from antifaz.web.assets import Assets
+from antifaz.web.check_gate import CheckGate
 from antifaz.web.cookies import read_session_cookie, session_scheme
 from antifaz.web.csrf import (
     api_fetch_allowed,
@@ -113,12 +114,16 @@ NOT_A_USE = frozenset({("/panel/api/live", "GET"), ("/panel/api/live", "HEAD")})
 # run_try() in a worker thread, behind the Try limiter (one thread) and then the proxy's mask
 # limiter. The panel never sees the detector, the policy or the settings, only this callable.
 type TryRunner = Callable[[str, str, bool], Awaitable[dict[str, Any]]]
+# «Comprobar ahora» (11e-4): no argument in, one closed result per provider out (the schema is
+# web/status_response.py CheckResponse). The gateway builds it (api/provider_check.py
+# ProviderCheck, on its own client); the panel never sees the settings or the client.
+type CheckRunner = Callable[[], Awaitable[list[dict[str, Any]]]]
 
 
 @dataclass(frozen=True)
 class PanelState:
     """Everything the panel gets from the gateway: the token's fingerprint, never the token,
-    the status facts (web/status.py) and the Try runner, never the settings."""
+    the status facts (web/status.py), the Try runner and the check runner, never the settings."""
 
     token_fingerprint: bytes = field(repr=False)
     trusted_proxies: tuple[IPNetwork, ...]
@@ -134,6 +139,10 @@ class PanelState:
     # 11e-1: «En directo»'s SSE streams over the gateway's live feed (web/live_stream.py). None:
     # the router makes its own over a feed that keeps nothing (only in tests of other routes).
     live_streams: "LiveStreams | None" = field(default=None, repr=False)
+    # 11e-4: «Comprobar ahora». None: no check can run (a fixed 500; only in tests of other
+    # routes). The gate: one check per process and 30 s from the end of the last one.
+    check_runner: CheckRunner | None = field(default=None, repr=False)
+    check_gate: CheckGate = field(default_factory=CheckGate, repr=False)
 
 
 @dataclass(frozen=True)

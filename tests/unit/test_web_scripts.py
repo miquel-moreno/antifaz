@@ -44,7 +44,7 @@ TIMER_SCRIPT = "session.js"
 # The one URL each script may fetch (11d-b for the last two).
 FETCHES = {
     "login.js": {"/panel/login"},
-    "panel.js": {"/panel/logout", "/panel/api/status"},
+    "panel.js": {"/panel/logout", "/panel/api/status", "/panel/api/status/check"},  # 11e-4
     "try.js": {"/panel/api/try"},
     "session.js": {"/panel/api/session"},
     "live.js": set(),  # 11e-2: no fetch; its one EventSource is checked below
