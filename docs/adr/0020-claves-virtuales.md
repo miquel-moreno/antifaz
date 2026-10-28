@@ -35,17 +35,18 @@ Los PR del issue: 8a (esta librería, sin conectar a nada), 8b (PostgreSQL), 8c 
 - `create()` devuelve la clave **una sola vez**, con su registro. El almacén solo guarda el registro.
 - Nada guarda la clave en claro después de `create()` o `verify()`: ni el almacén, ni el registro, ni el objeto «quién llama» (`Caller`, con solo el número y los scopes), ni una excepción. Si una llamada falla a medias, se borran las variables de los marcos de la librería en el traceback.
 - El registro de una clave: **número fijo** (no se reutiliza), nombre, scopes, creación, caducidad y revocación (en UTC), hash, versión del pepper y límites por minuto y por día. **Las claves nunca se borran**, solo se revocan: el número sigue sirviendo para las evidencias del ítem 9.
+- **El nombre**: de 1 a 64 caracteres imprimibles, sin espacios en blanco al principio ni al final y sin ningún carácter de control ni invisible en ninguna parte (categorías Unicode Cc, Cf, Zl, Zp, Cs, Co y Cn: entre ellas, los controles de dirección del texto U+202A–U+202E, U+2066–U+2069, U+200E, U+200F y U+061C, y los de ancho cero U+200B, U+200C, U+200D, U+2060 y U+FEFF). El nombre se enseña al administrador: un control de dirección podría hacer que se lea como otro nombre, y uno de ancho cero, que dos nombres parezcan iguales. El error no repite el nombre.
 
 ### Scopes, caducidad y respuestas
 
 - Scopes por grupo de rutas: chat de OpenAI (`/v1/chat/completions`), mensajes de Anthropic (`/v1/messages` y `/v1/messages/count_tokens`), modelos (`/v1/models`) y `scan` (`/antifaz/scan`). La puerta los aplica en 8d.
 - **Caducidad por defecto: 90 días.** Sin caducidad solo si se pide explícitamente (`--no-expiry` en 8c). Una clave vale mientras `ahora < caduca`; en el instante exacto de la caducidad ya no vale.
-- `verify()` nunca lanza un error por lo que recibe: responde «quién llama» o un motivo de una lista cerrada: `malformed`, `unknown`, `revoked` o `expired`. **Toda clave rechazada recibe el mismo 401** (no se dice si existe, está revocada o caducada); sin el scope de la ruta, 403; por encima del límite, 429 con `Retry-After`. El motivo solo va al log, con el número de la clave (`key=12 reason=revoked`), nunca la clave, su hash ni su nombre.
+- `verify()` nunca lanza un error por lo que recibe: responde «quién llama» o un motivo de una lista cerrada: `malformed`, `unknown`, `revoked` o `expired`. **Toda clave rechazada recibe el mismo 401** (no se dice si existe, está revocada o caducada); sin el scope de la ruta, 403 (se aplica en el 8d); por encima del límite, 429 con `Retry-After`. El motivo solo va al log, con el número de la clave (`key=12 reason=revoked`), nunca la clave, su hash ni su nombre.
 - `ANTIFAZ_API_KEY` se sigue aceptando, sin límites: es la entrada del administrador si la base de datos no responde.
 
 ### PostgreSQL opcional y límites contados en PostgreSQL
 
-- **PostgreSQL es opcional**: sin él, Antifaz funciona como en la v0.1. Solo `antifaz keys` y `antifaz db` cargan el código de la base de datos. Con la base de datos caída, las claves virtuales reciben 503 y **nunca pasan sin límites**.
+- **PostgreSQL es opcional**: sin él, Antifaz funciona como en la v0.1. Solo `antifaz keys` y `antifaz db` cargan el código de la base de datos. Con la base de datos caída, las claves virtuales reciben 503 (se aplica en el 8e) y **nunca pasan sin límites**.
 - Los límites se cuentan **en PostgreSQL**, de forma atómica, y no en el Valkey que menciona ADR-0001 «si hace falta estado compartido». Motivo: las claves ya necesitan PostgreSQL, y un segundo servicio solo para contar sería otra pieza que instalar, vigilar y asegurar. Un contador por clave y ventana, actualizado en una sola sentencia, es exacto entre procesos (con N de límite pasan exactamente N) y basta para el volumen de una pasarela de empresa. Si un día no basta, se reconsidera con medidas.
 - **Ventanas fijas**: por minuto natural y por día natural, **el día en UTC**. Efectos documentados:
   - alrededor del cambio de minuto pueden pasar **hasta el doble** del límite por minuto (N al final de un minuto y N al principio del siguiente);
