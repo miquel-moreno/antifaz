@@ -31,6 +31,7 @@ from typing import NoReturn
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
 HASH_BYTES = 32  # SHA-256
+FORBIDDEN_NAME_CATEGORIES: frozenset[str] = frozenset()  # stub, filled in the next commit
 
 
 class Scope(StrEnum):

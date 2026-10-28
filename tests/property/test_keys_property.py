@@ -6,8 +6,11 @@
   CRC32 detects every change of one byte, and any other character is outside the alphabet.
 - parse_key() never raises anything but MalformedKeyError, and verify() never raises at all,
   whatever it is given.
+- Any key name that check_name() accepts has no control or invisible character (Unicode
+  categories Cc, Cf, Zl, Zp, Cs, Co, Cn), 1 to 64 characters and no whitespace at either end.
 """
 
+import unicodedata
 from datetime import UTC, datetime
 
 from hypothesis import given, settings
@@ -23,9 +26,11 @@ from antifaz.keys.format import (
     parse_key,
 )
 from antifaz.keys.pepper import PepperRing
-from antifaz.keys.records import RefusalReason, Refused, Scope, Verified
+from antifaz.keys.records import RefusalReason, Refused, Scope, Verified, check_name
 from antifaz.keys.store import MemoryKeyStore
 
+# Written out here, not imported: the property checks the rule, not the constant.
+FORBIDDEN = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
 PEPPER = b"test-pepper-" + b"0" * 32
 START = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
@@ -133,6 +138,25 @@ def test_parse_raises_only_the_closed_error(value: object) -> None:
         assert error.__context__ is None
     else:
         assert result is value
+
+
+@settings(max_examples=1000)
+@given(
+    st.one_of(
+        st.text(max_size=70),
+        st.text(alphabet=st.characters(categories=("Cc", "Cf", "Zl", "Zp", "Co", "Cn"))),
+        st.lists(st.characters(), max_size=8).map("".join),
+    )
+)
+def test_any_accepted_name_has_no_control_or_invisible_character(name: str) -> None:
+    try:
+        check_name(name)
+    except ValueError as error:
+        assert not name or name not in str(error)
+        return
+    assert not any(unicodedata.category(character) in FORBIDDEN for character in name)
+    assert 1 <= len(name) <= 64
+    assert name == name.strip()
 
 
 @settings(max_examples=500)
