@@ -347,11 +347,11 @@
       pill.setAttribute("data-overall", shown);
       pill.querySelector("[data-label]").textContent = text;
     });
-    statusDot.hidden = local !== "warn" && local !== "danger";
-    statusDot.classList.toggle("is-warn", local !== "danger");
-    statusDot.classList.toggle("is-danger", local === "danger");
+    statusDot.hidden = tone !== "warn" && tone !== "danger";
+    statusDot.classList.toggle("is-warn", tone !== "danger");
+    statusDot.classList.toggle("is-danger", tone === "danger");
     statusDot.querySelector("[data-label]").textContent =
-      statusText(local === "danger" ? "dot.danger" : "dot.warn");
+      statusText(tone === "danger" ? "dot.danger" : "dot.warn");
   }
 
   function freshSnapshot(order) {
