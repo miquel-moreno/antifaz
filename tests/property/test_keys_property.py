@@ -31,6 +31,12 @@ from antifaz.keys.store import MemoryKeyStore
 
 # Written out here, not imported: the property checks the rule, not the constant.
 FORBIDDEN = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
+NAME_ERRORS = frozenset(
+    {
+        "a key name cannot hold control or invisible characters",
+        "a key name must be 1 to 64 printable characters, without whitespace at either end",
+    }
+)
 PEPPER = b"test-pepper-" + b"0" * 32
 START = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
@@ -152,7 +158,9 @@ def test_any_accepted_name_has_no_control_or_invisible_character(name: str) -> N
     try:
         check_name(name)
     except ValueError as error:
-        assert not name or name not in str(error)
+        # A fixed message, so it never holds the name (a short name like " " may still be
+        # a piece of the fixed text, which is why this compares whole messages).
+        assert str(error) in NAME_ERRORS
         return
     assert not any(unicodedata.category(character) in FORBIDDEN for character in name)
     assert 1 <= len(name) <= 64
