@@ -28,8 +28,10 @@ pytestmark = pytest.mark.e2e
 _DNI_NUMBER = 48151623
 DNI = f"{_DNI_NUMBER}{'TRWAGMYFPDXBNJZSQVHLCKE'[_DNI_NUMBER % 23]}"
 EMAIL = "lucia.ejemplo@example.com"
-# Distroless (issue 54): 143.5 MB on 2026-10-16 (the slim image was 249.1 MB). Lowered from 160 to
-# 140 in 8b-1, with the debug sections of the virtualenv stripped (ADR-0019, note of 2026-10-29).
+# Distroless (issue 54): 143.5 MB on 2026-10-16 (the slim image was 249.1 MB).
+# 127.2 MB on 2026-10-29 (8b-1: asyncpg added, debug sections of the virtualenv stripped;
+# ADR-0019, note of 2026-10-29).
+# 140, not more: room to grow a little, but a jump like a new heavy dependency fails here.
 MAX_IMAGE_MB = 140
 
 

@@ -76,7 +76,7 @@ PostgreSQL es **opcional**: sin él, Antifaz funciona como en la v0.1.
 
 ## Consecuencias
 
-- La imagen lleva asyncpg (unos 14 MB descomprimidos en Linux) aunque no se use PostgreSQL. `make e2e` comprueba que la imagen no pasa de 160 MB y que todos sus módulos importan.
+- La imagen lleva asyncpg aunque no se use PostgreSQL: 14,4 MB en disco tal como viene la rueda, unos 19 MB en la medida de Docker. Sin las secciones de depuración (nota del 2026-10-29 en ADR-0019) quedan 2,6 MB, y la imagen entera mide 127,2 MB. `make e2e` comprueba que no pasa de 140 MB y que todos sus módulos importan.
 - Un secreto más: `ANTIFAZ_DATABASE_PASSWORD`. Sin `.env.example` ni plantilla de `init` todavía (8f).
 - La CI depende de un servicio PostgreSQL: si no arranca, el job falla (no se salta).
 - `serve` no comprueba todavía los ajustes de la base de datos ni se conecta: llega con 8d. El almacén de PostgreSQL, `KeyStoreUnavailable`, el motivo `invalid` y la batería común de contrato llegan con 8b-2.
