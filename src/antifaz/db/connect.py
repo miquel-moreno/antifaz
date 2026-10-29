@@ -10,11 +10,18 @@ reason (DatabaseProblem) and a fixed text.
   OS user name are never used. TLS: `verify-full` is an ssl.SSLContext that checks the
   certificate against the system's CAs and the host name (TLS 1.2 or newer); `disable` is no
   TLS at all. There is no "prefer": a server that refuses TLS is tls_failed, never plain text.
+  OpenSSL also trusts the CAs named by SSL_CERT_FILE and SSL_CERT_DIR (8f adds a variable for
+  an own CA). The settings are checked first (check_database_settings): a bad host or
+  password never reaches asyncpg.
 - Every session sets statement_timeout, lock_timeout and idle_in_transaction_session_timeout
   to ANTIFAZ_DATABASE_TIMEOUT_SECONDS, application_name=antifaz, and
   log_parameter_max_length_on_error=0 (PostgreSQL 16 lets any role set it for its own session,
-  `pg_settings.context = 'user'`), so a failing statement never logs its arguments (a key's
-  hash, a name) in the server's log.
+  `pg_settings.context = 'user'`). That only keeps the $n arguments out of the server log's
+  STATEMENT line of a failing statement. It does NOT hide the DETAIL line of a CHECK or UNIQUE
+  that fails, which writes the row's values ("Failing row contains (...)", "Key (pepper_version,
+  key_hash)=(...) already exists"); only `log_error_verbosity = terse` in postgresql.conf
+  (superuser) drops it, and the admin should set it. In 8b-1 nothing writes keys yet; the 8b-2
+  store checks every value in Python before writing, so a row the table refuses is a bug.
 - Queries are Sql values: module-level constants written as `Sql("...")`; values travel as
   arguments ($1...). tests/unit/test_db_sql_rules.py enforces it from the AST.
 

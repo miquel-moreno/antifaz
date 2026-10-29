@@ -4,11 +4,21 @@ Own runner, no Alembic. Forward only:
 1. The server must be PostgreSQL >= 16 with a UTF8 database (too_old, not_utf8): checked before
    anything is created.
 2. pg_advisory_lock(LOCK_ID) is held for the whole run, so two `migrate` at once apply each
-   file once (the second waits, then finds nothing to do). lock_timeout bounds the wait.
-3. antifaz_schema_version is created if missing. Its rows are compared with the files: a newer
-   schema (ahead) or a changed or missing one (migration_changed) is refused and nothing runs.
+   file once. The second one waits at most ANTIFAZ_DATABASE_TIMEOUT_SECONDS (lock_timeout):
+   if the first one is still working by then, the second stops with `timeout` (run it again;
+   it then finds nothing to do).
+3. antifaz_schema_version is created if missing. Its rows (at most one more than the known
+   files) are compared with the files: a newer schema (ahead) or a changed or missing one
+   (migration_changed) is refused and nothing runs.
 4. Each pending file runs in its own transaction together with its row (version, SHA-256); a
-   failure rolls that file back and stops.
+   failure rolls that file back and stops. The same ANTIFAZ_DATABASE_TIMEOUT_SECONDS is the
+   statement_timeout of each file: a future heavy migration will need a higher value for that
+   run.
+
+The tables have no schema in their names: they go to the first schema of the role's
+search_path (the trigger functions pin their own search_path). The role must own the database
+or have CREATE on that schema (since PostgreSQL 15 only the database owner may create in
+`public`).
 
 `serve` never migrates: an admin runs `antifaz db migrate` on purpose (decision D7).
 """
