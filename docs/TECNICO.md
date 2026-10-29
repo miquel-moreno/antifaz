@@ -1219,17 +1219,18 @@ En pocas palabras: en «Estado», el botón «Comprobar ahora» pregunta a cada 
 from antifaz.keys import MemoryKeyStore, PepperRing, Scope
 
 store = MemoryKeyStore(PepperRing({1: pepper_de_32_bytes_o_mas}, current=1))
-created = store.create("facturas", {Scope.OPENAI_CHAT})  # created.key: se ve una vez
-store.verify(created.key)  # Verified(caller=Caller(key_id=1, scopes=...))
-store.verify("afz_inventada")  # Refused(reason=RefusalReason.MALFORMED)
+created = await store.create("facturas", {Scope.OPENAI_CHAT})  # created.key: se ve una vez
+await store.verify(created.key)  # Verified(caller=Caller(key_id=1, scopes=...))
+await store.verify("afz_inventada")  # Refused(reason=RefusalReason.MALFORMED)
 ```
 
 - **Formato** (`format.py`): `afz_` + 43 base62 de `secrets` + 6 base62 de control (CRC32). El control solo filtra erratas, no es seguridad. `parse_key()` no usa expresiones regulares y su error es siempre `malformed key`.
 - **Hash** (`pepper.py`): HMAC-SHA256 con el pepper de una versión. El almacén busca por (versión, hash) con cada versión del anillo, así una rotación no invalida las claves antiguas mientras su versión siga en el anillo.
-- **Registros** (`records.py`): cerrados y congelados; tiempos `datetime` con `tzinfo is UTC`; el `repr` no enseña ni el nombre ni el hash y la igualdad no compara el hash. El nombre tiene de 1 a 64 caracteres imprimibles, sin espacios en blanco en los extremos y sin caracteres de las categorías Unicode Cc, Cf, Zl, Zp, Cs, Co ni Cn (`FORBIDDEN_NAME_CATEGORIES`: controles de dirección como U+202E y de ancho cero como U+200B); el error no repite el nombre. Vale mientras `ahora < expires_at`.
-- **Almacén** (`store.py`): `KeyStore` es el protocolo que también implementará PostgreSQL. `MemoryKeyStore` no tiene cerrojo (un solo hilo, como las sesiones del panel), se puede cargar con registros existentes y no se puede serializar ni copiar.
+- **Registros** (`records.py`): cerrados y congelados; tiempos `datetime` con `tzinfo is UTC`; el `repr` no enseña ni el nombre ni el hash y la igualdad no compara el hash. El hash no es un campo de dataclass (vive en un slot y se lee con `.key_hash`), así que `asdict`, `astuple`, `replace` y pydantic no llegan a él; `CreatedKey` no es una dataclass y se compara por identidad. Vale mientras `ahora < expires_at`; una clave revocada no vale nunca, diga lo que diga el reloj.
+- **El nombre** es solo una etiqueta (la clave se identifica por su número, `key=N`, y los nombres pueden repetirse): de 1 a 64 caracteres (se mira la longitud antes que los caracteres), sin espacios en blanco en los extremos y sin caracteres de control ni invisibles: categorías Unicode Cc, Cf, Zl, Zp, Cs, Co y Cn (`FORBIDDEN_NAME_CATEGORIES`), todo `Default_Ignorable_Code_Point` (`DEFAULT_IGNORABLE`, tabla fija de Unicode 15.0.0 con 4174 puntos de código; un test exige `unicodedata.unidata_version == "15.0.0"`) y U+2800. El error no repite el nombre.
+- **Almacén** (`store.py`): `KeyStore` es el protocolo que también implementará PostgreSQL, **asíncrono** (`await store.create(...)`): asyncpg y la puerta ASGI no deben bloquear el bucle de eventos. `get()` y `revoke()` solo aceptan enteros positivos de verdad (`True` o `1.0` dan `None`), y `verify()` lee el reloj antes de buscar la clave. `MemoryKeyStore` no tiene cerrojo (un solo hilo, como las sesiones del panel), se puede cargar con registros existentes y no se puede serializar ni copiar.
 - **La clave en claro no se queda**: ni en el almacén ni en los objetos que devuelve; si una llamada falla a medias, se limpian las variables de los marcos de la librería en el traceback (`tests/redteam/test_keys_secrets.py`).
-- **El pepper**: sin él, ninguna clave virtual funciona. Cómo generarlo y guardar su copia llega con `antifaz init` (8c).
+- **El pepper**: sin él, ninguna clave virtual funciona. **Tiene que salir de un generador aleatorio** (`secrets.token_bytes(32)` o más), **nunca escrito a mano**: `PepperRing` solo exige 32 bytes, y una frase inventada de 32 letras los cumple sin ser secreta. Generarlo, rechazar los triviales y guardar su copia llegan con `antifaz init` (8c).
 
 ## Decisiones técnicas del issue 1
 
