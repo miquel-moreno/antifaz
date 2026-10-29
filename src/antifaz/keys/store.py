@@ -1,7 +1,10 @@
 """Key stores (ADR-0020): the KeyStore protocol and MemoryKeyStore. Standard library only.
 
 KeyStore is what the door (8d) and the CLI (8c) use; MemoryKeyStore implements it here and the
-PostgreSQL store (8b) will implement it too:
+PostgreSQL store (8b) will implement it too. Every method is a coroutine: the PostgreSQL store
+talks to the database with asyncpg (ADR-0001) and the door is ASGI, so a lookup must never block
+the event loop. MemoryKeyStore never awaits anything inside a call; the pure pieces (format,
+pepper digest, record checks) stay synchronous.
 
 - create(name, scopes, ...) -> CreatedKey: a new random key, shown ONCE (CreatedKey.key); the
   store keeps only its record (HMAC with the CURRENT pepper version, never the key).
@@ -60,7 +63,7 @@ def utc_now() -> datetime:
 
 @runtime_checkable
 class KeyStore(Protocol):
-    def create(
+    async def create(
         self,
         name: str,
         scopes: Iterable[Scope],
@@ -70,13 +73,13 @@ class KeyStore(Protocol):
         per_day_limit: int | None = None,
     ) -> CreatedKey: ...
 
-    def get(self, key_id: int) -> KeyRecord | None: ...
+    async def get(self, key_id: int) -> KeyRecord | None: ...
 
-    def list(self) -> tuple[KeyRecord, ...]: ...
+    async def list(self) -> tuple[KeyRecord, ...]: ...
 
-    def revoke(self, key_id: int) -> KeyRecord | None: ...
+    async def revoke(self, key_id: int) -> KeyRecord | None: ...
 
-    def verify(self, presented: object) -> VerifyResult: ...
+    async def verify(self, presented: object) -> VerifyResult: ...
 
 
 def _scope_set(scopes: object) -> frozenset[Scope]:
@@ -139,7 +142,7 @@ class MemoryKeyStore:
             raise ValueError("the key store clock must return an aware datetime (UTC)")
         return now.astimezone(UTC)
 
-    def create(
+    async def create(
         self,
         name: str,
         scopes: Iterable[Scope],
@@ -178,13 +181,13 @@ class MemoryKeyStore:
         self._next_id += 1
         return CreatedKey(key, record)
 
-    def get(self, key_id: int) -> KeyRecord | None:
+    async def get(self, key_id: int) -> KeyRecord | None:
         return self._records.get(key_id)
 
-    def list(self) -> tuple[KeyRecord, ...]:
+    async def list(self) -> tuple[KeyRecord, ...]:
         return tuple(self._records[key_id] for key_id in sorted(self._records))
 
-    def revoke(self, key_id: int) -> KeyRecord | None:
+    async def revoke(self, key_id: int) -> KeyRecord | None:
         record = self._records.get(key_id)
         if record is None or record.revoked_at is not None:
             return record
@@ -218,7 +221,7 @@ class MemoryKeyStore:
                     return record
         return None
 
-    def verify(self, presented: object) -> VerifyResult:
+    async def verify(self, presented: object) -> VerifyResult:
         try:
             found = self._find(presented)
         except BaseException as error:
