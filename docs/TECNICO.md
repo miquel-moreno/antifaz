@@ -1211,6 +1211,27 @@ En pocas palabras: en «Estado», el botón «Comprobar ahora» pregunta a cada 
 - Navegadores (`tests/browser/test_panel_check.py`, Chromium, Firefox y WebKit, siempre con el proveedor falso del propio proceso): píldora y punto en ok, aviso, alerta y «Sin actualizar», en escritorio y móvil; ninguna petición al cargar ni 27 minutos después; cada modo del proveedor falso (ok, 401, 302, sin respuesta, sin conexión, mixto); dos llamadas al proveedor falso por pulsación y ninguna a uno real; el foco; el 429, el 503 y el 401; el contador; axe, CSP, colores forzados, texto al 200 % (también a 320 px) y tema oscuro.
 - `make panel-captures` añade 48 capturas: la comprobación correcta, mixta y en enfriamiento (`*-24-status-check-ok.png`, `*-25-status-check-mixed.png`, `*-26-status-check-cooldown.png`), la píldora en aviso y en alerta (`*-27-pill-warn.png`, `*-28-pill-danger.png`) y la píldora «Revisa los proveedores» tras una comprobación mixta (`*-29-pill-providers.png`), en es/en × claro/oscuro × 1280x800 y 390x844. Datos inventados. En total, 206 PNG.
 
+## Claves virtuales: la librería (issue 121, PR 8a)
+
+[ADR-0020](adr/0020-claves-virtuales.md) (propuesta). `antifaz/keys/` es solo biblioteca estándar y todavía no la usa nada: ni la puerta, ni la CLI, ni los ajustes, ni una base de datos (llegan en 8b–8f).
+
+```python
+from antifaz.keys import MemoryKeyStore, PepperRing, Scope
+
+store = MemoryKeyStore(PepperRing({1: pepper_de_32_bytes_o_mas}, current=1))
+created = await store.create("facturas", {Scope.OPENAI_CHAT})  # created.key: se ve una vez
+await store.verify(created.key)  # Verified(caller=Caller(key_id=1, scopes=...))
+await store.verify("afz_inventada")  # Refused(reason=RefusalReason.MALFORMED)
+```
+
+- **Formato** (`format.py`): `afz_` + 43 base62 de `secrets` + 6 base62 de control (CRC32). El control solo filtra erratas, no es seguridad. `parse_key()` no usa expresiones regulares y su error es siempre `malformed key`.
+- **Hash** (`pepper.py`): HMAC-SHA256 con el pepper de una versión. El almacén busca por (versión, hash) con cada versión del anillo, así una rotación no invalida las claves antiguas mientras su versión siga en el anillo.
+- **Registros** (`records.py`): cerrados y congelados; tiempos `datetime` con `tzinfo is UTC`; el `repr` no enseña ni el nombre ni el hash y la igualdad no compara el hash. El hash no es un campo de dataclass (vive en un slot y se lee con `.key_hash`), así que `asdict`, `astuple`, `replace` y pydantic no llegan a él; `CreatedKey` no es una dataclass y se compara por identidad. Vale mientras `ahora < expires_at`; una clave revocada no vale nunca, diga lo que diga el reloj.
+- **El nombre** es solo una etiqueta (la clave se identifica por su número, `key=N`, y los nombres pueden repetirse): de 1 a 64 caracteres (se mira la longitud antes que los caracteres), sin espacios en blanco en los extremos y sin caracteres de control ni invisibles: categorías Unicode Cc, Cf, Zl, Zp, Cs, Co y Cn (`FORBIDDEN_NAME_CATEGORIES`), todo `Default_Ignorable_Code_Point` (`DEFAULT_IGNORABLE`, tabla fija de Unicode 15.0.0 con 4174 puntos de código; un test exige `unicodedata.unidata_version == "15.0.0"`) y U+2800. El error no repite el nombre.
+- **Almacén** (`store.py`): `KeyStore` es el protocolo que también implementará PostgreSQL, **asíncrono** (`await store.create(...)`): asyncpg y la puerta ASGI no deben bloquear el bucle de eventos. `get()` y `revoke()` solo aceptan enteros positivos de verdad (`True` o `1.0` dan `None`), y `verify()` lee el reloj antes de buscar la clave. `MemoryKeyStore` no tiene cerrojo (un solo hilo, como las sesiones del panel), se puede cargar con registros existentes y no se puede serializar ni copiar.
+- **La clave en claro no se queda**: ni en el almacén ni en los objetos que devuelve; si una llamada falla a medias, se limpian las variables de los marcos de la librería en el traceback (`tests/redteam/test_keys_secrets.py`).
+- **El pepper**: sin él, ninguna clave virtual funciona. **Tiene que salir de un generador aleatorio** (`secrets.token_bytes(32)` o más), **nunca escrito a mano**: `PepperRing` solo exige 32 bytes, y una frase inventada de 32 letras los cumple sin ser secreta. Generarlo, rechazar los triviales y guardar su copia llegan con `antifaz init` (8c).
+
 ## Decisiones técnicas del issue 1
 
 | Decisión | Por qué |

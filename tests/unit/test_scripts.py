@@ -64,6 +64,12 @@ def test_privacy_pieces_need_ninety_percent() -> None:
     assert check(report) == ["mask: 80.0 % < 90 %"]
 
 
+def test_the_virtual_keys_are_a_privacy_piece() -> None:
+    report = coverage_report({"src/antifaz/keys/store.py": (85, 100)})
+
+    assert check(report) == ["keys: 85.0 % < 90 %"]
+
+
 def test_paths_outside_the_package_do_not_count() -> None:
     assert check(coverage_report({"detect/other_project.py": (0, 10)})) == []
 
