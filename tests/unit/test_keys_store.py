@@ -536,6 +536,35 @@ def test_records_are_frozen() -> None:
         record.revoked_at = START  # type: ignore[misc]
 
 
+RECORD_COPIES = [
+    ("copy", copy.copy),
+    ("deepcopy", copy.deepcopy),
+    *[
+        (f"pickle-{protocol}", lambda value, p=protocol: pickle.dumps(value, protocol=p))
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1)
+    ],
+    ("__reduce__", lambda value: value.__reduce__()),
+    *[
+        (f"__reduce_ex__-{protocol}", lambda value, p=protocol: value.__reduce_ex__(p))
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1)
+    ],
+]
+
+
+@pytest.mark.parametrize(("how", "action"), RECORD_COPIES, ids=[how for how, _ in RECORD_COPIES])
+def test_a_record_cannot_be_copied_or_pickled(how: str, action: object) -> None:
+    assert callable(action)
+    record = _record(key_hash=bytes(range(200, 200 + HASH_BYTES)))
+
+    with pytest.raises(TypeError) as caught:
+        action(record)
+
+    message = str(caught.value)
+    assert message == "KeyRecord cannot be copied or serialised"
+    assert record.key_hash.hex() not in message
+    assert "app" not in message
+
+
 def test_record_equality_never_compares_the_hash() -> None:
     assert _record(key_hash=b"a" * HASH_BYTES) == _record(key_hash=b"b" * HASH_BYTES)
 
