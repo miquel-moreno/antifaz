@@ -183,10 +183,10 @@ async def mute(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, seen:
 async def http_speaker(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, seen: Seen
 ) -> None:
+    """Answers the startup with an HTTP error and hangs up, as a web server would."""
     await reader.read(8)
-    writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n" * 4)
+    writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
     await writer.drain()
-    await asyncio.sleep(30)
 
 
 async def refusing_tls(
@@ -294,6 +294,27 @@ async def test_a_mute_server_times_out_within_the_limit(
 
     assert_closed(error, DatabaseProblem.TIMEOUT, canaries)
     assert elapsed < 0.5 + 2.0
+    assert_no_logs(caplog, canaries)
+
+
+async def unsupported_authentication(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, seen: Seen
+) -> None:
+    """Speaks the protocol, but asks for an authentication method that does not exist."""
+    attach(reader, writer)
+    await read_startup(reader, seen, b"N")
+    writer.write(b"R" + struct.pack("!ii", 8, 99))
+    await writer.drain()
+    await asyncio.sleep(30)
+
+
+async def test_a_server_speaking_nonsense_is_other(
+    canaries: Canaries, caplog: pytest.LogCaptureFixture
+) -> None:
+    async with server(unsupported_authentication) as (port, _):
+        error, _ = await failure(settings(port, canaries), caplog)
+
+    assert_closed(error, DatabaseProblem.OTHER, canaries)
     assert_no_logs(caplog, canaries)
 
 

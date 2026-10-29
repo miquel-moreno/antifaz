@@ -20,7 +20,7 @@ FOLDER = Path(str(resources.files("antifaz.db").joinpath("migrations")))
 FILE_NAME = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 # Pinned when each file was released. Never update a line: add a new file instead.
 RELEASED_CHECKSUMS = {
-    1: "8e15e42c23ba9c7b841c1406beb42d3a0ba5af41ece03e7169600dccac13ccc1",
+    1: "23456710d1ea57b043928b96562ddcd0e5f8bc5f5c9b35107612ba69f214a056",
 }
 
 

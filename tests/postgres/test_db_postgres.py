@@ -326,7 +326,7 @@ async def test_infinite_times_are_refused(schema: Schema, column: str, value: st
     await prepare(schema)
     raw = await schema.raw()
     times = {"created_at": "now()", "expires_at": "NULL", "revoked_at": "NULL"}
-    times[column] = "$1::timestamptz"
+    times[column] = "$1::text::timestamptz"  # the infinity values travel as text
     # Column names and SQL words fixed in this test; the time travels as $1.
     statement = (
         "INSERT INTO virtual_keys (name, scopes, key_hash, pepper_version, created_at, "  # noqa: S608

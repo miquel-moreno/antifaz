@@ -1,12 +1,15 @@
 """Static rules of the database code (issue 121, PR 8b-1, ADR-0021), read from its AST.
 
 1. Every asyncpg call (connect, execute, executemany, fetch, fetchrow, fetchval, close) passes
-   `timeout=`: a database that stops answering never holds the gateway or the CLI.
+   `timeout=`: a database that stops answering never holds the gateway or the CLI. asyncpg is
+   only called from the adapter (connect.py, rule 3), whose Session passes the timeout on every
+   call, so the rule is checked there; the other modules call the Session.
 2. Every query is a module-level constant written as `Sql("...")` (a plain literal), never an
    f-string, `%`, `.format()`, a concatenation or a local variable: values only travel as
    query arguments ($1, $2...), so nothing a user typed becomes SQL. Two exceptions, both
    fixed by name: the adapter's own methods forward their `query` parameter (typed Sql), and
-   the runner executes `migration.sql`, the text of a file shipped in the package.
+   the runner executes `migration.sql`, the text of a file shipped in the package (schema.py
+   makes it an Sql from the file's bytes).
 3. Only antifaz/db/connect.py imports asyncpg.
 
 Each rule has a negative case on a small source text.
@@ -28,9 +31,11 @@ QUERY_CALLS = frozenset({"execute", "executemany", "fetch", "fetchrow", "fetchva
 ADAPTER = "connect.py"
 # (file, the expression allowed as a query besides a constant)
 FORWARDED = {(ADAPTER, "query"), ("migrate.py", "migration.sql")}
+# (file, the only argument allowed in an Sql() that is not a literal)
+SQL_FROM_FILES = {("schema.py", "data.decode('utf-8')")}
 
 
-def _constants(tree: ast.Module) -> tuple[set[str], list[str]]:
+def _constants(tree: ast.Module, file_name: str) -> tuple[set[str], list[str]]:
     """Module-level Sql constants, and the problems of every Sql(...) built anywhere."""
     names: set[str] = set()
     problems: list[str] = []
@@ -44,6 +49,9 @@ def _constants(tree: ast.Module) -> tuple[set[str], list[str]]:
                 and not node.keywords
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)
+            )
+            and not (
+                len(node.args) == 1 and (file_name, ast.unparse(node.args[0])) in SQL_FROM_FILES
             )
         ):
             problems.append(f"line {node.lineno}: Sql() takes one plain string literal")
@@ -62,7 +70,7 @@ def _constants(tree: ast.Module) -> tuple[set[str], list[str]]:
 
 def problems_of(source: str, file_name: str) -> list[str]:
     tree = ast.parse(source)
-    constants, problems = _constants(tree)
+    constants, problems = _constants(tree, file_name)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom) and file_name != ADAPTER:
             modules = (
@@ -75,7 +83,11 @@ def problems_of(source: str, file_name: str) -> list[str]:
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         method = node.func.attr
-        if method in CALLS_WITH_TIMEOUT and not any(k.arg == "timeout" for k in node.keywords):
+        if (
+            file_name == ADAPTER
+            and method in CALLS_WITH_TIMEOUT
+            and not any(k.arg == "timeout" for k in node.keywords)
+        ):
             problems.append(f"line {node.lineno}: {method}() without timeout=")
         if method not in QUERY_CALLS:
             continue
@@ -154,19 +166,42 @@ async def count(session, key_id):
         ('Q = Sql(f"SELECT {x}")\n', ["Sql() takes one plain string literal"]),
         ('Q = Sql("SELECT " + x)\n', ["Sql() takes one plain string literal"]),
         (
+            "import asyncpg\nasync def f():\n    return await asyncpg.connect(host='h')\n",
+            ["only connect.py imports asyncpg"],
+        ),
+        ("from asyncpg import exceptions\n", ["only connect.py imports asyncpg"]),
+        ('Q = Sql(data.decode("utf-8"))\n', ["Sql() takes one plain string literal"]),
+    ],
+)
+def test_the_rules_catch_each_mistake(source: str, expected: list[str]) -> None:
+    found = problems_of(source, "checks.py")
+
+    assert len(found) == len(expected), found
+    for problem, wanted in zip(found, expected, strict=True):
+        assert wanted in problem
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (GOOD, []),
+        (
             'Q = Sql("SELECT 1")\nasync def f(s):\n    return await s.fetchval(Q)\n',
             ["fetchval() without timeout="],
         ),
         ("async def f(s):\n    await s.close()\n", ["close() without timeout="]),
         (
             "import asyncpg\nasync def f():\n    return await asyncpg.connect(host='h')\n",
-            ["only connect.py imports asyncpg", "connect() without timeout="],
+            ["connect() without timeout="],
         ),
-        ("from asyncpg import exceptions\n", ["only connect.py imports asyncpg"]),
+        (
+            "async def f(c, query):\n    return await c.execute(query, timeout=1)\n",
+            [],
+        ),
     ],
 )
-def test_the_rules_catch_each_mistake(source: str, expected: list[str]) -> None:
-    found = problems_of(source, "checks.py")
+def test_every_call_in_the_adapter_has_a_timeout(source: str, expected: list[str]) -> None:
+    found = problems_of(source, ADAPTER)
 
     assert len(found) == len(expected), found
     for problem, wanted in zip(found, expected, strict=True):
@@ -178,3 +213,10 @@ def test_a_forwarded_query_is_only_allowed_where_it_is_named() -> None:
 
     assert problems_of(source, ADAPTER) == []
     assert problems_of(source, "checks.py") != []
+
+
+def test_sql_from_a_file_is_only_allowed_in_the_loader() -> None:
+    source = "def load(data):\n    return Sql(data.decode('utf-8'))\n"
+
+    assert problems_of(source, "schema.py") == []
+    assert problems_of(source, "migrate.py") != []
