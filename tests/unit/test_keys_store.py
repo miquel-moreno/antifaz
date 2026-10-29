@@ -561,6 +561,16 @@ async def test_the_created_key_cannot_be_pickled_or_copied() -> None:
             action(created)
 
 
+async def test_the_created_key_is_read_only() -> None:
+    store, _ = make_store()
+    created = await store.create("app", ALL_SCOPES)
+
+    with pytest.raises(AttributeError):
+        created.key = "afz_other"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        del created.record
+
+
 def test_the_memory_store_follows_the_protocol() -> None:
     store, _ = make_store()
 

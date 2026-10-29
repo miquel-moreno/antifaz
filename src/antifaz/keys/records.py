@@ -27,7 +27,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
-from typing import NoReturn, TypeGuard
+from typing import Any, NoReturn, TypeGuard
 
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
@@ -160,39 +160,119 @@ def check_limit(limit: object) -> None:
         raise ValueError("a key limit must be a positive integer or None")
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class KeyRecord:
+def _check_record(
+    key_id: int,
+    name: str,
+    scopes: frozenset[Scope],
+    created_at: datetime,
+    expires_at: datetime | None,
+    revoked_at: datetime | None,
+    key_hash: bytes,
+    pepper_version: int,
+    per_minute_limit: int | None,
+    per_day_limit: int | None,
+) -> None:
+    if not is_positive_int(key_id):
+        raise ValueError("a key id must be a positive integer")
+    check_name(name)
+    check_scopes(scopes)
+    if not is_utc(created_at):
+        raise ValueError("created_at must be an aware datetime in UTC")
+    for moment in (expires_at, revoked_at):
+        if moment is not None and not is_utc(moment):
+            raise ValueError("expires_at and revoked_at must be aware datetimes in UTC")
+    if expires_at is not None and expires_at <= created_at:
+        raise ValueError("expires_at must be after created_at")
+    if revoked_at is not None and revoked_at < created_at:
+        raise ValueError("revoked_at cannot be before created_at")
+    if type(key_hash) is not bytes or len(key_hash) != HASH_BYTES:
+        raise ValueError(f"a key hash must be {HASH_BYTES} bytes")
+    if not is_positive_int(pepper_version):
+        raise ValueError("a pepper version must be a positive integer")
+    check_limit(per_minute_limit)
+    check_limit(per_day_limit)
+
+
+def _record_problem(*values: Any) -> Exception | None:
+    """The first problem of a record's values, without a traceback (its frames held them)."""
+    try:
+        _check_record(*values)
+    except (TypeError, ValueError) as error:
+        return error.with_traceback(None)
+    return None
+
+
+class _KeyHashSlot:
+    """Holds a record's hash outside its dataclass fields."""
+
+    __slots__ = ("_key_hash",)
+    _key_hash: bytes
+
+
+@dataclass(frozen=True, slots=True, kw_only=True, init=False)
+class KeyRecord(_KeyHashSlot):
+    """A key's record. The hash is NOT a dataclass field (it lives in a slot of the base
+    class, read with `.key_hash`): dataclasses.asdict, astuple and replace and a pydantic dump
+    never reach it, equality never compares it, and replace() cannot build a record."""
+
     id: int
     name: str = field(repr=False)
     scopes: frozenset[Scope]
     created_at: datetime
     expires_at: datetime | None
     revoked_at: datetime | None
-    key_hash: bytes = field(repr=False, compare=False)
     pepper_version: int
     per_minute_limit: int | None = None
     per_day_limit: int | None = None
 
-    def __post_init__(self) -> None:
-        if not is_positive_int(self.id):
-            raise ValueError("a key id must be a positive integer")
-        check_name(self.name)
-        check_scopes(self.scopes)
-        if not is_utc(self.created_at):
-            raise ValueError("created_at must be an aware datetime in UTC")
-        for moment in (self.expires_at, self.revoked_at):
-            if moment is not None and not is_utc(moment):
-                raise ValueError("expires_at and revoked_at must be aware datetimes in UTC")
-        if self.expires_at is not None and self.expires_at <= self.created_at:
-            raise ValueError("expires_at must be after created_at")
-        if self.revoked_at is not None and self.revoked_at < self.created_at:
-            raise ValueError("revoked_at cannot be before created_at")
-        if type(self.key_hash) is not bytes or len(self.key_hash) != HASH_BYTES:
-            raise ValueError(f"a key hash must be {HASH_BYTES} bytes")
-        if not is_positive_int(self.pepper_version):
-            raise ValueError("a pepper version must be a positive integer")
-        check_limit(self.per_minute_limit)
-        check_limit(self.per_day_limit)
+    def __init__(
+        self,
+        *,
+        id: int,
+        name: str,
+        scopes: frozenset[Scope],
+        created_at: datetime,
+        expires_at: datetime | None,
+        revoked_at: datetime | None,
+        key_hash: bytes,
+        pepper_version: int,
+        per_minute_limit: int | None = None,
+        per_day_limit: int | None = None,
+    ) -> None:
+        problem = _record_problem(
+            id,
+            name,
+            scopes,
+            created_at,
+            expires_at,
+            revoked_at,
+            key_hash,
+            pepper_version,
+            per_minute_limit,
+            per_day_limit,
+        )
+        if problem is not None:
+            del name, key_hash  # the traceback keeps this frame: no name, no hash
+            raise problem
+        values = {
+            "id": id,
+            "name": name,
+            "scopes": scopes,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "revoked_at": revoked_at,
+            "pepper_version": pepper_version,
+            "per_minute_limit": per_minute_limit,
+            "per_day_limit": per_day_limit,
+            "_key_hash": key_hash,
+        }
+        for attribute, value in values.items():
+            object.__setattr__(self, attribute, value)
+
+    @property
+    def key_hash(self) -> bytes:
+        """HMAC-SHA256 of the key with the pepper of `pepper_version`."""
+        return self._key_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,12 +296,40 @@ class Refused:
 type VerifyResult = Verified | Refused
 
 
-@dataclass(frozen=True, slots=True)
 class CreatedKey:
-    """The clear key, shown once, and its record. Never stored."""
+    """The clear key, shown once, and its record. Never stored.
 
-    key: str = field(repr=False)
-    record: KeyRecord
+    Not a dataclass, so dataclasses.asdict, astuple and replace and pydantic cannot read the
+    key; compared and hashed by identity (object's own __eq__ and __hash__), never by the key.
+    Read-only, and it cannot be pickled or copied.
+    """
+
+    __slots__ = ("_key", "_record")
+    _key: str
+    _record: KeyRecord
+
+    def __init__(self, key: str, record: KeyRecord) -> None:
+        object.__setattr__(self, "_key", key)
+        object.__setattr__(self, "_record", record)
+
+    @property
+    def key(self) -> str:
+        return self._key
+
+    @property
+    def record(self) -> KeyRecord:
+        return self._record
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
+        raise AttributeError("CreatedKey is read-only")
+
+    def __delattr__(self, name: str) -> NoReturn:
+        raise AttributeError("CreatedKey is read-only")
+
+    def __repr__(self) -> str:
+        return f"CreatedKey(record={self._record!r})"
+
+    __str__ = __repr__
 
     def _refuse(self, *_: object) -> NoReturn:
         raise TypeError("CreatedKey cannot be copied or serialised")
