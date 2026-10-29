@@ -1,5 +1,5 @@
 """Command line: `antifaz scan <file>`, `antifaz mask <file>` (`-` is stdin), `antifaz verify`,
-`antifaz init`, `antifaz serve`, `antifaz doctor`, `antifaz setup claude-code`.
+`antifaz init`, `antifaz serve`, `antifaz doctor`, `antifaz db`, `antifaz setup claude-code`.
 
 Uses the library functions directly. `scan` prints `TYPE start end` per detection and
 `mask` prints the masked text. Neither prints values nor the placeholder table, and errors
@@ -10,9 +10,10 @@ data with the current configuration and checks that none reaches a fake provider
 `doctor` (cli/doctor.py) checks the configuration, the running gateway and, only with
 --providers, the provider keys (a free model list). `setup claude-code`
 (cli/setup_claude_code.py) points Claude Code at Antifaz by its settings file, never writing a
-key.
+key. `db migrate` and `db status` (cli/db.py) create and check the PostgreSQL of the virtual
+keys: the only command that loads the database code (asyncpg), inside its run().
 
-Forbidden: No dependency on the database for scan.
+Forbidden: No dependency on the database for scan (or any command but `db`, and `keys` from 8c).
 """
 
 import argparse
@@ -21,7 +22,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
-from antifaz.cli import doctor, init, serve, setup_claude_code
+from antifaz.cli import db, doctor, init, serve, setup_claude_code
 from antifaz.detect.scan import scan
 from antifaz.mask import mask
 
@@ -52,6 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     init.add_parser(commands)
     doctor.add_parser(commands)
+    db.add_parser(commands)
     setup_claude_code.add_parser(commands)
     commands.add_parser(
         "serve",
@@ -75,6 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return init.run(args)
     if args.command == "doctor":
         return doctor.run(args)
+    if args.command == "db":
+        return db.run(args)
     if args.command == "setup":
         return setup_claude_code.run(args)
     if args.command == "serve":

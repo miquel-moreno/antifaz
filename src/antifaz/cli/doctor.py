@@ -5,8 +5,9 @@ Three checks, in order (issue 43, ADR-0017):
 1. Configuration: the settings the gateway would read (the .env in --path, default the current
    folder, with ANTIFAZ_* environment variables on top, as pydantic-settings does) and
    `check_safe_to_start`. It names variables, never values, and says which providers have a
-   key (names only), whether the NER and the panel are on and how many trusted proxies there
-   are (a count, never the addresses), with a warning when a range is wider than /24 or /64.
+   key (names only), whether the NER and the panel are on, whether PostgreSQL is configured
+   (never connected: `antifaz db status` does that) and how many trusted proxies there are (a
+   count, never the addresses), with a warning when a range is wider than /24 or /64.
 2. Gateway: `GET {url}/healthz` (public: no key is sent) with a Host the gateway accepts and
    never through a proxy (HTTP(S)_PROXY is ignored: the gateway is local), no redirects, no
    compression (so the 64 KiB cap on the answer is real).
@@ -47,7 +48,13 @@ import httpx
 from pydantic import ValidationError
 
 from antifaz.api.provider_check import ANTHROPIC_VERSION, model_list_request
-from antifaz.config import Settings, UnsafeConfigError, _format_problem, check_safe_to_start
+from antifaz.config import (
+    Settings,
+    UnsafeConfigError,
+    _format_problem,
+    check_database_settings,
+    check_safe_to_start,
+)
 from antifaz.healthcheck import host_header
 from antifaz.logging import QUIET_LOGGERS
 from antifaz.trusted_networks import is_wide, parse_proxy_network, proxy_network_problem
@@ -228,6 +235,21 @@ def _wide_proxy_ranges(entries: Sequence[str]) -> int:
     return wide
 
 
+def _database_line(settings: Settings, report: Report) -> None:
+    """PostgreSQL for the virtual keys (8b-1, D8): configured or not, never connected here
+    (doctor never loads asyncpg; `antifaz db status` does). A bad setting is a failure that
+    names the variable."""
+    if settings.database_host is None:
+        report.add("note", "PostgreSQL: not configured (virtual keys off)")
+        return
+    try:
+        check_database_settings(settings)
+    except UnsafeConfigError as error:  # names the variable, never the value
+        report.add("fail", f"PostgreSQL: {error}")
+    else:
+        report.add("note", "PostgreSQL: configured; check it with `antifaz db status`")
+
+
 def check_config(folder: Path, report: Report) -> Settings | None:
     found = (folder / ".env").is_file()
     settings, problem = load_settings(folder)
@@ -251,6 +273,7 @@ def check_config(folder: Path, report: Report) -> Settings | None:
     report.add("note", f"NER (names and addresses): {'on' if settings.ner_enabled else 'off'}")
     # Only whether the token is set and how many proxies: never the token nor the addresses.
     report.add("note", f"panel: {'on' if settings.admin_token is not None else 'off'}")
+    _database_line(settings, report)
     report.add("note", f"trusted proxies: {len(settings.trusted_proxies)}")
     wide = _wide_proxy_ranges(settings.trusted_proxies)
     if wide:
