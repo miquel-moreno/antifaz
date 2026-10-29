@@ -7,7 +7,8 @@
 - parse_key() never raises anything but MalformedKeyError, and verify() never raises at all,
   whatever it is given.
 - Any key name that check_name() accepts has no control or invisible character (Unicode
-  categories Cc, Cf, Zl, Zp, Cs, Co, Cn), 1 to 64 characters and no whitespace at either end.
+  categories Cc, Cf, Zl, Zp, Cs, Co, Cn, any Default_Ignorable_Code_Point, U+2800), 1 to 64
+  characters and no whitespace at either end.
 """
 
 import asyncio
@@ -29,9 +30,18 @@ from antifaz.keys.format import (
 from antifaz.keys.pepper import PepperRing
 from antifaz.keys.records import RefusalReason, Refused, Scope, Verified, check_name
 from antifaz.keys.store import MemoryKeyStore
+from tests.unit.test_keys_names import OFFICIAL_DEFAULT_IGNORABLE
 
 # Written out here, not imported: the property checks the rule, not the constant.
 FORBIDDEN = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
+# Every Default_Ignorable_Code_Point (the test's own copy of the official table) and U+2800.
+IGNORABLE = frozenset(
+    {point for first, last in OFFICIAL_DEFAULT_IGNORABLE for point in range(first, last + 1)}
+    | {0x2800}
+)
+IGNORABLE_SAMPLES = [
+    chr(point) for first, last in OFFICIAL_DEFAULT_IGNORABLE for point in (first, last)
+] + [chr(0x2800)]
 NAME_ERRORS = frozenset(
     {
         "a key name cannot hold control or invisible characters",
@@ -160,6 +170,11 @@ def test_parse_raises_only_the_closed_error(value: object) -> None:
         st.text(max_size=70),
         st.text(alphabet=st.characters(categories=("Cc", "Cf", "Zl", "Zp", "Co", "Cn"))),
         st.lists(st.characters(), max_size=8).map("".join),
+        st.lists(
+            st.one_of(st.sampled_from(IGNORABLE_SAMPLES), st.characters(categories=("L",))),
+            min_size=1,
+            max_size=8,
+        ).map("".join),
     )
 )
 def test_any_accepted_name_has_no_control_or_invisible_character(name: str) -> None:
@@ -171,6 +186,7 @@ def test_any_accepted_name_has_no_control_or_invisible_character(name: str) -> N
         assert str(error) in NAME_ERRORS
         return
     assert not any(unicodedata.category(character) in FORBIDDEN for character in name)
+    assert not any(ord(character) in IGNORABLE for character in name)
     assert 1 <= len(name) <= 64
     assert name == name.strip()
 

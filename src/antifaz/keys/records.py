@@ -36,6 +36,7 @@ HASH_BYTES = 32  # SHA-256
 # such as the bidi controls and the zero-width ones (Cf), line and paragraph separators (Zl, Zp),
 # surrogates (Cs), private use (Co) and unassigned code points (Cn).
 FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
+DEFAULT_IGNORABLE: frozenset[int] = frozenset()  # stub, filled in the next commit
 
 
 class Scope(StrEnum):
