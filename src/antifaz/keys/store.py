@@ -155,16 +155,17 @@ class MemoryKeyStore:
         per_minute_limit: int | None = None,
         per_day_limit: int | None = None,
     ) -> CreatedKey:
-        # Everything that can be refused is checked before the key exists.
-        check_name(name)
-        chosen = _scope_set(scopes)
-        check_limit(per_minute_limit)
-        check_limit(per_day_limit)
-        now = self._now()
-        expires_at = _expires_at(now, expires_in)
-        version = self._peppers.current
-        key = generate_key()
+        key = ""  # until it is generated
         try:
+            # Everything that can be refused is checked before the key exists.
+            check_name(name)
+            chosen = _scope_set(scopes)
+            check_limit(per_minute_limit)
+            check_limit(per_day_limit)
+            now = self._now()
+            expires_at = _expires_at(now, expires_in)
+            version = self._peppers.current
+            key = generate_key()
             record = KeyRecord(
                 id=self._next_id,
                 name=name,
@@ -180,7 +181,7 @@ class MemoryKeyStore:
             self._add(record)
         except BaseException as error:
             _forget_frames(error)
-            del key  # this frame stays in the traceback: it must not keep the key
+            del key, name  # this frame stays in the traceback: no key, no rejected name
             raise
         self._next_id += 1
         return CreatedKey(key, record)

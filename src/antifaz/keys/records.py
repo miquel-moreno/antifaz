@@ -36,7 +36,50 @@ HASH_BYTES = 32  # SHA-256
 # such as the bidi controls and the zero-width ones (Cf), line and paragraph separators (Zl, Zp),
 # surrogates (Cs), private use (Co) and unassigned code points (Cn).
 FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"})
-DEFAULT_IGNORABLE: frozenset[int] = frozenset()  # stub, filled in the next commit
+# Unicode 15.0.0 DerivedCoreProperties.txt, Default_Ignorable_Code_Point (4174 code points);
+# matches unicodedata.unidata_version of Python 3.12. Python has no API for this property, so
+# the ranges are copied here verbatim; a test fails when Python's Unicode version changes.
+# Some of them are not Cf or Cn (U+034F, U+115F, U+3164, U+FFA0, the variation selectors...),
+# so the category check alone would miss them.
+_DEFAULT_IGNORABLE_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180D),
+    (0x180E, 0x180E),
+    (0x180F, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x2064),
+    (0x2065, 0x2065),
+    (0x2066, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0000),
+    (0xE0001, 0xE0001),
+    (0xE0002, 0xE001F),
+    (0xE0020, 0xE007F),
+    (0xE0080, 0xE00FF),
+    (0xE0100, 0xE01EF),
+    (0xE01F0, 0xE0FFF),
+)
+DEFAULT_IGNORABLE = frozenset(
+    point for first, last in _DEFAULT_IGNORABLE_RANGES for point in range(first, last + 1)
+)
+# Not default-ignorable, but it looks like a blank: a name that seems empty or spaced.
+BRAILLE_PATTERN_BLANK = 0x2800
+_NAME_LENGTH_ERROR = (
+    f"a key name must be 1 to {MAX_NAME_LENGTH} printable characters, "
+    "without whitespace at either end"
+)
+_NAME_INVISIBLE_ERROR = "a key name cannot hold control or invisible characters"
 
 
 class Scope(StrEnum):
@@ -67,23 +110,42 @@ def is_utc(value: object) -> bool:
     return isinstance(value, datetime) and value.tzinfo is UTC
 
 
-def check_name(name: object) -> None:
-    """1 to MAX_NAME_LENGTH printable characters, without whitespace at either end, and no
-    control or invisible format character anywhere (FORBIDDEN_NAME_CATEGORIES).
+def _is_invisible(character: str) -> bool:
+    point = ord(character)
+    return (
+        point in DEFAULT_IGNORABLE
+        or point == BRAILLE_PATTERN_BLANK
+        or unicodedata.category(character) in FORBIDDEN_NAME_CATEGORIES
+    )
 
-    The name is shown to the admin: a bidi control (U+202E...) could make it read as another
-    name, a zero-width character (U+200B...) could make two names look the same. The errors
-    never repeat the name.
-    """
+
+def _name_problem(name: object) -> Exception | None:
+    """What is wrong with the name, or None. Its frame is gone before anything is raised."""
     if type(name) is not str:
-        raise TypeError("a key name must be text")
-    if any(unicodedata.category(character) in FORBIDDEN_NAME_CATEGORIES for character in name):
-        raise ValueError("a key name cannot hold control or invisible characters")
-    if not 1 <= len(name) <= MAX_NAME_LENGTH or name != name.strip() or not name.isprintable():
-        raise ValueError(
-            f"a key name must be 1 to {MAX_NAME_LENGTH} printable characters, "
-            "without whitespace at either end"
-        )
+        return TypeError("a key name must be text")
+    if not 1 <= len(name) <= MAX_NAME_LENGTH:  # first: never scan a huge text
+        return ValueError(_NAME_LENGTH_ERROR)
+    if any(_is_invisible(character) for character in name):
+        return ValueError(_NAME_INVISIBLE_ERROR)
+    if name != name.strip() or not name.isprintable():
+        return ValueError(_NAME_LENGTH_ERROR)
+    return None
+
+
+def check_name(name: object) -> None:
+    """1 to MAX_NAME_LENGTH printable characters (the length is checked first), without
+    whitespace at either end, and no control or invisible character anywhere: the categories
+    in FORBIDDEN_NAME_CATEGORIES, every Default_Ignorable_Code_Point and U+2800.
+
+    The name is only a label for the admin: the key is identified by its number (`key=N` in the
+    logs, the number `revoke` takes), and names need not be unique. Invisible characters are
+    refused so the label shows what it holds. The errors never repeat the name, and this frame
+    drops it before raising.
+    """
+    problem = _name_problem(name)
+    if problem is not None:
+        del name  # the traceback keeps this frame: it must not keep the name
+        raise problem
 
 
 def check_scopes(scopes: object) -> None:
@@ -172,6 +234,8 @@ class CreatedKey:
 
 
 __all__ = [
+    "BRAILLE_PATTERN_BLANK",
+    "DEFAULT_IGNORABLE",
     "DEFAULT_LIFETIME",
     "FORBIDDEN_NAME_CATEGORIES",
     "HASH_BYTES",
