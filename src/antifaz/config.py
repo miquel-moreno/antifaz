@@ -3,14 +3,16 @@
 Upstream URLs and provider keys come ONLY from here, never from the client (ADR-0013).
 `check_safe_to_start()` refuses a configuration that would run open or with the example keys
 (ADR-0015). Its messages name the variable and the reason, never the value.
+`check_database_settings()` does the same for the PostgreSQL settings (ADR-0021).
 """
 
 import hmac
+import ipaddress
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -46,6 +48,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        # A value in the wrong variable (a password in ANTIFAZ_DATABASE_PORT) never shows in
+        # the error: it names the variable only.
+        hide_input_in_errors=True,
     )
 
     app_name: str = "antifaz"
@@ -91,6 +96,19 @@ class Settings(BaseSettings):
     # CPU threads of torch in EACH worker process; 0 lets torch choose (all cores). With several
     # workers, workers x threads should not pass the number of cores.
     ner_torch_threads: int = Field(default=0, ge=0, le=256)
+
+    # PostgreSQL for the virtual keys (issue 121, ADR-0021). Separate variables, never a DSN (a
+    # URL would carry the password into logs and errors). No host: PostgreSQL is off and
+    # Antifaz works as in v0.1. Only `antifaz db` (and from 8c `antifaz keys`) connects; the
+    # gateway checks them from 8d. sslmode: `verify-full` (TLS, certificate and host name
+    # checked against the system's CAs) or `disable` (only on a private network or loopback).
+    database_host: str | None = None
+    database_port: int = Field(default=5432, ge=1, le=65535)
+    database_name: str = "antifaz"
+    database_user: str = "antifaz"
+    database_password: SecretStr | None = None
+    database_sslmode: Literal["disable", "verify-full"] = "verify-full"
+    database_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
     @field_validator("allowed_hosts", "allowed_origins", "trusted_proxies", mode="before")
     @classmethod
@@ -215,6 +233,66 @@ def check_safe_to_start(settings: Settings) -> None:
         problem = proxy_network_problem(entry)  # a fixed message: never the entry itself
         if problem:
             raise UnsafeConfigError(f"ANTIFAZ_TRUSTED_PROXIES {problem}")
+
+
+def check_database_settings(settings: Settings) -> None:
+    """Raise UnsafeConfigError if the PostgreSQL settings cannot be used (PR 8b-1, ADR-0021).
+
+    Nothing to check while ANTIFAZ_DATABASE_HOST is unset (PostgreSQL off). With a host: the
+    host is a name or an address, never a URL, a DSN or a socket path (no "/" or "@"); the
+    password is set and is not the example value; the database and user names are not empty.
+    Messages name the variable, never the value. Not called by `serve` yet (the door, 8d).
+    """
+    host = settings.database_host
+    if host is None:
+        return
+    if not host.strip() or "/" in host or "@" in host or host != host.strip():
+        raise UnsafeConfigError(
+            "ANTIFAZ_DATABASE_HOST must be a host name or IP address, without '/' or '@' "
+            "(never a URL, a DSN or a socket path); remove the variable to turn PostgreSQL off"
+        )
+    password = settings.database_password
+    secret = password.get_secret_value() if password is not None else ""
+    if not secret:
+        raise UnsafeConfigError(
+            "ANTIFAZ_DATABASE_PASSWORD is missing: set it when ANTIFAZ_DATABASE_HOST is set"
+        )
+    if _is_example(secret):
+        raise UnsafeConfigError(
+            "ANTIFAZ_DATABASE_PASSWORD still has the example value from .env.example: "
+            "set your own random value"
+        )
+    for variable, value in (
+        ("ANTIFAZ_DATABASE_NAME", settings.database_name),
+        ("ANTIFAZ_DATABASE_USER", settings.database_user),
+    ):
+        if not value.strip():
+            raise UnsafeConfigError(f"{variable} is empty: set a value or remove the variable")
+
+
+DATABASE_TLS_OFF = (
+    "PostgreSQL: TLS off (ANTIFAZ_DATABASE_SSLMODE=disable) with a host that is not loopback: "
+    "the password and every query travel in clear text; use verify-full outside one machine"
+)
+
+
+def _is_loopback_host(host: str) -> bool:
+    """localhost, 127.0.0.0/8 or ::1 (a name other than localhost is never assumed local)."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def database_tls_warning(settings: Settings) -> str | None:
+    """A fixed warning when TLS is off for a host that is not loopback, else None. Never
+    connects and never names the host (doctor and `antifaz db` print it)."""
+    host = settings.database_host
+    if host is None or settings.database_sslmode != "disable" or _is_loopback_host(host):
+        return None
+    return DATABASE_TLS_OFF
 
 
 @lru_cache

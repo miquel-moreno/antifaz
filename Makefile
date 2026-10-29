@@ -3,7 +3,7 @@ PKG := antifaz
 UV_AUDIT := uvx --from uv==0.13.0 uv audit --frozen --preview-features audit-command
 ZIZMOR := uvx zizmor==1.30.1 --offline --persona auditor --format plain
 
-.PHONY: help install dev up down lint format typecheck test contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures panel-check panel-captures
+.PHONY: help install dev up down lint format typecheck test test-postgres contract e2e secrets check audit licenses bench workflows ner-model openapi demo design-check design-captures panel-check panel-captures
 
 help:
 	@echo "install    Install dependencies and git hooks"
@@ -13,7 +13,8 @@ help:
 	@echo "lint       Check style and common bugs (ruff)"
 	@echo "format     Auto-format the code (ruff)"
 	@echo "typecheck  Check types (mypy strict)"
-	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces)"
+	@echo "test       Tests with coverage (80 % overall, 90 % in the privacy pieces); POSTGRES=1 adds PostgreSQL"
+	@echo "test-postgres  The tests with a throwaway PostgreSQL 16 in Docker (the CI image)"
 	@echo "contract   Only the contract tests: official SDKs against Antifaz (no network)"
 	@echo "e2e        End-to-end: builds the image, runs init and Compose with a fake provider (needs Docker)"
 	@echo "secrets    Scan the git history for secrets (gitleaks, redacted)"
@@ -62,9 +63,17 @@ format:
 typecheck:
 	uv run mypy src evals
 
+# POSTGRES=1: also the PostgreSQL tests (needs TEST_POSTGRES_*; `make test-postgres` sets them).
+# Without it they are skipped and so is the 90 % rule of the db piece (CI always runs them).
 test:
-	uv run pytest --cov --cov-report=term-missing --cov-report=json
-	uv run python -m scripts.check_coverage
+	uv run pytest $(if $(POSTGRES),--postgres,) --cov --cov-report=term-missing --cov-report=json
+	uv run python -m scripts.check_coverage $(if $(POSTGRES),,--without db)
+
+# The tests with a throwaway PostgreSQL 16 in Docker: the image of CI (same digest, read from
+# ci.yml), on 127.0.0.1 and a free port, random password, removed at the end. ARGS=... runs
+# only those tests (without coverage), e.g. ARGS="tests/postgres -x".
+test-postgres:
+	uv run python -m scripts.postgres_tests $(ARGS)
 
 # Official OpenAI and Anthropic SDKs against Antifaz and a fake provider. `make test` (and so
 # `make check`) already runs them with the rest of tests/; this target is for a quick loop.

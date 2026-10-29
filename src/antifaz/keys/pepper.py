@@ -10,9 +10,10 @@ Rotation: a ring holds several versions and says which one is CURRENT (used for 
 Keys made with an older version keep working while that version stays in the ring; dropping a
 version makes its keys unknown. Losing every pepper makes every virtual key stop working.
 
-Rules: versions are positive integers; every pepper is `bytes` of at least MIN_PEPPER_BYTES and
-different from the others; the ring keeps its own copy. The pepper never appears in a repr, a
-str or an error, and the ring cannot be pickled or copied.
+Rules: versions are integers from 1 to MAX_PEPPER_VERSION (a PostgreSQL smallint, the same cap
+as KeyRecord); every pepper is `bytes` of at least MIN_PEPPER_BYTES and different from the
+others; the ring keeps its own copy. The pepper never appears in a repr, a str or an error, and
+the ring cannot be pickled or copied.
 
 Forbidden: logging a pepper, a key or a digest. Hashing without a pepper.
 """
@@ -22,11 +23,14 @@ import hmac
 from collections.abc import Mapping
 from typing import NoReturn
 
+from antifaz.keys.records import MAX_PEPPER_VERSION, is_pepper_version
+
 MIN_PEPPER_BYTES = 32
 
 
 def _is_version(value: object) -> bool:
-    return type(value) is int and value >= 1
+    """1 to MAX_PEPPER_VERSION: a version PostgreSQL can store (smallint)."""
+    return is_pepper_version(value)
 
 
 class PepperRing:
@@ -40,7 +44,9 @@ class PepperRing:
         copied: dict[int, bytes] = {}
         for version, pepper in peppers.items():
             if not _is_version(version):
-                raise ValueError("a key pepper version must be a positive integer")
+                raise ValueError(
+                    f"a key pepper version must be an integer from 1 to {MAX_PEPPER_VERSION}"
+                )
             if type(pepper) is not bytes:
                 raise TypeError("a key pepper must be bytes")
             if len(pepper) < MIN_PEPPER_BYTES:

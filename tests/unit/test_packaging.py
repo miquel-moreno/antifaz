@@ -79,3 +79,16 @@ def test_the_wheel_ships_every_language_catalog_and_nothing_else_there(
     assert shipped == catalogs
     for name in catalogs:
         assert wheel.read(prefix + name) == (I18N_DIR / name).read_bytes(), name
+
+
+def test_the_wheel_ships_every_migration_with_its_exact_bytes(wheel: zipfile.ZipFile) -> None:
+    """`antifaz db migrate` reads them from the installed package (PR 8b-1, ADR-0021)."""
+    folder = REPO / "src" / "antifaz" / "db" / "migrations"
+    files = sorted(folder.glob("*.sql"))
+    prefix = "antifaz/db/migrations/"
+    shipped = sorted(name for name in wheel.namelist() if name.startswith(prefix))
+
+    assert files
+    assert shipped == [prefix + path.name for path in files]
+    for path in files:
+        assert wheel.read(prefix + path.name) == path.read_bytes(), path.name

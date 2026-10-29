@@ -24,4 +24,5 @@ consecuencias. Se escriben como **Propuesta** y pasan a **Aceptada** cuando Miqu
 | [0017](0017-instalacion-y-secretos-en-la-cli.md) | Instalación y secretos en la CLI (`init`, imagen, `setup`) | Aceptada |
 | [0018](0018-el-panel-y-su-puerta.md) | El panel y su puerta | Aceptada |
 | [0019](0019-imagen-distroless.md) | La imagen de ejecución pasa a distroless | Aceptada |
-| [0020](0020-claves-virtuales.md) | Claves virtuales: formato `afz_`, HMAC con pepper versionado y límites en PostgreSQL | Propuesta |
+| [0020](0020-claves-virtuales.md) | Claves virtuales: formato `afz_`, HMAC con pepper versionado y límites en PostgreSQL (nota 2026-10-29: PostgreSQL en ADR-0021) | Propuesta |
+| [0021](0021-postgresql-conexion-esquema-y-migraciones.md) | PostgreSQL: conexión, esquema y migraciones | Propuesta |

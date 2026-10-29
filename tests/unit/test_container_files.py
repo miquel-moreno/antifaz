@@ -132,9 +132,19 @@ def test_the_image_has_a_healthcheck_without_curl_or_a_shell() -> None:
     # Exec form: there is no shell in the image to run a CMD-SHELL healthcheck.
     assert '["python", "-m", "antifaz.healthcheck"]' in healthcheck
     assert "CMD-SHELL" not in DOCKERFILE
-    # Nothing is installed with the system package manager (no curl, wget or shells added).
-    for line in _instructions("RUN"):
-        assert "apt-get" not in line and "apk " not in line, line
+    # Nothing that reaches the image is installed with the system package manager (no curl,
+    # wget or shells added). The only exception is binutils, pinned, in the build stage alone
+    # (8b-1: test_binutils_is_pinned_to_an_exact_version and _never_reaches_the_final_stage).
+    for stage in ("python", "runtime"):
+        for line in re.findall(r"^RUN\s+(.+)$", _stage(stage), re.MULTILINE):
+            assert "apt-get" not in line and "apk " not in line, line
+    for line in re.findall(r"^RUN\s+(.+)$", _stage("build"), re.MULTILINE):
+        assert "apk " not in line, line
+        for tool in ("curl", "wget", "bash", "busybox"):
+            assert tool not in line, (tool, line)
+        packages = re.findall(r"apt-get install\s+(?:-\S+\s+)*([^;]+)", line)
+        for package in packages:
+            assert re.fullmatch(r"binutils=\d[\w.+~:-]*", package.strip()), line
 
 
 def test_the_image_runs_the_antifaz_command_and_serves_by_default() -> None:
@@ -413,3 +423,65 @@ def test_the_same_uv_version_everywhere() -> None:
         (REPO / ".github/workflows/panel-webkit.yml").read_text(encoding="utf-8")
     )
     assert image[0] == ci["env"]["UV_VERSION"] == audit[0] == webkit["env"]["UV_VERSION"]
+
+
+# 8b-1 (ADR-0019, note of 2026-10-29): the compiled pieces of the virtualenv ship with their
+# debug sections (uvloop, asyncpg, yaml, httptools...). The build stage strips ONLY those
+# (`strip --strip-debug`: symbols and code stay) with binutils pinned to an exact Debian
+# version, and binutils never reaches the final stage. tests/e2e/test_image_imports.py checks
+# the built image: no .so of the virtualenv keeps a .debug_* section.
+_STRIP = re.compile(r"\bstrip\s+--strip-debug\b")
+
+
+def test_the_build_stage_strips_the_debug_sections_of_the_virtualenv() -> None:
+    build = _stage("build")
+    runs = re.findall(r"^RUN\s+(.+)$", build, re.MULTILINE)
+    stripping = [run for run in runs if _STRIP.search(run)]
+    assert len(stripping) == 1, runs
+    assert "/app/.venv" in stripping[0]
+    assert "*.so" in stripping[0]
+    # After the last `uv sync`: nothing installed later could bring unstripped pieces back.
+    syncs = [i for i, run in enumerate(runs) if "uv sync" in run]
+    assert syncs and runs.index(stripping[0]) > max(syncs)
+
+
+def test_nothing_but_the_debug_sections_is_ever_stripped() -> None:
+    for forbidden in ("--strip-all", "--strip-unneeded", "strip -s ", "strip -x ", "-Wl,-s"):
+        assert forbidden not in DOCKERFILE, forbidden
+    assert re.findall(r"\bstrip\s+(\S+)", DOCKERFILE) == ["--strip-debug"]
+
+
+def test_binutils_is_pinned_to_an_exact_version() -> None:
+    installs = [
+        run for run in re.findall(r"^RUN\s+(.+)$", _stage("build"), re.MULTILINE)
+        if "apt-get install" in run
+    ]  # fmt: skip
+    assert len(installs) == 1, installs
+    assert re.search(r"--no-install-recommends\s+binutils=\d[\w.+~:-]*(\s|;|$)", installs[0])
+    assert "apt-get upgrade" not in DOCKERFILE
+
+
+def test_binutils_never_reaches_the_final_stage() -> None:
+    assert "binutils" not in _stage("runtime")
+    assert "binutils" not in _stage("python")
+    assert "strip" not in _stage("runtime")
+
+
+def test_binutils_is_installed_before_the_dependencies_and_stripping_comes_last() -> None:
+    """Review of 8b-1: the install has its own RUN before the first COPY of dependencies or code
+    (its layer is cached and never rebuilt for a code change), and the strip has its own RUN
+    after the last `uv sync`."""
+    build = _stage("build")
+    lines = [line.strip() for line in build.splitlines() if re.match(r"^(RUN|COPY)\s", line)]
+    install = [i for i, line in enumerate(lines) if "apt-get install" in line]
+    strip = [i for i, line in enumerate(lines) if _STRIP.search(line)]
+    copies = [
+        i for i, line in enumerate(lines) if line.startswith("COPY ") and "--from=" not in line
+    ]
+    syncs = [i for i, line in enumerate(lines) if "uv sync" in line]
+
+    assert len(install) == 1 and len(strip) == 1, lines
+    assert install[0] != strip[0]  # two separate RUN instructions
+    assert copies and install[0] < min(copies), lines
+    assert strip[0] > max(syncs), lines
+    assert "binutils" not in lines[strip[0]]

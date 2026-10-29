@@ -19,6 +19,7 @@ Las dependencias se declaran sin tope superior (`>=`); las versiones exactas que
 | anyio | MIT | Ya venía con Starlette y httpx; se declara porque el streaming (parte 5c) la usa directamente para cerrar la conexión con el proveedor aunque el cliente se vaya (`CancelScope(shield=True)`). |
 | jinja2 | BSD-3-Clause (sus metadatos: «BSD License») | Plantillas del panel (ADR-0018, PR 11c-1), con autoescape. Versión 3.1.6 en `uv.lock`. Antes solo llegaba con el extra `ner` (por torch); ahora es directa y se distribuye siempre, así que sale de `RECORDED_EXTRA` y se comprueba con sus metadatos instalados. |
 | markupsafe | BSD-3-Clause | Llega con jinja2 (el escape de las plantillas). Versión 3.0.3 en `uv.lock`. Igual que jinja2: ya no es solo del extra `ner`. |
+| asyncpg | Apache-2.0 (metadatos leídos el 2026-10-29) | PostgreSQL para las claves virtuales (issue 121, PR 8b-1, [ADR-0021](adr/0021-postgresql-conexion-esquema-y-migraciones.md)). Versión 0.32.0 en `uv.lock`, sin dependencias nuevas en Python 3.12. Va en la rueda y en la imagen, pero solo la cargan `antifaz db` y (desde 8c) `antifaz keys`. Su rueda para Linux trae dentro su código compilado (Cython) y nada de libpq. |
 
 ## Dependencias transitivas nuevas
 

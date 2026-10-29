@@ -33,6 +33,11 @@ from typing import Any, NoReturn, TypeGuard
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
 HASH_BYTES = 32  # SHA-256
+# Common caps of every store (8b-1, D14): what PostgreSQL can hold, so the memory store and the
+# PostgreSQL store refuse exactly the same records. Limits are `integer` columns, the pepper
+# version a `smallint`.
+MAX_LIMIT = 2_147_483_647
+MAX_PEPPER_VERSION = 32_767
 # Unicode categories never allowed in a key name: controls (Cc), invisible format characters
 # such as the bidi controls and the zero-width ones (Cf), line and paragraph separators (Zl, Zp),
 # surrogates (Cs), private use (Co) and unassigned code points (Cn).
@@ -156,9 +161,14 @@ def check_scopes(scopes: object) -> None:
         raise TypeError("every key scope must be a Scope")
 
 
+def is_pepper_version(value: object) -> TypeGuard[int]:
+    """1 to MAX_PEPPER_VERSION, a real int (True is not a version)."""
+    return is_positive_int(value) and value <= MAX_PEPPER_VERSION
+
+
 def check_limit(limit: object) -> None:
-    if limit is not None and not is_positive_int(limit):
-        raise ValueError("a key limit must be a positive integer or None")
+    if limit is not None and not (is_positive_int(limit) and limit <= MAX_LIMIT):
+        raise ValueError(f"a key limit must be an integer from 1 to {MAX_LIMIT}, or None")
 
 
 def _check_record(
@@ -188,8 +198,8 @@ def _check_record(
         raise ValueError("revoked_at cannot be before created_at")
     if type(key_hash) is not bytes or len(key_hash) != HASH_BYTES:
         raise ValueError(f"a key hash must be {HASH_BYTES} bytes")
-    if not is_positive_int(pepper_version):
-        raise ValueError("a pepper version must be a positive integer")
+    if not is_pepper_version(pepper_version):
+        raise ValueError(f"a pepper version must be an integer from 1 to {MAX_PEPPER_VERSION}")
     check_limit(per_minute_limit)
     check_limit(per_day_limit)
 
@@ -358,7 +368,9 @@ __all__ = [
     "DEFAULT_LIFETIME",
     "FORBIDDEN_NAME_CATEGORIES",
     "HASH_BYTES",
+    "MAX_LIMIT",
     "MAX_NAME_LENGTH",
+    "MAX_PEPPER_VERSION",
     "Caller",
     "CreatedKey",
     "Expiry",

@@ -432,6 +432,41 @@ print(json.dumps({'status': answer.status, 'headers': headers,
                   'body': base64.b64encode(body).decode()}))
 """
 
+# The section names of every compiled piece (ELF shared object) under argv[1], read from the ELF
+# headers with the standard library only (the image has no binutils): one line per file,
+# "<path> <name> <name>...", then "files <count>". Symlinks are skipped; anything that is not a
+# 64-bit ELF file is printed as "not-elf64 <path>" (8b-1, ADR-0019 note of 2026-10-29).
+ELF_SECTIONS = """
+import os, struct, sys
+count = 0
+for top, dirs, files in os.walk(sys.argv[1]):
+    for name in sorted(files):
+        if not (name.endswith('.so') or '.so.' in name):
+            continue
+        path = os.path.join(top, name)
+        if os.path.islink(path):
+            continue
+        with open(path, 'rb') as handle:
+            data = handle.read()
+        if data[:4] != b'\\x7fELF' or data[4] != 2:
+            print('not-elf64', path)
+            continue
+        order = '<' if data[5] == 1 else '>'
+        (table,) = struct.unpack_from(order + 'Q', data, 0x28)
+        size, number, names_index = struct.unpack_from(order + 'HHH', data, 0x3A)
+        def header(index):
+            return struct.unpack_from(order + 'IIQQQQIIQQ', data, table + index * size)
+        names_offset = header(names_index)[4]
+        names = set()
+        for index in range(number):
+            start = names_offset + header(index)[0]
+            names.add(data[start:data.index(b'\\0', start)].decode('ascii', 'replace'))
+        names.discard('')
+        count += 1
+        print(path, ' '.join(sorted(names)))
+print('files', count)
+"""
+
 # No network, read-only image, no capabilities: the probes need none of them.
 HARDENED = ["--network", "none", "--read-only", "--cap-drop", "ALL"]
 HARDENED += ["--security-opt", "no-new-privileges"]

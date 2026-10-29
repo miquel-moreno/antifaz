@@ -82,3 +82,12 @@ Los PR del issue: 8a (esta librería, sin conectar a nada), 8b (PostgreSQL), 8c 
 - Hay un secreto nuevo que guardar (el pepper), con su copia de seguridad aparte.
 - Los límites por minuto pueden llegar al doble en el cambio de minuto, y el día del límite no es el día local.
 - Pendiente para el ítem 9: separar roles de la base de datos (hoy uno solo) y enlazar el número de la clave con las evidencias. Esta ficha se enmendará entonces.
+
+## Nota del 2026-10-29 (PR 8b-1)
+
+La base de PostgreSQL está en [ADR-0021](0021-postgresql-conexion-esquema-y-migraciones.md) (propuesta): ajustes separados sin DSN, errores cerrados, migraciones propias y la tabla `virtual_keys` con la columna de la versión del pepper, sus `CHECK` y disparadores que impiden borrar claves o cambiar su número, su hash, su versión del pepper, su creación o una revocación. Dos cambios que tocan esta ficha:
+
+- **Topes comunes** de los dos almacenes: los límites por minuto y por día van de 1 a 2 147 483 647 (`integer`) y la versión del pepper de 1 a 32 767 (`smallint`). `KeyRecord`, `MemoryKeyStore` y `PepperRing` rechazan lo que pase de ahí, igual que PostgreSQL.
+- Las reglas Unicode completas del nombre se quedan en Python; SQL repite solo una parte (ADR-0021, «hueco documentado»). El almacén de PostgreSQL (8b-2) comprobará cada nombre en Python antes de escribirlo.
+
+Esta ficha sigue como **Propuesta**.

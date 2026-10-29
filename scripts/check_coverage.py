@@ -4,11 +4,13 @@ ANTIFAZ spec 5.2 and issue 2.
 
 Reads coverage.json (pytest --cov-report=json). Pieces without code yet are skipped.
 
-    uv run python -m scripts.check_coverage
+    uv run python -m scripts.check_coverage [--without db]
 """
 
+import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +27,9 @@ MINIMUMS = {
     "api": 90.0,
     "web": 90.0,
     "keys": 90.0,
+    # PostgreSQL (PR 8b-1): only measured when its tests ran (--postgres, CI and
+    # `make test-postgres`); a local `make test` passes --without db.
+    "db": 90.0,
 }
 
 
@@ -43,9 +48,12 @@ def piece_coverage(report: dict[str, object], piece: str) -> tuple[int, int]:
     return covered, statements
 
 
-def check(report: dict[str, object]) -> list[str]:
+def check(report: dict[str, object], without: frozenset[str] = frozenset()) -> list[str]:
     problems = []
     for piece, minimum in MINIMUMS.items():
+        if piece in without:
+            print(f"{piece:<18} skipped (--without)")
+            continue
         covered, statements = piece_coverage(report, piece)
         if statements == 0:
             print(f"{piece:<18} no code yet")
@@ -57,16 +65,25 @@ def check(report: dict[str, object]) -> list[str]:
     return problems
 
 
-def main(path: Path = ROOT / "coverage.json") -> int:
+def main(path: Path = ROOT / "coverage.json", without: frozenset[str] = frozenset()) -> int:
     if not path.exists():
         print(f"{path.name} not found: run the tests with --cov-report=json first", file=sys.stderr)
         return 1
-    problems = check(json.loads(path.read_text(encoding="utf-8")))
+    problems = check(json.loads(path.read_text(encoding="utf-8")), without)
     if problems:
         print("Privacy coverage too low:\n- " + "\n- ".join(problems), file=sys.stderr)
         return 1
     return 0
 
 
+def run(argv: Sequence[str], path: Path = ROOT / "coverage.json") -> int:
+    """`--without db`: skip a piece whose tests did not run (local `make test` without
+    PostgreSQL, PR 8b-1). CI never passes it. Unknown pieces are a usage error (exit 2)."""
+    parser = argparse.ArgumentParser(prog="python -m scripts.check_coverage")
+    parser.add_argument("--without", action="append", choices=sorted(MINIMUMS), default=[])
+    arguments = parser.parse_args(list(argv))
+    return main(path, frozenset(arguments.without))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run(sys.argv[1:]))

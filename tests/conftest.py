@@ -30,6 +30,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="run the end-to-end tests (Docker Compose, tests/e2e): `make e2e`",
     )
     parser.addoption(
+        "--postgres",
+        action="store_true",
+        default=False,
+        help="run the tests against a real PostgreSQL 16 (TEST_POSTGRES_* variables; "
+        "`make test-postgres`). With the option and no database they FAIL, never skip",
+    )
+    parser.addoption(
         "--panel",
         action="store_true",
         default=False,
@@ -69,12 +76,18 @@ def panel_browsers(config: pytest.Config) -> list[str]:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Tests marked `ner_model` need the real model (issue 6b): skipped unless it is there.
-    Tests marked `e2e` need Docker and only run with --e2e (`make e2e`, issue 7a)."""
+    Tests marked `e2e` need Docker and only run with --e2e (`make e2e`, issue 7a).
+    Tests marked `postgres` need a real PostgreSQL and only run with --postgres (PR 8b-1)."""
     skip_e2e = pytest.mark.skip(reason="end-to-end test with Docker: run `make e2e`")
     if not config.getoption("--e2e"):
         for item in items:
             if "e2e" in item.keywords:
                 item.add_marker(skip_e2e)
+    skip_postgres = pytest.mark.skip(reason="needs PostgreSQL: run `make test-postgres`")
+    if not config.getoption("--postgres"):
+        for item in items:
+            if "postgres" in item.keywords:
+                item.add_marker(skip_postgres)
     if os.environ.get("ANTIFAZ_NER_MODEL_DIR"):
         return
     skip = pytest.mark.skip(reason="needs the real NER model: set ANTIFAZ_NER_MODEL_DIR")

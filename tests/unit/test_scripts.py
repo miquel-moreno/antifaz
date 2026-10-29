@@ -1,6 +1,7 @@
 """The CI helper scripts: license rule, privacy-coverage rule and the design-check server."""
 
 import http.client
+import json
 import subprocess
 from collections.abc import Iterator
 from importlib import metadata
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from scripts import check_licenses
-from scripts.check_coverage import check, main
+from scripts.check_coverage import check, main, run
 from scripts.check_licenses import Verdict, classify, documented_packages
 
 
@@ -68,6 +69,33 @@ def test_the_virtual_keys_are_a_privacy_piece() -> None:
     report = coverage_report({"src/antifaz/keys/store.py": (85, 100)})
 
     assert check(report) == ["keys: 85.0 % < 90 %"]
+
+
+def test_the_database_code_is_a_privacy_piece() -> None:
+    report = coverage_report({"src/antifaz/db/connect.py": (85, 100)})
+
+    assert check(report) == ["db: 85.0 % < 90 %"]
+
+
+def test_a_piece_can_be_left_out_when_its_tests_did_not_run(tmp_path: Path) -> None:
+    """`make test` without PostgreSQL: the db piece is skipped (CI never passes --without)."""
+    path = tmp_path / "coverage.json"
+    report = coverage_report({"src/antifaz/db/connect.py": (10, 100)})
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    assert check(report, without=frozenset({"db"})) == []
+    assert run(["--without", "db"], path) == 0
+    assert run([], path) == 1
+
+
+@pytest.mark.parametrize("argv", [["--without", "nothing"], ["--without"], ["--other"]])
+def test_an_unknown_piece_or_option_is_refused(tmp_path: Path, argv: list[str]) -> None:
+    path = tmp_path / "coverage.json"
+    path.write_text(json.dumps(coverage_report({})), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as stop:
+        run(argv, path)
+    assert stop.value.code == 2
 
 
 def test_paths_outside_the_package_do_not_count() -> None:
