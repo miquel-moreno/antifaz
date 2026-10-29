@@ -8,21 +8,24 @@ fails half-way, the frames of antifaz.keys in the traceback no longer hold the k
 """
 
 import base64
+import dataclasses
 import gc
 import logging
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
+from pydantic.errors import PydanticSchemaGenerationError
 
 import antifaz.keys
 from antifaz.api.key_fragments import KeyFragments
 from antifaz.keys import pepper as pepper_module
 from antifaz.keys.format import MalformedKeyError, parse_key
 from antifaz.keys.pepper import PepperRing
-from antifaz.keys.records import Scope, Verified
+from antifaz.keys.records import HASH_BYTES, CreatedKey, KeyRecord, Scope, Verified
 from antifaz.keys.store import MemoryKeyStore
 
 PACKAGE = Path(antifaz.keys.__file__).resolve().parent
@@ -234,6 +237,101 @@ async def test_a_failing_hash_during_create_leaves_no_key_in_the_traceback(
     assert frames
     assert not any(_holds_a_key(frame) for frame in frames)
     assert await store.list() == ()
+
+
+# --- generic tools cannot reach the secrets (dataclasses, pydantic) ---------------------------
+
+
+def _reached(action: Callable[[], object], secret: str) -> bool:
+    """True if `action` succeeds and its result reaches `secret` (raising is fine)."""
+    try:
+        result = action()
+    except (TypeError, ValueError, AttributeError, PydanticSchemaGenerationError):
+        return False
+    return any(secret in text for text in _texts_reachable_from(result))
+
+
+async def test_dataclass_and_pydantic_tools_never_yield_the_clear_key() -> None:
+    store = _store()
+    created = await store.create("app", ALL_SCOPES)
+    key = created.key
+
+    actions: list[Callable[[], object]] = [
+        lambda: dataclasses.asdict(created),  # type: ignore[call-overload]
+        lambda: dataclasses.astuple(created),  # type: ignore[call-overload]
+        lambda: dataclasses.replace(created),  # type: ignore[type-var]
+        lambda: TypeAdapter(CreatedKey).dump_python(created),
+        lambda: TypeAdapter(CreatedKey).dump_json(created),
+    ]
+    for action in actions:
+        assert not _reached(action, key)
+
+
+async def test_dataclass_and_pydantic_tools_never_yield_the_hash() -> None:
+    store = _store()
+    record = (await store.create("app", ALL_SCOPES)).record
+    secret = record.key_hash.decode("latin-1")
+
+    actions: list[Callable[[], object]] = [
+        lambda: dataclasses.asdict(record),
+        lambda: dataclasses.astuple(record),
+        lambda: dataclasses.replace(record, name="other"),
+        lambda: TypeAdapter(KeyRecord).dump_python(record),
+        lambda: TypeAdapter(KeyRecord).dump_json(record),
+    ]
+    for action in actions:
+        assert not _reached(action, secret)
+    assert record.key_hash.hex() not in str(TypeAdapter(KeyRecord).dump_json(record))
+
+
+async def test_a_created_key_is_compared_and_hashed_by_identity_never_by_the_key() -> None:
+    store = _store()
+    created = await store.create("app", ALL_SCOPES)
+    twin = CreatedKey(created.key, created.record)
+
+    assert created != twin
+    assert created == created
+    assert type(created).__eq__ is object.__eq__
+    assert type(created).__hash__ is object.__hash__
+
+
+CANARY_HASH = bytes(range(100, 100 + HASH_BYTES))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"name": ""},
+        {"id": 0},
+        {"scopes": frozenset()},
+        {"expires_at": START},
+        {"pepper_version": 0},
+        {"per_day_limit": -1},
+    ],
+)
+def test_a_record_that_fails_to_build_leaves_no_hash_in_the_library_frames(
+    bad: dict[str, object],
+) -> None:
+    fields: dict[str, object] = {
+        "id": 1,
+        "name": "app",
+        "scopes": ALL_SCOPES,
+        "created_at": START,
+        "expires_at": None,
+        "revoked_at": None,
+        "key_hash": CANARY_HASH,
+        "pepper_version": 1,
+    }
+    fields.update(bad)
+
+    with pytest.raises((ValueError, TypeError)) as caught:
+        KeyRecord(**fields)  # type: ignore[arg-type]
+
+    secret = CANARY_HASH.decode("latin-1")
+    for frame in _keys_frames(caught.value):
+        for value in frame.f_locals.values():
+            assert all(secret not in text for text in _texts_reachable_from(value))
+    assert caught.value.__context__ is None
 
 
 async def test_a_malformed_key_error_carries_nothing_of_the_text() -> None:
