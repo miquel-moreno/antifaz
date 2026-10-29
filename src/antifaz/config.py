@@ -217,6 +217,11 @@ def check_safe_to_start(settings: Settings) -> None:
             raise UnsafeConfigError(f"ANTIFAZ_TRUSTED_PROXIES {problem}")
 
 
+def check_database_settings(settings: Settings) -> None:
+    """Stub (red): PR 8b-1."""
+    raise NotImplementedError
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

@@ -68,5 +68,10 @@ def main(path: Path = ROOT / "coverage.json") -> int:
     return 0
 
 
+def run(argv: list[str], path: Path = ROOT / "coverage.json") -> int:
+    """Stub (red): PR 8b-1."""
+    raise NotImplementedError
+
+
 if __name__ == "__main__":
     sys.exit(main())

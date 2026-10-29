@@ -33,6 +33,8 @@ from typing import Any, NoReturn, TypeGuard
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
 HASH_BYTES = 32  # SHA-256
+MAX_LIMIT = 2_147_483_647  # stub (red): not enforced yet
+MAX_PEPPER_VERSION = 32_767  # stub (red): not enforced yet
 # Unicode categories never allowed in a key name: controls (Cc), invisible format characters
 # such as the bidi controls and the zero-width ones (Cf), line and paragraph separators (Zl, Zp),
 # surrogates (Cs), private use (Co) and unassigned code points (Cn).
