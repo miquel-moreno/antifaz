@@ -10,6 +10,7 @@
   categories Cc, Cf, Zl, Zp, Cs, Co, Cn), 1 to 64 characters and no whitespace at either end.
 """
 
+import asyncio
 import unicodedata
 from datetime import UTC, datetime
 
@@ -73,14 +74,17 @@ def test_every_base62_body_makes_a_key_that_parses(body: str) -> None:
 def test_every_created_key_verifies_to_its_own_id_and_scopes(
     wanted: list[tuple[str, frozenset[Scope]]],
 ) -> None:
-    store = _store()
-    created = [store.create(name, scopes) for name, scopes in wanted]
+    async def run() -> None:
+        store = _store()
+        created = [await store.create(name, scopes) for name, scopes in wanted]
 
-    for number, item in enumerate(created, start=1):
-        result = store.verify(item.key)
-        assert isinstance(result, Verified)
-        assert result.caller.key_id == number
-        assert result.caller.scopes == wanted[number - 1][1]
+        for number, item in enumerate(created, start=1):
+            result = await store.verify(item.key)
+            assert isinstance(result, Verified)
+            assert result.caller.key_id == number
+            assert result.caller.scopes == wanted[number - 1][1]
+
+    asyncio.run(run())
 
 
 single_changes = st.tuples(
@@ -105,12 +109,16 @@ def _changed(key: str, position: int, how: str, character: str) -> str:
 def test_any_single_character_change_of_a_created_key_is_refused_as_malformed(
     change: tuple[int, str, str],
 ) -> None:
-    store = _store()
-    key = store.create("app", {Scope.SCAN}).key
-    changed = _changed(key, *change)
+    async def run() -> str:
+        store = _store()
+        key = (await store.create("app", {Scope.SCAN})).key
+        changed = _changed(key, *change)
 
-    assert changed != key
-    assert store.verify(changed) == Refused(RefusalReason.MALFORMED)
+        assert changed != key
+        assert await store.verify(changed) == Refused(RefusalReason.MALFORMED)
+        return changed
+
+    changed = asyncio.run(run())
     try:
         parse_key(changed)
     except MalformedKeyError:
@@ -170,10 +178,12 @@ def test_any_accepted_name_has_no_control_or_invisible_character(name: str) -> N
 @settings(max_examples=500)
 @given(anything)
 def test_verify_never_raises_and_refuses_what_it_does_not_know(value: object) -> None:
-    store = _store()
-    store.create("app", {Scope.SCAN})
+    async def run() -> object:
+        store = _store()
+        await store.create("app", {Scope.SCAN})
+        return await store.verify(value)
 
-    result = store.verify(value)
+    result = asyncio.run(run())
 
     assert isinstance(result, Refused)
     assert result.reason in {RefusalReason.MALFORMED, RefusalReason.UNKNOWN}

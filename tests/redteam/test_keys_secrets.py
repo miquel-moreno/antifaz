@@ -63,15 +63,15 @@ def _renderings(value: object) -> list[str]:
     return [repr(value), str(value), f"{value}", f"{value!r}", "%r" % (value,), "%s" % (value,)]  # noqa: UP031
 
 
-def test_no_object_of_the_package_shows_the_key_its_hash_or_the_pepper(
+async def test_no_object_of_the_package_shows_the_key_its_hash_or_the_pepper(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     store = _store()
-    created = store.create("canary-app", ALL_SCOPES, per_minute_limit=5)
+    created = await store.create("canary-app", ALL_SCOPES, per_minute_limit=5)
     key, key_hash = created.key, created.record.key_hash
-    verified = store.verify(key)
-    refused = store.verify(key[:-1])
-    revoked = store.revoke(1)
+    verified = await store.verify(key)
+    refused = await store.verify(key[:-1])
+    revoked = await store.revoke(1)
     try:
         parse_key(key[:-1])
     except MalformedKeyError as error:
@@ -83,8 +83,8 @@ def test_no_object_of_the_package_shows_the_key_its_hash_or_the_pepper(
         refused,
         revoked,
         store,
-        store.list(),
-        store.get(1),
+        await store.list(),
+        await store.get(1),
         PepperRing({1: PEPPER}, current=1),
         malformed,
     ]
@@ -107,11 +107,11 @@ def test_no_object_of_the_package_shows_the_key_its_hash_or_the_pepper(
     _assert_clean(caplog.text, key, key_hash)
 
 
-def test_the_record_name_is_not_in_its_repr() -> None:
+async def test_the_record_name_is_not_in_its_repr() -> None:
     store = _store()
-    created = store.create("Secret project name", ALL_SCOPES)
+    created = await store.create("Secret project name", ALL_SCOPES)
 
-    for value in (created, created.record, store.list()):
+    for value in (created, created.record, await store.list()):
         assert "Secret project name" not in repr(value)
 
 
@@ -139,12 +139,12 @@ def _texts_reachable_from(root: object) -> list[str]:
     return found
 
 
-def test_the_store_keeps_only_hashes_after_create_and_verify() -> None:
+async def test_the_store_keeps_only_hashes_after_create_and_verify() -> None:
     store = _store()
-    keys = [store.create(f"app-{n}", ALL_SCOPES).key for n in range(3)]
+    keys = [(await store.create(f"app-{n}", ALL_SCOPES)).key for n in range(3)]
     for key in keys:
-        assert isinstance(store.verify(key), Verified)
-        store.verify(key[:-1])
+        assert isinstance(await store.verify(key), Verified)
+        await store.verify(key[:-1])
 
     texts = _texts_reachable_from(store)
 
@@ -154,12 +154,12 @@ def test_the_store_keeps_only_hashes_after_create_and_verify() -> None:
         assert all(key[4:24] not in text for text in texts)
 
 
-def test_records_and_callers_hold_no_clear_key() -> None:
+async def test_records_and_callers_hold_no_clear_key() -> None:
     store = _store()
-    created = store.create("app", ALL_SCOPES)
-    verified = store.verify(created.key)
+    created = await store.create("app", ALL_SCOPES)
+    verified = await store.verify(created.key)
 
-    for root in (created.record, verified, store.list()):
+    for root in (created.record, verified, await store.list()):
         assert all(created.key not in text for text in _texts_reachable_from(root))
 
 
@@ -183,16 +183,16 @@ def _holds_a_key(frame: types.FrameType) -> bool:
     return False
 
 
-def test_a_failing_clock_during_verify_leaves_no_key_in_the_traceback() -> None:
+async def test_a_failing_clock_during_verify_leaves_no_key_in_the_traceback() -> None:
     store = _store()
-    key = store.create("app", ALL_SCOPES).key
+    key = (await store.create("app", ALL_SCOPES)).key
 
     def broken_clock() -> datetime:
         raise RuntimeError("clock broke")
 
-    failing = MemoryKeyStore(PepperRing({1: PEPPER}, current=1), broken_clock, store.list())
+    failing = MemoryKeyStore(PepperRing({1: PEPPER}, current=1), broken_clock, await store.list())
     with pytest.raises(RuntimeError) as caught:
-        failing.verify(key)
+        await failing.verify(key)
 
     frames = list(_keys_frames(caught.value))
     assert frames
@@ -200,25 +200,25 @@ def test_a_failing_clock_during_verify_leaves_no_key_in_the_traceback() -> None:
     assert key not in str(caught.value)
 
 
-def test_a_failing_hash_during_verify_leaves_no_key_in_the_traceback(
+async def test_a_failing_hash_during_verify_leaves_no_key_in_the_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _store()
-    key = store.create("app", ALL_SCOPES).key
+    key = (await store.create("app", ALL_SCOPES)).key
 
     def broken_hmac(*_: object, **__: object) -> object:
         raise RuntimeError("hash broke")
 
     monkeypatch.setattr(pepper_module.hmac, "new", broken_hmac)
     with pytest.raises(RuntimeError) as caught:
-        store.verify(key)
+        await store.verify(key)
 
     frames = list(_keys_frames(caught.value))
     assert frames
     assert not any(_holds_a_key(frame) for frame in frames)
 
 
-def test_a_failing_hash_during_create_leaves_no_key_in_the_traceback(
+async def test_a_failing_hash_during_create_leaves_no_key_in_the_traceback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _store()
@@ -228,17 +228,17 @@ def test_a_failing_hash_during_create_leaves_no_key_in_the_traceback(
 
     monkeypatch.setattr(pepper_module.hmac, "new", broken_hmac)
     with pytest.raises(RuntimeError) as caught:
-        store.create("app", ALL_SCOPES)
+        await store.create("app", ALL_SCOPES)
 
     frames = list(_keys_frames(caught.value))
     assert frames
     assert not any(_holds_a_key(frame) for frame in frames)
-    assert store.list() == ()
+    assert await store.list() == ()
 
 
-def test_a_malformed_key_error_carries_nothing_of_the_text() -> None:
+async def test_a_malformed_key_error_carries_nothing_of_the_text() -> None:
     store = _store()
-    key = store.create("app", ALL_SCOPES).key
+    key = (await store.create("app", ALL_SCOPES)).key
 
     with pytest.raises(MalformedKeyError) as caught:
         parse_key(key + "x")

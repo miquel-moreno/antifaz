@@ -85,13 +85,13 @@ def test_a_control_or_invisible_character_is_refused_at_the_start_middle_and_end
 
 
 @pytest.mark.parametrize("character", REFUSED, ids=ascii)
-def test_the_store_refuses_the_name_and_keeps_nothing(character: str) -> None:
+async def test_the_store_refuses_the_name_and_keeps_nothing(character: str) -> None:
     store = MemoryKeyStore(PepperRing({1: PEPPER}, current=1), lambda: START)
 
     with pytest.raises(ValueError, match="control or invisible"):
-        store.create("ap" + character + "p", {Scope.SCAN})
+        await store.create("ap" + character + "p", {Scope.SCAN})
 
-    assert store.list() == ()
+    assert await store.list() == ()
 
 
 @pytest.mark.parametrize(
