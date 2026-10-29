@@ -163,6 +163,23 @@ async def test_a_newer_schema_is_ahead_and_never_migrated(schema: Schema) -> Non
     assert caught.value.problem is DatabaseProblem.AHEAD
 
 
+async def test_a_long_version_table_is_read_with_a_limit_and_is_ahead(schema: Schema) -> None:
+    session = await migrated(schema)
+    raw = await schema.raw()
+    await raw.executemany(
+        "INSERT INTO antifaz_schema_version (version, checksum) VALUES ($1, $2)",
+        [(version, bytes(32)) for version in range(SCHEMA_VERSION + 1, SCHEMA_VERSION + 200)],
+    )
+    await raw.close()
+    try:
+        result = await check_database(session)
+    finally:
+        await session.close()
+
+    assert result.problem is DatabaseProblem.AHEAD
+    assert result.version == SCHEMA_VERSION + 1  # only one row past the known files was read
+
+
 async def test_checking_an_unmigrated_database_creates_nothing(schema: Schema) -> None:
     session = await connect(schema.settings())
     try:
@@ -465,8 +482,14 @@ async def test_the_id_cannot_change(schema: Schema) -> None:
     raw = await schema.raw()
     try:
         key_id = await insert(raw)
-        with pytest.raises(asyncpg.PostgresError):
+        # A new value is refused by GENERATED ALWAYS itself, before the trigger runs...
+        with pytest.raises(asyncpg.GeneratedAlwaysError):
             await raw.execute("UPDATE virtual_keys SET id = id + 100 WHERE id = $1", key_id)
+        # ...but DEFAULT is allowed by the identity (the next number): only the trigger stops it.
+        with pytest.raises(asyncpg.IntegrityConstraintViolationError) as caught:
+            await raw.execute("UPDATE virtual_keys SET id = DEFAULT WHERE id = $1", key_id)
+        assert not isinstance(caught.value, asyncpg.GeneratedAlwaysError)
+        assert await raw.fetchval("SELECT id FROM virtual_keys") == key_id
     finally:
         await raw.close()
 

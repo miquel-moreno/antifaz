@@ -232,3 +232,62 @@ def test_doctor_names_a_bad_database_setting_as_a_failure(
     assert "PostgreSQL: ANTIFAZ_DATABASE_" in result.out
     assert "user@db.internal" not in result.everything
     assert "change-me" not in result.everything
+
+
+TLS_OFF = "PostgreSQL: TLS off (ANTIFAZ_DATABASE_SSLMODE=disable)"
+
+
+@pytest.mark.parametrize("host", ["db.internal", "10.0.0.5", "192.168.1.20", "fd00::5"])
+def test_doctor_warns_when_tls_is_off_for_a_remote_host(
+    monkeypatch: pytest.MonkeyPatch, healthy_gateway: None, run: Any, host: str
+) -> None:
+    configure(monkeypatch, canary("pw"), ANTIFAZ_DATABASE_HOST=host)
+
+    result = run("doctor")
+
+    assert TLS_OFF in result.out
+    assert "warning:" in result.out.split(TLS_OFF)[0].splitlines()[-1]
+    assert host not in result.out
+    assert result.code == 0  # a warning, not a failure
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.8.9.10", "::1", "localhost", "LOCALHOST"])
+def test_doctor_does_not_warn_for_a_loopback_host(
+    monkeypatch: pytest.MonkeyPatch, healthy_gateway: None, run: Any, host: str
+) -> None:
+    configure(monkeypatch, canary("pw"), ANTIFAZ_DATABASE_HOST=host)
+
+    assert TLS_OFF not in run("doctor").out
+
+
+def test_doctor_does_not_warn_with_verify_full(
+    monkeypatch: pytest.MonkeyPatch, healthy_gateway: None, run: Any
+) -> None:
+    configure(
+        monkeypatch,
+        canary("pw"),
+        ANTIFAZ_DATABASE_HOST="db.internal",
+        ANTIFAZ_DATABASE_SSLMODE="verify-full",
+    )
+
+    assert TLS_OFF not in run("doctor").out
+
+
+def test_db_status_warns_when_tls_is_off_for_a_remote_host(
+    monkeypatch: pytest.MonkeyPatch, run: Any
+) -> None:
+    """Printed before connecting (here the connection itself is refused by the test guard)."""
+    configure(monkeypatch, canary("pw"), ANTIFAZ_DATABASE_HOST="db.internal")
+
+    result = run("db", "status")
+
+    assert TLS_OFF in result.err
+    assert "db.internal" not in result.everything
+
+
+def test_db_status_does_not_warn_for_a_loopback_host(
+    monkeypatch: pytest.MonkeyPatch, run: Any
+) -> None:
+    configure(monkeypatch, canary("pw"))
+
+    assert TLS_OFF not in run("db", "status").err

@@ -389,3 +389,48 @@ def test_the_tls_context_verifies_the_certificate_and_the_host_name() -> None:
     assert context.check_hostname is True
     assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
     assert tls_context("disable") is False
+
+
+@pytest.mark.parametrize(
+    ("changes", "variable"),
+    [
+        ({"database_host": "/run/postgresql"}, "ANTIFAZ_DATABASE_HOST"),
+        ({"database_host": "user@db.internal"}, "ANTIFAZ_DATABASE_HOST"),
+        ({"database_host": "postgresql://u:p@db.internal/x"}, "ANTIFAZ_DATABASE_HOST"),
+        ({"database_password": SecretStr("")}, "ANTIFAZ_DATABASE_PASSWORD"),
+        ({"database_password": None}, "ANTIFAZ_DATABASE_PASSWORD"),
+        ({"database_password": SecretStr("change-me")}, "ANTIFAZ_DATABASE_PASSWORD"),
+        ({"database_name": ""}, "ANTIFAZ_DATABASE_NAME"),
+    ],
+)
+async def test_connect_refuses_bad_settings_without_trying_to_connect(
+    canaries: Canaries,
+    monkeypatch: pytest.MonkeyPatch,
+    changes: dict[str, object],
+    variable: str,
+) -> None:
+    """A future caller that skips check_database_settings cannot reach, for example, a Unix
+    socket without TLS while the mode says verify-full: connect() checks first, fails closed
+    and never calls asyncpg."""
+    import asyncpg
+
+    from antifaz.config import UnsafeConfigError
+
+    calls: list[object] = []
+
+    async def no_connection(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        raise AssertionError("connect() must not try to connect")
+
+    monkeypatch.setattr(asyncpg, "connect", no_connection)
+    configured = settings(1, canaries, database_sslmode="verify-full", **changes)
+
+    with pytest.raises(UnsafeConfigError) as caught:
+        await connect(configured)
+
+    assert str(caught.value).startswith(f"{variable} ")
+    assert calls == []
+    shown = str(caught.value) + repr(caught.value)
+    for value in (canaries.password, canaries.user, canaries.database, "/run/postgresql"):
+        assert value not in shown
+    assert "db.internal" not in shown

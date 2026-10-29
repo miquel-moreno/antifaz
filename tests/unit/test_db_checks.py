@@ -36,6 +36,7 @@ class FakeSession:
         table: bool = True,
         applied: list[tuple[int, bytes]] | None = None,
         broken: DatabaseProblem | None = None,
+        honour_limit: bool = True,
     ) -> None:
         self.answers: dict[str, object] = {
             checks_module.SERVER_VERSION: version,
@@ -44,7 +45,9 @@ class FakeSession:
         }
         self.applied = applied if applied is not None else []
         self.broken = broken
+        self.honour_limit = honour_limit
         self.queries: list[str] = []
+        self.fetch_args: list[tuple[object, ...]] = []
 
     async def fetchval(self, query: str, *args: object) -> object:
         self.queries.append(query)
@@ -55,7 +58,13 @@ class FakeSession:
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
         self.queries.append(query)
         assert query == checks_module.APPLIED_MIGRATIONS
-        return [{"version": v, "checksum": c} for v, c in self.applied]
+        self.fetch_args.append(args)
+        rows = [{"version": v, "checksum": c} for v, c in sorted(self.applied)]
+        if self.honour_limit and args:
+            limit = args[0]
+            assert type(limit) is int
+            rows = rows[:limit]
+        return rows
 
 
 def applied(*migrations: Migration) -> list[tuple[int, bytes]]:
@@ -146,3 +155,34 @@ async def test_a_failing_query_gives_its_closed_reason(problem: DatabaseProblem)
 
     assert result.problem is problem
     assert not result.ready
+
+
+async def test_the_applied_versions_are_read_with_a_limit() -> None:
+    """Never the whole table: at most one row more than the known files (that row alone already
+    makes the schema `ahead`)."""
+    session = FakeSession(applied=applied(*TWO))
+
+    await check_database(session, TWO)  # type: ignore[arg-type]
+
+    assert "LIMIT $1" in checks_module.APPLIED_MIGRATIONS
+    assert session.fetch_args == [(len(TWO) + 1,)]
+
+
+async def test_more_rows_than_the_limit_is_a_closed_error() -> None:
+    """A session that returns more rows than asked for is refused, not trusted."""
+    rows = applied(*TWO, migration(3), migration(4))
+    session = FakeSession(applied=rows, honour_limit=False)
+
+    result = await check_database(session, TWO)  # type: ignore[arg-type]
+
+    assert result.problem is DatabaseProblem.OTHER
+
+
+async def test_many_newer_versions_are_ahead_within_the_limit() -> None:
+    rows = applied(*TWO, *(migration(version) for version in range(3, 50)))
+    session = FakeSession(applied=rows)
+
+    result = await check_database(session, TWO)  # type: ignore[arg-type]
+
+    assert result.problem is DatabaseProblem.AHEAD
+    assert result.version == 3

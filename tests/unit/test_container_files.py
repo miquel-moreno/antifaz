@@ -465,3 +465,23 @@ def test_binutils_never_reaches_the_final_stage() -> None:
     assert "binutils" not in _stage("runtime")
     assert "binutils" not in _stage("python")
     assert "strip" not in _stage("runtime")
+
+
+def test_binutils_is_installed_before_the_dependencies_and_stripping_comes_last() -> None:
+    """Review of 8b-1: the install has its own RUN before the first COPY of dependencies or code
+    (its layer is cached and never rebuilt for a code change), and the strip has its own RUN
+    after the last `uv sync`."""
+    build = _stage("build")
+    lines = [line.strip() for line in build.splitlines() if re.match(r"^(RUN|COPY)\s", line)]
+    install = [i for i, line in enumerate(lines) if "apt-get install" in line]
+    strip = [i for i, line in enumerate(lines) if _STRIP.search(line)]
+    copies = [
+        i for i, line in enumerate(lines) if line.startswith("COPY ") and "--from=" not in line
+    ]
+    syncs = [i for i, line in enumerate(lines) if "uv sync" in line]
+
+    assert len(install) == 1 and len(strip) == 1, lines
+    assert install[0] != strip[0]  # two separate RUN instructions
+    assert copies and install[0] < min(copies), lines
+    assert strip[0] > max(syncs), lines
+    assert "binutils" not in lines[strip[0]]
