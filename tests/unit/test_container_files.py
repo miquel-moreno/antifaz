@@ -413,3 +413,45 @@ def test_the_same_uv_version_everywhere() -> None:
         (REPO / ".github/workflows/panel-webkit.yml").read_text(encoding="utf-8")
     )
     assert image[0] == ci["env"]["UV_VERSION"] == audit[0] == webkit["env"]["UV_VERSION"]
+
+
+# 8b-1 (ADR-0019, note of 2026-10-29): the compiled pieces of the virtualenv ship with their
+# debug sections (uvloop, asyncpg, yaml, httptools...). The build stage strips ONLY those
+# (`strip --strip-debug`: symbols and code stay) with binutils pinned to an exact Debian
+# version, and binutils never reaches the final stage. tests/e2e/test_image_imports.py checks
+# the built image: no .so of the virtualenv keeps a .debug_* section.
+_STRIP = re.compile(r"\bstrip\s+--strip-debug\b")
+
+
+def test_the_build_stage_strips_the_debug_sections_of_the_virtualenv() -> None:
+    build = _stage("build")
+    runs = re.findall(r"^RUN\s+(.+)$", build, re.MULTILINE)
+    stripping = [run for run in runs if _STRIP.search(run)]
+    assert len(stripping) == 1, runs
+    assert "/app/.venv" in stripping[0]
+    assert "*.so" in stripping[0]
+    # After the last `uv sync`: nothing installed later could bring unstripped pieces back.
+    syncs = [i for i, run in enumerate(runs) if "uv sync" in run]
+    assert syncs and runs.index(stripping[0]) > max(syncs)
+
+
+def test_nothing_but_the_debug_sections_is_ever_stripped() -> None:
+    for forbidden in ("--strip-all", "--strip-unneeded", "strip -s ", "strip -x ", "-Wl,-s"):
+        assert forbidden not in DOCKERFILE, forbidden
+    assert re.findall(r"\bstrip\s+(\S+)", DOCKERFILE) == ["--strip-debug"]
+
+
+def test_binutils_is_pinned_to_an_exact_version() -> None:
+    installs = [
+        run for run in re.findall(r"^RUN\s+(.+)$", _stage("build"), re.MULTILINE)
+        if "apt-get install" in run
+    ]  # fmt: skip
+    assert len(installs) == 1, installs
+    assert re.search(r"--no-install-recommends\s+binutils=\d[\w.+~:-]*(\s|;|$)", installs[0])
+    assert "apt-get upgrade" not in DOCKERFILE
+
+
+def test_binutils_never_reaches_the_final_stage() -> None:
+    assert "binutils" not in _stage("runtime")
+    assert "binutils" not in _stage("python")
+    assert "strip" not in _stage("runtime")

@@ -92,6 +92,20 @@ def test_the_windows_job_has_no_database() -> None:
     assert "--postgres" not in str(windows)
 
 
+def test_the_windows_job_runs_the_database_tests_that_need_no_postgresql() -> None:
+    """`antifaz db` and its errors without a database behave the same on Windows (8b-1): the
+    CLI job runs test_cli_db.py and every tests/unit/test_db_*.py (none needs --postgres)."""
+    run = next(s for s in CI["jobs"]["cli-windows"]["steps"] if s.get("name") == "CLI tests")["run"]
+    listed = set(run.split())
+    wanted = {"tests/unit/test_cli_db.py"} | {
+        path.relative_to(REPO).as_posix() for path in (REPO / "tests" / "unit").glob("test_db_*.py")
+    }
+
+    assert len(wanted) >= 6
+    assert wanted <= listed, sorted(wanted - listed)
+    assert "--postgres" not in listed
+
+
 def test_make_test_postgres_runs_the_ci_image() -> None:
     assert postgres_tests.ci_image() == service()["image"]
 

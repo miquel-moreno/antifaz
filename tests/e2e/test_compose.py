@@ -28,8 +28,9 @@ pytestmark = pytest.mark.e2e
 _DNI_NUMBER = 48151623
 DNI = f"{_DNI_NUMBER}{'TRWAGMYFPDXBNJZSQVHLCKE'[_DNI_NUMBER % 23]}"
 EMAIL = "lucia.ejemplo@example.com"
-# Distroless (issue 54): 143.5 MB on 2026-10-16 (the slim image was 249.1 MB).
-MAX_IMAGE_MB = 160
+# Distroless (issue 54): 143.5 MB on 2026-10-16 (the slim image was 249.1 MB). Lowered from 160 to
+# 140 in 8b-1, with the debug sections of the virtualenv stripped (ADR-0019, note of 2026-10-29).
+MAX_IMAGE_MB = 140
 
 
 def _message(tag: str) -> str:

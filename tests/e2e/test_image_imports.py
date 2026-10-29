@@ -17,6 +17,7 @@ from tests.e2e.conftest import IMAGE, Stack, docker
 from tests.e2e.image_probes import (
     BROWSER_CHECK_PACKAGES,
     BUILD_APP,
+    ELF_SECTIONS,
     EXPECTED_MISSING,
     HARDENED,
     IMPORT_ALL,
@@ -59,6 +60,29 @@ def test_the_image_imports_every_module_of_every_installed_package(stack: Stack)
     assert result.returncode == 0, result.stderr[-2000:]
     problems = import_problems(result.stdout, EXPECTED_MISSING)
     assert problems == [], "\n".join(problems)
+
+
+def test_no_compiled_piece_of_the_virtualenv_keeps_debug_sections(stack: Stack) -> None:
+    """8b-1 (ADR-0019, note of 2026-10-29): the build stage runs `strip --strip-debug` on every
+    .so of the virtualenv. Read from the ELF headers inside the image (no binutils there): no
+    .debug_* or .zdebug_* section is left, and what strip keeps is still there (each piece
+    keeps its dynamic symbols: the code still loads, as the import test shows)."""
+    result = python_in_image(ELF_SECTIONS, "/app/.venv", timeout=300)
+    assert result.returncode == 0, result.stderr[-2000:]
+    lines = result.stdout.splitlines()
+    assert not [line for line in lines if line.startswith("not-elf64 ")]
+    assert lines[-1].startswith("files ")
+    assert int(lines[-1].split()[1]) >= 10  # 11 on 2026-10-29
+    pieces = {line.split()[0]: set(line.split()[1:]) for line in lines[:-1]}
+    with_debug = sorted(
+        path
+        for path, names in pieces.items()
+        if any(name.startswith((".debug_", ".zdebug_")) for name in names)
+    )
+    assert with_debug == []
+    assert all(".dynsym" in names for names in pieces.values())
+    for package in ("asyncpg", "uvloop", "pydantic_core", "httptools", "yaml", "markupsafe"):
+        assert any(f"/site-packages/{package}/" in path for path in pieces), package
 
 
 def test_the_image_ships_no_package_of_the_browser_checks(stack: Stack) -> None:
