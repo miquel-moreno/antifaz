@@ -339,6 +339,65 @@ async def test_a_revoked_and_expired_key_is_reported_as_revoked() -> None:
     assert await store.verify(key) == refused(RefusalReason.REVOKED)
 
 
+async def test_revocation_fails_closed_even_when_the_clock_goes_back() -> None:
+    store, clock = make_store()
+    key = (await store.create("app", ALL_SCOPES)).key
+    clock.now = START - timedelta(seconds=5)
+
+    revoked = await store.revoke(1)
+
+    assert revoked is not None
+    assert revoked.revoked_at is not None
+    assert await store.verify(key) == refused(RefusalReason.REVOKED)
+
+
+async def test_a_loaded_record_revoked_in_the_future_is_already_revoked() -> None:
+    old_store, clock = make_store()
+    created = await old_store.create("app", ALL_SCOPES)
+    record = created.record
+    future = KeyRecord(
+        id=record.id,
+        name=record.name,
+        scopes=record.scopes,
+        created_at=record.created_at,
+        expires_at=record.expires_at,
+        revoked_at=START + timedelta(days=1),
+        key_hash=record.key_hash,
+        pepper_version=record.pepper_version,
+    )
+
+    store = MemoryKeyStore(PepperRing({1: PEPPER_1}, current=1), clock, [future])
+
+    assert await store.verify(created.key) == refused(RefusalReason.REVOKED)
+
+
+@pytest.mark.parametrize("key_id", [True, 1.0, "1", None, b"1", [1]])
+async def test_get_and_revoke_take_only_real_positive_integers(key_id: object) -> None:
+    store, _ = make_store()
+    created = await store.create("app", ALL_SCOPES)
+
+    assert await store.get(key_id) is None  # type: ignore[arg-type]
+    assert await store.revoke(key_id) is None  # type: ignore[arg-type]
+    assert isinstance(await store.verify(created.key), Verified)
+
+
+@pytest.mark.parametrize("which", ["known", "unknown", "malformed"])
+async def test_a_broken_clock_fails_the_same_for_every_key(which: str) -> None:
+    store, _ = make_store()
+    known = (await store.create("app", ALL_SCOPES)).key
+    stranger, _ = make_store()
+    unknown = (await stranger.create("elsewhere", ALL_SCOPES)).key
+    presented = {"known": known, "unknown": unknown, "malformed": "afz_typo"}[which]
+
+    def broken_clock() -> datetime:
+        raise RuntimeError("clock broke")
+
+    failing = MemoryKeyStore(PepperRing({1: PEPPER_1}, current=1), broken_clock, await store.list())
+
+    with pytest.raises(RuntimeError, match="clock broke"):
+        await failing.verify(presented)
+
+
 # --- pepper rotation -----------------------------------------------------------------------
 
 
