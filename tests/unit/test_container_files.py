@@ -132,9 +132,19 @@ def test_the_image_has_a_healthcheck_without_curl_or_a_shell() -> None:
     # Exec form: there is no shell in the image to run a CMD-SHELL healthcheck.
     assert '["python", "-m", "antifaz.healthcheck"]' in healthcheck
     assert "CMD-SHELL" not in DOCKERFILE
-    # Nothing is installed with the system package manager (no curl, wget or shells added).
-    for line in _instructions("RUN"):
-        assert "apt-get" not in line and "apk " not in line, line
+    # Nothing that reaches the image is installed with the system package manager (no curl,
+    # wget or shells added). The only exception is binutils, pinned, in the build stage alone
+    # (8b-1: test_binutils_is_pinned_to_an_exact_version and _never_reaches_the_final_stage).
+    for stage in ("python", "runtime"):
+        for line in re.findall(r"^RUN\s+(.+)$", _stage(stage), re.MULTILINE):
+            assert "apt-get" not in line and "apk " not in line, line
+    for line in re.findall(r"^RUN\s+(.+)$", _stage("build"), re.MULTILINE):
+        assert "apk " not in line, line
+        for tool in ("curl", "wget", "bash", "busybox"):
+            assert tool not in line, (tool, line)
+        packages = re.findall(r"apt-get install\s+(?:-\S+\s+)*([^;]+)", line)
+        for package in packages:
+            assert re.fullmatch(r"binutils=\d[\w.+~:-]*", package.strip()), line
 
 
 def test_the_image_runs_the_antifaz_command_and_serves_by_default() -> None:
