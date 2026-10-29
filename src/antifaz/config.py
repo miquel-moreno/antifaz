@@ -7,6 +7,7 @@ Upstream URLs and provider keys come ONLY from here, never from the client (ADR-
 """
 
 import hmac
+import ipaddress
 import json
 import re
 from functools import lru_cache
@@ -267,6 +268,31 @@ def check_database_settings(settings: Settings) -> None:
     ):
         if not value.strip():
             raise UnsafeConfigError(f"{variable} is empty: set a value or remove the variable")
+
+
+DATABASE_TLS_OFF = (
+    "PostgreSQL: TLS off (ANTIFAZ_DATABASE_SSLMODE=disable) with a host that is not loopback: "
+    "the password and every query travel in clear text; use verify-full outside one machine"
+)
+
+
+def _is_loopback_host(host: str) -> bool:
+    """localhost, 127.0.0.0/8 or ::1 (a name other than localhost is never assumed local)."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def database_tls_warning(settings: Settings) -> str | None:
+    """A fixed warning when TLS is off for a host that is not loopback, else None. Never
+    connects and never names the host (doctor and `antifaz db` print it)."""
+    host = settings.database_host
+    if host is None or settings.database_sslmode != "disable" or _is_loopback_host(host):
+        return None
+    return DATABASE_TLS_OFF
 
 
 @lru_cache

@@ -21,7 +21,10 @@ MIN_SERVER_VERSION = 160000  # PostgreSQL 16 (server_version_num)
 SERVER_VERSION = Sql("SELECT current_setting('server_version_num')::integer")
 SERVER_ENCODING = Sql("SELECT current_setting('server_encoding')")
 SCHEMA_TABLE_EXISTS = Sql("SELECT to_regclass('antifaz_schema_version') IS NOT NULL")
-APPLIED_MIGRATIONS = Sql("SELECT version, checksum FROM antifaz_schema_version ORDER BY version")
+# Never the whole table: one row more than the known files is enough to tell `ahead`.
+APPLIED_MIGRATIONS = Sql(
+    "SELECT version, checksum FROM antifaz_schema_version ORDER BY version LIMIT $1"
+)
 COUNT_KEYS = Sql(
     "SELECT"
     " count(*) FILTER (WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $1))"
@@ -59,8 +62,14 @@ async def server_problem(session: Session) -> DatabaseProblem | None:
     return None
 
 
-async def applied_migrations(session: Session) -> list[tuple[int, bytes]]:
-    rows = await session.fetch(APPLIED_MIGRATIONS)
+async def applied_migrations(session: Session, known: int) -> list[tuple[int, bytes]]:
+    """The applied versions, at most `known + 1` of them (the lowest): any row past the known
+    files makes the schema `ahead`, so more is never read. More rows than asked for is a
+    closed error (other)."""
+    limit = known + 1
+    rows = await session.fetch(APPLIED_MIGRATIONS, limit)
+    if len(rows) > limit:
+        raise DatabaseError(DatabaseProblem.OTHER)
     applied = []
     for row in rows:
         version, checksum = row["version"], row["checksum"]
@@ -76,7 +85,7 @@ async def _check(session: Session, known: Sequence[Migration]) -> DatabaseCheck:
         return DatabaseCheck(problem, None)
     if await session.fetchval(SCHEMA_TABLE_EXISTS) is not True:
         return DatabaseCheck(DatabaseProblem.NOT_MIGRATED, None)
-    state, version = compare(await applied_migrations(session), known)
+    state, version = compare(await applied_migrations(session, len(known)), known)
     return DatabaseCheck(state, version)
 
 

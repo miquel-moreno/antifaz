@@ -23,7 +23,12 @@ from typing import Any
 
 # doctor's reader: it names the variables of a validation error, never their values.
 from antifaz.cli.doctor import load_settings
-from antifaz.config import Settings, UnsafeConfigError, check_database_settings
+from antifaz.config import (
+    Settings,
+    UnsafeConfigError,
+    check_database_settings,
+    database_tls_warning,
+)
 
 NOT_CONFIGURED = (
     "antifaz db: PostgreSQL is not configured: set ANTIFAZ_DATABASE_HOST and "
@@ -74,6 +79,9 @@ def run(args: argparse.Namespace) -> int:
     if settings is None:
         print(problem, file=sys.stderr)
         return 2
+    warning = database_tls_warning(settings)
+    if warning is not None:  # before connecting: the password would travel in clear text
+        print(f"antifaz db: warning: {warning}", file=sys.stderr)
     work = _migrate if args.db_command == "migrate" else _status
     failure = asyncio.run(work(settings))
     if failure is not None:

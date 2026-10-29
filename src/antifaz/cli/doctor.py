@@ -54,6 +54,7 @@ from antifaz.config import (
     _format_problem,
     check_database_settings,
     check_safe_to_start,
+    database_tls_warning,
 )
 from antifaz.healthcheck import host_header
 from antifaz.logging import QUIET_LOGGERS
@@ -248,6 +249,9 @@ def _database_line(settings: Settings, report: Report) -> None:
         report.add("fail", f"PostgreSQL: {error}")
     else:
         report.add("note", "PostgreSQL: configured; check it with `antifaz db status`")
+        warning = database_tls_warning(settings)
+        if warning is not None:
+            report.add("note", f"warning: {warning}")
 
 
 def check_config(folder: Path, report: Report) -> Settings | None:

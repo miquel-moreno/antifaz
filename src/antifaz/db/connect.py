@@ -37,7 +37,7 @@ from typing import Any, Literal, NewType, NoReturn
 
 import asyncpg
 
-from antifaz.config import Settings
+from antifaz.config import Settings, check_database_settings
 
 Sql = NewType("Sql", str)
 APPLICATION_NAME = "antifaz"
@@ -256,10 +256,15 @@ async def _open(settings: Settings) -> Any:
 
 
 async def connect(settings: Settings) -> Session:
-    """A Session, or DatabaseError with a closed reason. Needs ANTIFAZ_DATABASE_HOST: callers
-    check the settings first (config.check_database_settings)."""
+    """A Session, or DatabaseError with a closed reason. Needs ANTIFAZ_DATABASE_HOST.
+
+    The settings are checked here too (config.check_database_settings), before asyncpg is ever
+    called: a caller that skips the check still cannot reach, say, a Unix socket path (no TLS
+    there, whatever the mode says) or use an empty or example password. UnsafeConfigError names
+    the variable, never the value."""
     if settings.database_host is None:
         raise ValueError("ANTIFAZ_DATABASE_HOST is not set: PostgreSQL is off")
+    check_database_settings(settings)
     tls = settings.database_sslmode != "disable"
     connection = await _guarded(_open(settings), tls)
     return Session(connection, settings.database_timeout_seconds)

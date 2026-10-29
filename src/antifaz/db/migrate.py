@@ -59,7 +59,7 @@ async def _apply(session: Session, migration: Migration) -> None:
 
 async def _migrate_locked(session: Session, known: Sequence[Migration]) -> MigrationResult:
     await session.execute(CREATE_VERSION_TABLE)
-    problem, version = compare(await applied_migrations(session), known)
+    problem, version = compare(await applied_migrations(session, len(known)), known)
     if problem is not None and problem in _REFUSED:
         raise DatabaseError(problem)
     done = []
