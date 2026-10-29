@@ -13,7 +13,10 @@ pepper digest, record checks) stay synchronous.
 - verify(presented) -> Verified(Caller) or Refused(reason). It never raises for what it is
   given: anything that is not a well-formed key is MALFORMED before any lookup. A well-formed
   key is hashed with every pepper version in the ring and looked up by (version, hash); not
-  found is UNKNOWN, then REVOKED (revoked_at <= now), then EXPIRED (now >= expires_at).
+  found is UNKNOWN, then REVOKED (any revoked_at at all: revocation fails closed, whatever the
+  clock says, also for a loaded record revoked "in the future"), then EXPIRED
+  (now >= expires_at). The clock is read before the lookup, so a broken clock fails the same
+  way for every key. get() and revoke() take only real positive ints (None for anything else).
 
 The clear key is not kept: not in the store, a record, a Caller or an exception. When a call
 fails half-way (a broken clock, MemoryError...), the frames of this package in the traceback
@@ -52,6 +55,7 @@ from antifaz.keys.records import (
     check_limit,
     check_name,
     check_scopes,
+    is_positive_int,
 )
 
 type Clock = Callable[[], datetime]
@@ -181,14 +185,19 @@ class MemoryKeyStore:
         self._next_id += 1
         return CreatedKey(key, record)
 
+    def _record_of(self, key_id: object) -> KeyRecord | None:
+        """The record with that number; None for anything but a real positive int (True,
+        1.0 or "1" are not key numbers, even if they compare equal to one)."""
+        return self._records.get(key_id) if is_positive_int(key_id) else None
+
     async def get(self, key_id: int) -> KeyRecord | None:
-        return self._records.get(key_id)
+        return self._record_of(key_id)
 
     async def list(self) -> tuple[KeyRecord, ...]:
         return tuple(self._records[key_id] for key_id in sorted(self._records))
 
     async def revoke(self, key_id: int) -> KeyRecord | None:
-        record = self._records.get(key_id)
+        record = self._record_of(key_id)
         if record is None or record.revoked_at is not None:
             return record
         revoked = KeyRecord(
@@ -223,6 +232,8 @@ class MemoryKeyStore:
 
     async def verify(self, presented: object) -> VerifyResult:
         try:
+            # The clock first: a broken clock fails the same for every key, known or not.
+            now = self._now()
             found = self._find(presented)
         except BaseException as error:
             _forget_frames(error)
@@ -233,8 +244,7 @@ class MemoryKeyStore:
             return Refused(found)
         if found is None:
             return Refused(RefusalReason.UNKNOWN)
-        now = self._now()
-        if found.revoked_at is not None and found.revoked_at <= now:
+        if found.revoked_at is not None:  # fails closed: whatever the clock says
             return Refused(RefusalReason.REVOKED)
         if found.expires_at is not None and now >= found.expires_at:
             return Refused(RefusalReason.EXPIRED)

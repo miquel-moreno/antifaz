@@ -27,7 +27,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
-from typing import NoReturn
+from typing import NoReturn, TypeGuard
 
 DEFAULT_LIFETIME = timedelta(days=90)
 MAX_NAME_LENGTH = 64
@@ -58,7 +58,7 @@ class RefusalReason(StrEnum):
     EXPIRED = "expired"
 
 
-def is_positive_int(value: object) -> bool:
+def is_positive_int(value: object) -> TypeGuard[int]:
     return type(value) is int and value >= 1
 
 
