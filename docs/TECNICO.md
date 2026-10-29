@@ -1213,7 +1213,7 @@ En pocas palabras: en «Estado», el botón «Comprobar ahora» pregunta a cada 
 
 ## Claves virtuales: la librería (issue 121, PR 8a)
 
-[ADR-0020](adr/0020-claves-virtuales.md) (propuesta). `antifaz/keys/` es solo biblioteca estándar y todavía no la usa nada: ni la puerta, ni la CLI, ni los ajustes, ni una base de datos (llegan en 8b–8f).
+[ADR-0020](adr/0020-claves-virtuales.md) (propuesta). `antifaz/keys/` es solo biblioteca estándar y todavía no la usa ni la puerta ni la CLI (llegan en 8c–8f). La base de PostgreSQL está desde 8b-1 (sección siguiente); el almacén de PostgreSQL llega con 8b-2.
 
 ```python
 from antifaz.keys import MemoryKeyStore, PepperRing, Scope
@@ -1231,6 +1231,72 @@ await store.verify("afz_inventada")  # Refused(reason=RefusalReason.MALFORMED)
 - **Almacén** (`store.py`): `KeyStore` es el protocolo que también implementará PostgreSQL, **asíncrono** (`await store.create(...)`): asyncpg y la puerta ASGI no deben bloquear el bucle de eventos. `get()` y `revoke()` solo aceptan enteros positivos de verdad (`True` o `1.0` dan `None`), y `verify()` lee el reloj antes de buscar la clave. `MemoryKeyStore` no tiene cerrojo (un solo hilo, como las sesiones del panel), se puede cargar con registros existentes y no se puede serializar ni copiar.
 - **La clave en claro no se queda**: ni en el almacén ni en los objetos que devuelve; si una llamada falla a medias, se limpian las variables de los marcos de la librería en el traceback (`tests/redteam/test_keys_secrets.py`).
 - **El pepper**: sin él, ninguna clave virtual funciona. **Tiene que salir de un generador aleatorio** (`secrets.token_bytes(32)` o más), **nunca escrito a mano**: `PepperRing` solo exige 32 bytes, y una frase inventada de 32 letras los cumple sin ser secreta. Generarlo, rechazar los triviales y guardar su copia llegan con `antifaz init` (8c).
+- **Topes comunes** (8b-1): límites de 1 a `MAX_LIMIT` (2 147 483 647, un `integer`) y versiones del pepper de 1 a `MAX_PEPPER_VERSION` (32 767, un `smallint`). `KeyRecord`, `MemoryKeyStore` y `PepperRing` rechazan lo que no cabe en PostgreSQL, así los dos almacenes rechazan lo mismo.
+
+## Claves virtuales: PostgreSQL (8b)
+
+[ADR-0021](adr/0021-postgresql-conexion-esquema-y-migraciones.md) (propuesta). PR 8b-1: la conexión, el esquema, las migraciones, `antifaz db` y la CI con PostgreSQL de verdad. El almacén de claves sobre PostgreSQL (`PostgresKeyStore`), `KeyStoreUnavailable`, el motivo `invalid` y la batería de contrato común llegan con 8b-2. **PostgreSQL es opcional**: sin `ANTIFAZ_DATABASE_HOST`, Antifaz funciona como en la v0.1.
+
+### Variables
+
+| Variable | Por defecto | Qué es |
+|---|---|---|
+| `ANTIFAZ_DATABASE_HOST` | sin valor (PostgreSQL apagado) | Nombre o IP del servidor. Nunca una URL, una DSN ni un socket: se rechaza un valor con `/` o `@` |
+| `ANTIFAZ_DATABASE_PORT` | `5432` | De 1 a 65535 |
+| `ANTIFAZ_DATABASE_NAME` | `antifaz` | La base de datos |
+| `ANTIFAZ_DATABASE_USER` | `antifaz` | El rol |
+| `ANTIFAZ_DATABASE_PASSWORD` | sin valor | Obligatoria con un host; ni vacía ni de ejemplo |
+| `ANTIFAZ_DATABASE_SSLMODE` | `verify-full` | `verify-full` (TLS 1.2 o más, certificado y nombre comprobados contra las CA del sistema) o `disable` (solo en red privada o en la misma máquina). No hay `prefer` ni `require` |
+| `ANTIFAZ_DATABASE_TIMEOUT_SECONDS` | `5` | Más de 0 y como mucho 60: al conectar, en cada llamada y como `statement_timeout`, `lock_timeout` e `idle_in_transaction_session_timeout` de la sesión |
+
+`antifaz/db/connect.py` pasa a asyncpg host, puerto, usuario, contraseña, base de datos y TLS de forma explícita: **nunca lee `PG*`** (`PGHOST`, `PGPASSWORD`, `PGSSLMODE`…), `~/.pgpass` ni el usuario del sistema. Cada sesión fija también `application_name=antifaz` y `log_parameter_max_length_on_error=0`, para que una sentencia que falla no deje sus argumentos en el log del servidor (en PostgreSQL 16 cualquier rol puede fijarlo para su sesión; un test lo comprueba en `pg_settings`). `.env.example` y la plantilla de `antifaz init` no traen estas variables todavía: llegan con 8f.
+
+### `antifaz db migrate` y `antifaz db status`
+
+- `antifaz db migrate [--path CARPETA]`: crea o actualiza las tablas. Comprueba PostgreSQL ≥ 16 y base de datos UTF8, toma un cerrojo consultivo (`pg_advisory_lock`) para que dos `migrate` a la vez no apliquen dos veces lo mismo, y aplica cada archivo pendiente de `src/antifaz/db/migrations/` en su propia transacción, con su fila en `antifaz_schema_version` (versión y SHA-256). Solo hacia delante. Un archivo publicado no se edita nunca (`tests/unit/test_db_migrations.py` fija su suma).
+- `antifaz db status [--path CARPETA]`: la versión del esquema y cuántas claves hay activas, revocadas y caducadas (con SQL; las filas que no pasan las comprobaciones de Python se cuentan desde 8b-2).
+- Leen la configuración como `doctor` (el `.env` de `--path` con las variables `ANTIFAZ_*` encima). Códigos de salida: **0** bien, **1** problema de la base de datos, **2** uso o configuración (sin `ANTIFAZ_DATABASE_HOST`, o un ajuste que `check_database_settings` rechaza, nombrando la variable).
+- **`serve` nunca migra**, y en 8b todavía no se conecta ni comprueba estos ajustes (8d). `antifaz doctor` solo dice «PostgreSQL: not configured (virtual keys off)» o «PostgreSQL: configured; check it with `antifaz db status`», sin conectarse ni cargar asyncpg; un ajuste malo sale como fallo con el nombre de la variable.
+- Solo `antifaz db` (y desde 8c `antifaz keys`) carga asyncpg, dentro de su `run()` (`tests/unit/test_db_imports.py`).
+
+### Motivos cerrados
+
+Todo fallo es un `DatabaseError` con uno de estos motivos y un texto fijo; el mensaje de asyncpg o del servidor nunca se muestra, ni se registra, ni se encadena (puede llevar el usuario, la base de datos, el host o valores):
+
+| Motivo | Cuándo |
+|---|---|
+| `unreachable` | No se pudo abrir la conexión (puerto cerrado, host desconocido, conexión cortada) |
+| `timeout` | No respondió en `ANTIFAZ_DATABASE_TIMEOUT_SECONDS` (también una sentencia o un cerrojo que tardan demasiado) |
+| `auth_failed` | Usuario, contraseña o base de datos rechazados |
+| `tls_failed` | `verify-full` sin TLS en el servidor, o con un certificado que el sistema no acepta para ese nombre |
+| `too_old` | PostgreSQL anterior a 16 |
+| `not_utf8` | La base de datos no usa UTF8 |
+| `not_migrated` | Sin tablas de Antifaz: `antifaz db migrate` |
+| `behind` | Esquema más viejo que este Antifaz: `antifaz db migrate` |
+| `ahead` | Esquema más nuevo que este Antifaz: actualizar Antifaz (nunca se migra hacia atrás) |
+| `migration_changed` | Un archivo aplicado ha cambiado o falta una versión: no se toca nada |
+| `other` | Cualquier otra cosa (ver el log del propio PostgreSQL) |
+
+### La tabla `virtual_keys` (migración 0001)
+
+- `id` es `GENERATED ALWAYS AS IDENTITY`: no se puede dar a mano.
+- Los `CHECK` repiten las reglas de `keys/records.py` hasta donde llega SQL (longitud del nombre, controles e invisibles comunes, espacios en los extremos, scopes de la lista sin repetir, tiempos finitos y en orden, hash de 32 bytes, versión ≥ 1, límites ≥ 1) y `UNIQUE (pepper_version, key_hash)`. Las reglas Unicode completas del nombre se quedan en Python: SQL deja entrar, por ejemplo, un carácter de uso privado (un test lo enseña).
+- **Disparadores**: `DELETE` y `TRUNCATE` se rechazan siempre (las claves se revocan, no se borran); un `UPDATE` no puede cambiar `id`, `key_hash`, `pepper_version` ni `created_at`, ni quitar o cambiar una revocación ya puesta.
+- **El dueño de la tabla puede saltárselos** (desactivar disparadores, cambiar la tabla): hasta el ítem 9 hay un solo rol, así que protegen de errores y de la aplicación, no del administrador de la base de datos.
+- Los tiempos vuelven siempre con `tzinfo is datetime.UTC` y sus microsegundos, también con `SET TimeZone = 'Europe/Madrid'` (asyncpg ya devuelve `datetime.UTC`; un test lo comprueba).
+
+### Cómo se prueba
+
+- Sin PostgreSQL (`make test`): ajustes, aislamiento de imports, archivos de migración, reglas del AST (timeout en cada llamada del adaptador, consultas solo como constantes `Sql("...")`), errores de conexión contra servidores falsos en 127.0.0.1 con contraseña canario, `check_database` sobre una sesión falsa, la CLI y la línea de `doctor`.
+- Con PostgreSQL (tests marcados `postgres`, opción `--postgres`): migrar, migrar dos veces, dos `migrate` a la vez, archivo cambiado, esquema más nuevo, sin migrar, base de datos `SQL_ASCII`, cada `CHECK`, disparadores, tiempos y la CLI completa. Sin `--postgres` se saltan; **con `--postgres` y sin servidor, fallan**. Leen el servidor de `TEST_POSTGRES_HOST`, `_PORT`, `_USER`, `_PASSWORD` y `_DATABASE` (nunca de `ANTIFAZ_*`). Cada sesión crea `antifaz_test_<aleatorio>` (y otra `SQL_ASCII`) con un rol sin superusuario y contraseña aleatoria, y cada test su propio esquema; una guarda rechaza cualquier base de datos cuyo nombre no empiece por `antifaz_test`.
+- `make test-postgres` levanta con `docker run --rm` la misma imagen que la CI (leída de `ci.yml`), en 127.0.0.1 y un puerto libre, con `scram-sha-256` y contraseña aleatoria, y corre `make test` con `--postgres`. `ARGS="tests/postgres -x"` corre solo esos. `make test POSTGRES=1` hace lo mismo con un servidor propio (variables `TEST_POSTGRES_*`).
+- `make test` sin PostgreSQL pasa `--without db` a `scripts/check_coverage.py` (la regla del 90 % de `db` no se mide). **La CI no**: el job `quality` corre con `--postgres` contra su servicio y exige el 90 % también en `db`.
+
+### PostgreSQL en la CI
+
+El job `quality` tiene un servicio `postgres:16` fijado por digest (`postgres:16@sha256:1beaa308…77c61c`, PostgreSQL 16.15, resuelto el 2026-10-29 con `docker buildx imagetools inspect postgres:16`), publicado solo en `127.0.0.1:5432`, con `--auth-host=scram-sha-256 --auth-local=scram-sha-256` (nunca `trust`), `pg_isready` como comprobación de salud y una contraseña de usar y tirar que solo existe en ese job. Un test (`tests/unit/test_ci_postgres.py`) exige el digest, el 127.0.0.1, scram, el `--postgres` y que el job solo tenga `contents: read`. El job de Windows no cambia y no tiene PostgreSQL; `antifaz db --help` y sus errores sin base de datos se prueban sin servidor (`tests/unit/test_cli_db.py`).
+
+**Dependabot no actualiza las imágenes de `services:`** (su ecosistema `github-actions` solo mira las acciones). El digest se renueva **a mano**: `docker buildx imagetools inspect postgres:16`, copiar el `Digest:` del índice en `ci.yml` (y su versión en el comentario) y pasar `make test-postgres`. Con 8f llegan el ecosistema `docker-compose` de Dependabot (para el `compose.keys.yml`) y un test que ate los dos digests.
 
 ## Decisiones técnicas del issue 1
 

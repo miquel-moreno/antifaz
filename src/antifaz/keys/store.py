@@ -1,7 +1,8 @@
 """Key stores (ADR-0020): the KeyStore protocol and MemoryKeyStore. Standard library only.
 
 KeyStore is what the door (8d) and the CLI (8c) use; MemoryKeyStore implements it here and the
-PostgreSQL store (8b) will implement it too. Every method is a coroutine: the PostgreSQL store
+PostgreSQL store (8b-2, on the antifaz.db base of 8b-1) will implement it too. Every method is
+a coroutine: the PostgreSQL store
 talks to the database with asyncpg (ADR-0001) and the door is ASGI, so a lookup must never block
 the event loop. MemoryKeyStore never awaits anything inside a call; the pure pieces (format,
 pepper digest, record checks) stay synchronous.

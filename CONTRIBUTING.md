@@ -23,6 +23,16 @@ Thanks for helping. Antifaz handles personal data, so a few rules are stricter t
   dependency group and Playwright's browsers, installed once outside the repo with
   `uv run --group panel playwright install chromium firefox webkit` (about 120–205 MB each).
   `make panel-check PANEL_BROWSERS=chromium` runs one browser only.
+- For the PostgreSQL tests (virtual keys, marked `postgres`): Docker, then `make test-postgres`.
+  It starts the same `postgres:16` image as CI (pinned by digest in `.github/workflows/ci.yml`)
+  with `docker run --rm` on 127.0.0.1 and a free port, with a random password, runs `make test`
+  with `--postgres` and removes the container; `make test-postgres ARGS="tests/postgres -x"` runs
+  only those tests. With your own PostgreSQL 16 instead, set `TEST_POSTGRES_HOST`,
+  `TEST_POSTGRES_PORT`, `TEST_POSTGRES_USER`, `TEST_POSTGRES_PASSWORD` (a role that can create
+  roles and databases) and `TEST_POSTGRES_DATABASE` (the database to connect to first), then
+  `make test POSTGRES=1`. The tests only create and drop databases named `antifaz_test*` and
+  their own role. A plain `make test` skips them (and the 90 % coverage rule of `db`); CI never
+  does, and with `--postgres` and no database they fail instead of skipping.
 
 ## Workflow
 
