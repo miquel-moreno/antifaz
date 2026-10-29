@@ -94,8 +94,16 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv sync --frozen
+      # `antifaz db` and the database code without PostgreSQL too (8b-1): settings, errors
+      # against fake loopback servers, migration files, import isolation (no --postgres here).
       - name: CLI tests
-        run: uv run pytest tests/unit/test_cli.py tests/unit/test_cli_init.py tests/unit/test_cli_doctor.py tests/unit/test_cli_setup_claude_code.py --no-cov
+        run: >-
+          uv run pytest --no-cov
+          tests/unit/test_cli.py tests/unit/test_cli_init.py tests/unit/test_cli_doctor.py
+          tests/unit/test_cli_setup_claude_code.py tests/unit/test_cli_db.py
+          tests/unit/test_db_checks.py tests/unit/test_db_connect.py tests/unit/test_db_imports.py
+          tests/unit/test_db_migrations.py tests/unit/test_db_settings.py
+          tests/unit/test_db_sql_rules.py
 
   # The real panel in a real browser (PR 11c-2a, tests/browser): an in-process gateway on
   # 127.0.0.1 with throwaway tokens, no provider and no network beyond loopback. Chromium only

@@ -47,6 +47,27 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+# Debug sections out of the compiled pieces of the virtualenv (8b-1, ADR-0019 note of
+# 2026-10-29). The wheels of uvloop, asyncpg, yaml, httptools, markupsafe and websockets ship
+# with DWARF debug information the gateway never uses; `--strip-debug` removes only that (the
+# code, the symbol table and the dynamic symbols stay, so every module loads and a crash still
+# names its functions). Measured on 2026-10-29: about 29.5 MB less (uvloop 13.9, asyncpg 11.8,
+# yaml 2.3, httptools 1.5). Never a stronger mode: tests/unit/test_container_files.py allows only
+# --strip-debug, and make e2e checks that no .so keeps a .debug_* section.
+# binutils only lives in this build stage (the final stage copies /app/.venv alone), pinned to
+# the exact version of Debian 13 "trixie" checked on 2026-10-29 in this same base image
+# (`apt-cache policy binutils`: 2.44-3, from trixie/main). If a Debian point release or a
+# security update replaces that version, apt-get can no longer find it and this build FAILS:
+# look up the new version the same way and update the pin here (never drop the pin).
+# The RECORD files of those packages keep the hashes of the wheel, which no longer match the
+# stripped files: nothing at runtime reads them, and Syft lists packages from METADATA (see
+# ADR-0019).
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends binutils=2.44-3; \
+    find /app/.venv -type f -name '*.so' -exec strip --strip-debug {} +; \
+    rm -rf /var/lib/apt/lists/*
+
 # ---- Python stage: the CPython 3.12 runtime that goes into the final image, trimmed ----
 FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS python
 
