@@ -3,8 +3,9 @@
 - KeyRecord: a fixed number (`id`, never reused: keys are revoked, never deleted), a name for
   the admin, the scopes, the UTC times (created, expires, revoked), the HMAC of the key and the
   pepper version it used, and the per-minute and per-day request limits (only stored in 8a;
-  counting comes in 8e). Closed: every field is checked when it is built. Its repr shows
-  neither the name nor the hash, and equality never compares the hash.
+  counting comes in 8e). Closed: every field is checked when it is built, and it cannot be
+  copied or pickled (that would skip the checks or lose the hash). Its repr shows neither the
+  name nor the hash, and equality never compares the hash.
 - Caller: who is calling, for the door and, later, policies: the key's number and scopes. No
   clear key, no hash, no name.
 - Verified(caller) or Refused(reason), with a closed list of reasons. Every refusal gets the
@@ -273,6 +274,16 @@ class KeyRecord(_KeyHashSlot):
     def key_hash(self) -> bytes:
         """HMAC-SHA256 of the key with the pepper of `pepper_version`."""
         return self._key_hash
+
+    # A copy or an unpickled record would skip __init__: without its hash, or never checked.
+    def _refuse(self, *_: object) -> NoReturn:
+        raise TypeError("KeyRecord cannot be copied or serialised")
+
+    __reduce__ = _refuse
+    __reduce_ex__ = _refuse
+    __getstate__ = _refuse
+    __copy__ = _refuse
+    __deepcopy__ = _refuse
 
 
 @dataclass(frozen=True, slots=True)
