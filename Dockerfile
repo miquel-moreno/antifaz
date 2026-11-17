@@ -23,7 +23,7 @@
 FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77ad87865e381d9917da55a168 AS uv
 
 # ---- Build stage: the virtualenv with the locked runtime dependencies (no dev, no extras) ----
-FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
+FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS build
 
 COPY --from=uv /uv /usr/local/bin/uv
 
@@ -74,7 +74,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN find /app/.venv -type f -name '*.so' -exec strip --strip-debug {} +
 
 # ---- Python stage: the CPython 3.12 runtime that goes into the final image, trimmed ----
-FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS python
+FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS python
 
 # Removed (ADR-0019):
 # - installers and tools the gateway never runs: pip, setuptools, wheel, ensurepip, IDLE,
